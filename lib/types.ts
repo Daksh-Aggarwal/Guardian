@@ -102,6 +102,17 @@ export type Report = {
       kind: string;
       decision: string;
     }[];
+    installation_locations?: {
+      location: string;
+      identity: string;
+      sha256: string;
+      direct: boolean;
+      dependencies: string[];
+    }[];
+    unique_artifacts?: number;
+    location_count?: number;
+    budgets?: Record<string, number>;
+    acquisition?: Record<string, number>;
   } | null;
 };
 export type Answer = {
@@ -333,6 +344,7 @@ export type GitHubStatus = {
   connected: boolean;
   installation?: GitHubInstallation | null;
   installations?: GitHubInstallation[];
+  available_installations?: GitHubInstallation[];
   reason?: string | null;
 };
 

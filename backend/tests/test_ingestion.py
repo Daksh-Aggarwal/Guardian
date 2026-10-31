@@ -110,7 +110,7 @@ def test_manifest_oversized_and_malformed():
 def test_aggregate_decompression_limit():
     from backend.guardian.ingestion import MAX_EXPANDED
     data = io.BytesIO()
-    with zipfile.ZipFile(data, 'w') as z:
+    with zipfile.ZipFile(data, 'w', compression=zipfile.ZIP_DEFLATED) as z:
         # 26 files of 1 MB each exceeds 25 MB limit
         chunk = b'x' * (1024 * 1024)
         for i in range(26):
