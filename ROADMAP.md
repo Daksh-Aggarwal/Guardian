@@ -54,6 +54,13 @@
     - [x] Security Timeline: Chronological security posture timeline and side-by-side 2-scan delta comparator.
   - [x] Guardian Autopilot Multi-File Safety Hardening: Pre-flight create collision rejection, operational write journal, automatic removal of newly created files upon write failure, and safe undo removal of created files without touching user edits.
   - [x] Product Terminology Standardization: Guardian, Guardian Intelligence, Guardian Autopilot.
+- [x] Guardian 4.0 — GitHub Integration & Repository-Native Remediation:
+  - [x] Server-side GitHub App installation flow with RS256 JWT signing, short-lived in-memory token caching, and cryptographic single-use CSRF state tokens.
+  - [x] Repository and branch discovery with real-time name search, visibility status (private vs public), and default branch identification.
+  - [x] Bounded Git Data API repository retrieval (trees and blobs) with truncated tree detection, strict file boundaries (250 files, 1 MB file, 10 MB aggregate), and secret file exclusions.
+  - [x] Full integration with Guardian's authoritative 4D security analysis engine, persisting immutable source commit SHA and branch metadata.
+  - [x] Project Investigation Workspace support for GitHub-backed repositories with stable repository identity (`github:{repo_id}`) and branch-aware security timeline comparisons.
+  - [x] Guardian Autopilot GitHub-native remediation: pre-flight source commit verification (rejecting stale branches), atomic Git tree and commit creation, automated descriptive Pull Request opening with human-review disclosures, and safe PR closure audit path.
 
 ## Next priorities
 

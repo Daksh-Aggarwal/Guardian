@@ -29,6 +29,7 @@ import {
   Layers,
   Sparkles,
   Menu,
+  CheckCircle2,
 } from "lucide-react";
 import { api, Report, ScanJob, Finding } from "@/lib/types";
 import { Sidebar, SidebarBody, SidebarLink } from "@/components/ui/sidebar";
@@ -59,6 +60,7 @@ export default function Home() {
   const [dark, setDark] = useState(false);
   const [job, setJob] = useState<ScanJob | null>(null);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [connected, setConnected] = useState(false);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -117,6 +119,12 @@ export default function Home() {
       api<Report>(`/scans/${id}`)
         .then(setReport)
         .catch((e) => setError(e.message));
+    }
+
+    const gh = new URLSearchParams(window.location.search).get("github");
+    if (gh === "connected") {
+      setNotice("GitHub App successfully connected. You can now browse and inspect repositories.");
+      window.history.replaceState(null, "", window.location.pathname);
     }
   }, [refresh]);
 
@@ -555,6 +563,41 @@ export default function Home() {
                 className="btn-error-dismiss"
               >
                 <X size={15} />
+              </button>
+            </div>
+          )}
+
+          {notice && (
+            <div
+              style={{
+                background: "rgba(16, 185, 129, 0.15)",
+                border: "1px solid rgba(16, 185, 129, 0.3)",
+                color: "#10b981",
+                padding: "10px 16px",
+                borderRadius: "8px",
+                marginBottom: "16px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                fontSize: "13px",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <CheckCircle2 size={16} />
+                <span>{notice}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setNotice("")}
+                style={{
+                  background: "none",
+                  border: "none",
+                  color: "#10b981",
+                  cursor: "pointer",
+                  padding: "4px",
+                }}
+              >
+                <X size={14} />
               </button>
             </div>
           )}

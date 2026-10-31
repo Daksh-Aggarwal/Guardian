@@ -6,8 +6,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 from fastapi import FastAPI, File, HTTPException, UploadFile, Form
+from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
-from . import ingestion, storage, advisor
+from pydantic import BaseModel
+from . import ingestion, storage, advisor, github
 from .engine import analyze, assess, RANK, finding
 from .explanations import EvidenceExplainer
 from .intelligence import check_osv
@@ -44,7 +46,7 @@ def stage(job_id, label):
         if job_id in JOBS and JOBS[job_id]['status'] in ('queued', 'running'):
             JOBS[job_id]['stage'] = label
 
-def run(job_id, loader, source, profile, classification='real', project_id=None):
+def run(job_id, loader, source, profile, classification='real', project_id=None, source_metadata=None):
     started = time.monotonic()
     try:
         with LOCK:
@@ -123,6 +125,7 @@ def run(job_id, loader, source, profile, classification='real', project_id=None)
             source=source,
             classification=classification,
             project_id=project_id,
+            source_metadata=source_metadata,
             risk=risk,
             rationale=rationale,
             findings=findings,
@@ -192,7 +195,7 @@ def run(job_id, loader, source, profile, classification='real', project_id=None)
                 JOBS[job_id].update(status='cancelled', stage='Scan cancelled')
         SLOTS.release()
 
-def submit(loader, source, profile="fast", job_id=None, classification=None, project_id=None):
+def submit(loader, source, profile="fast", job_id=None, classification=None, project_id=None, source_metadata=None):
     if not SLOTS.acquire(blocking=False):
         raise HTTPException(429, 'Two scans are already running. Try again shortly.')
     if not job_id:
@@ -209,7 +212,7 @@ def submit(loader, source, profile="fast", job_id=None, classification=None, pro
                     break
         JOBS[job_id] = {'id':job_id, 'status':'queued', 'stage':'Queued'}
         CANCELLATIONS[job_id] = threading.Event()
-    threading.Thread(target=run, args=(job_id, loader, source, profile, classification, project_id), daemon=True).start()
+    threading.Thread(target=run, args=(job_id, loader, source, profile, classification, project_id, source_metadata), daemon=True).start()
     return {'id':job_id}
 
 @app.get('/api/health')
@@ -431,6 +434,10 @@ def create_remediation_plan(scan_id: str, request: PlanGenerationRequest):
         consent=request.consent,
         instructions=request.instructions
     )
+    if rep.source_metadata:
+        plan.repository_id = rep.source_metadata.repository_id
+        plan.branch = rep.source_metadata.branch
+        plan.commit_sha = rep.source_metadata.commit_sha
     storage.save_plan(plan)
     return plan
 
@@ -533,4 +540,128 @@ def get_project_remediation_history(name: str):
             'verification': verification
         })
     return history
+
+class GitHubScanRequest(BaseModel):
+    repository_id: int
+    branch: Optional[str] = None
+    profile: Literal['fast', 'deep'] = 'fast'
+
+@app.get('/api/github/status')
+def github_status():
+    return github.get_connection_status()
+
+@app.post('/api/github/connect')
+def github_connect():
+    try:
+        return github.create_connect_flow()
+    except Exception as err:
+        raise HTTPException(400, str(err))
+
+@app.get('/api/github/callback')
+def github_callback(installation_id: int, state: str, setup_action: Optional[str] = None):
+    try:
+        github.handle_installation_callback(installation_id, state)
+        return RedirectResponse(url='/?github=connected', status_code=302)
+    except Exception as err:
+        raise HTTPException(400, f"GitHub installation callback failed: {err}")
+
+@app.post('/api/github/disconnect')
+def github_disconnect():
+    return github.disconnect_github()
+
+@app.get('/api/github/repositories')
+def github_repositories(q: Optional[str] = None):
+    try:
+        return github.list_repositories(query=q)
+    except ValueError as err:
+        raise HTTPException(400, str(err))
+    except Exception as err:
+        raise HTTPException(500, f"Failed to list repositories: {err}")
+
+@app.get('/api/github/repositories/{repo_id}')
+def github_repository(repo_id: int):
+    try:
+        return github.get_repository(repo_id)
+    except ValueError as err:
+        raise HTTPException(400, str(err))
+    except Exception as err:
+        raise HTTPException(500, f"Failed to retrieve repository metadata: {err}")
+
+@app.get('/api/github/repositories/{repo_id}/branches')
+def github_branches(repo_id: int):
+    try:
+        return github.list_branches(repo_id)
+    except ValueError as err:
+        raise HTTPException(400, str(err))
+    except Exception as err:
+        raise HTTPException(500, f"Failed to list branches: {err}")
+
+@app.post('/api/scans/github', status_code=202)
+def scan_github_repository(request: GitHubScanRequest):
+    try:
+        repo_full_name, files_dict, gh_meta, warnings = github.retrieve_repository_snapshot(
+            repo_id=request.repository_id,
+            branch=request.branch
+        )
+    except ValueError as err:
+        raise HTTPException(400, str(err))
+    except Exception as err:
+        raise HTTPException(502, f"GitHub repository retrieval failed: {err}")
+
+    job_id = uuid4().hex
+    try:
+        snapshot = project_manager.save_snapshot(
+            scan_id=job_id,
+            name=repo_full_name,
+            raw_files=files_dict,
+            project_id=f"github:{request.repository_id}"
+        )
+    except ValueError as err:
+        raise HTTPException(400, str(err))
+
+    try:
+        return submit(
+            loader=lambda: (dict(snapshot.files), warnings),
+            source=f"github: {repo_full_name}@{gh_meta.branch}",
+            profile=request.profile,
+            job_id=job_id,
+            classification='real',
+            project_id=snapshot.project_id,
+            source_metadata=gh_meta
+        )
+    except Exception:
+        project_manager.discard_snapshot(job_id)
+        raise
+
+@app.post('/api/remediation/plans/{plan_id}/apply-github')
+def apply_remediation_github(plan_id: str):
+    plan = storage.get_plan(plan_id)
+    if not plan:
+        raise HTTPException(404, 'Remediation plan not found.')
+    if not plan.repository_id:
+        raise HTTPException(400, 'Remediation plan is not associated with a GitHub repository.')
+
+    try:
+        res = github.apply_remediation_pull_request(plan)
+        return res
+    except ValueError as err:
+        raise HTTPException(409 if "Pre-flight check failed" in str(err) else 400, str(err))
+    except Exception as err:
+        raise HTTPException(502, f"Failed to apply GitHub remediation: {err}")
+
+@app.post('/api/remediation/plans/{plan_id}/close-github-pr')
+def close_remediation_github_pr(plan_id: str):
+    plan = storage.get_plan(plan_id)
+    if not plan:
+        raise HTTPException(404, 'Remediation plan not found.')
+    if not plan.repository_id or not plan.pr_number:
+        raise HTTPException(400, 'Remediation plan does not have an active GitHub pull request.')
+
+    try:
+        return github.close_remediation_pull_request(plan)
+    except ValueError as err:
+        raise HTTPException(400, str(err))
+    except Exception as err:
+        raise HTTPException(502, f"Failed to close pull request: {err}")
+
 

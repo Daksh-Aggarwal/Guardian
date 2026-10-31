@@ -14,6 +14,10 @@ import {
   ChevronRight,
   ShieldCheck,
   Loader2,
+  GitPullRequest,
+  ExternalLink,
+  GitBranch,
+  HardDrive,
 } from "lucide-react";
 import { api, Report, RemediationPlan, VerificationResult } from "@/lib/types";
 import { Eyebrow, Badge } from "./ui";
@@ -68,6 +72,28 @@ export default function RemediationHistory({
       cancelled = true;
     };
   }, [report.name, report.id]);
+
+  async function handleClosePR(planId: string) {
+    try {
+      await api(`/remediation/plans/${planId}/close-github-pr`, { method: "POST" });
+      setHistory((prev) =>
+        prev.map((item) =>
+          item.plan.plan_id === planId
+            ? {
+                ...item,
+                plan: {
+                  ...item.plan,
+                  status: "reverted",
+                  pr_state: "closed",
+                },
+              }
+            : item
+        )
+      );
+    } catch (err) {
+      alert(`Failed to close pull request: ${(err as Error).message}`);
+    }
+  }
 
   function getStatusBadge(status: string) {
     switch (status) {
@@ -344,10 +370,45 @@ export default function RemediationHistory({
                       alignItems: "center",
                       gap: "8px",
                       marginBottom: "4px",
+                      flexWrap: "wrap",
                     }}
                   >
                     <strong style={{ fontSize: "15px" }}>{plan.title}</strong>
                     {getStatusBadge(plan.status)}
+                    {plan.pr_number ? (
+                      <span
+                        style={{
+                          fontSize: "11px",
+                          padding: "2px 6px",
+                          borderRadius: "4px",
+                          background: "rgba(99, 102, 241, 0.15)",
+                          color: "var(--accent, #6366f1)",
+                          fontWeight: 600,
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "3px",
+                        }}
+                      >
+                        <GitPullRequest size={11} />
+                        GitHub PR #{plan.pr_number}
+                      </span>
+                    ) : (
+                      <span
+                        style={{
+                          fontSize: "11px",
+                          padding: "2px 6px",
+                          borderRadius: "4px",
+                          background: "rgba(255, 255, 255, 0.05)",
+                          color: "var(--muted)",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "3px",
+                        }}
+                      >
+                        <HardDrive size={11} />
+                        Local Filesystem
+                      </span>
+                    )}
                   </div>
                   <p
                     style={{
@@ -421,6 +482,79 @@ export default function RemediationHistory({
                   </span>
                 )}
               </div>
+
+              {/* GitHub PR Info Row */}
+              {plan.pr_url && (
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    flexWrap: "wrap",
+                    gap: "8px",
+                    padding: "8px 12px",
+                    borderRadius: "6px",
+                    background: "rgba(99, 102, 241, 0.08)",
+                    border: "1px solid rgba(99, 102, 241, 0.2)",
+                    fontSize: "12px",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                    <GitPullRequest size={13} style={{ color: "var(--accent, #6366f1)" }} />
+                    <span>
+                      Target Branch: <code>{plan.branch || "main"}</code>
+                    </span>
+                    <span>·</span>
+                    <span>
+                      Remediation Branch: <code>{plan.remediation_branch}</code>
+                    </span>
+                    <span
+                      style={{
+                        padding: "1px 6px",
+                        borderRadius: "3px",
+                        fontSize: "10px",
+                        fontWeight: 600,
+                        background:
+                          plan.pr_state === "closed"
+                            ? "rgba(239, 68, 68, 0.15)"
+                            : "rgba(16, 185, 129, 0.15)",
+                        color: plan.pr_state === "closed" ? "#f87171" : "#10b981",
+                      }}
+                    >
+                      {plan.pr_state || "open"}
+                    </span>
+                  </div>
+
+                  <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                    <a
+                      href={plan.pr_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="button secondary compact"
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "4px",
+                        fontSize: "11px",
+                        textDecoration: "none",
+                      }}
+                    >
+                      <span>Open on GitHub</span>
+                      <ExternalLink size={11} />
+                    </a>
+
+                    {plan.pr_state !== "closed" && (
+                      <button
+                        onClick={() => handleClosePR(plan.plan_id)}
+                        className="button secondary compact"
+                        style={{ fontSize: "11px", color: "#f87171" }}
+                      >
+                        Close PR
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* Expanded details */}
               {isExpanded && (
