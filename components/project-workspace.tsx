@@ -365,294 +365,355 @@ export default function ProjectWorkspace({
 
   return (
     <div className="project-workspace-container">
-      {/* Top Workspace Header */}
+      {/* Top Workspace Header with Integrated Navigation */}
       <div className="workspace-top-bar">
-        <div className="workspace-project-info">
-          <Eyebrow>GUARDIAN 3.1 / PROJECT INVESTIGATION WORKSPACE</Eyebrow>
+        {/* Top Row: Project Identity & Actions */}
+        <div className="workspace-header-top-row">
+          <div className="workspace-project-info">
+            <Eyebrow>GUARDIAN 3.1 / PROJECT INVESTIGATION WORKSPACE</Eyebrow>
 
-          <div className="workspace-project-title-row">
-            <h1 className="workspace-project-title">
-              {activeReport?.name ||
-                uniqueProjects.find((p) => p.id === selectedProjectId)?.name ||
-                "Local Project"}
-            </h1>
+            <div className="workspace-project-title-row">
+              <h1 className="workspace-project-title">
+                {activeReport?.name ||
+                  uniqueProjects.find((p) => p.id === selectedProjectId)?.name ||
+                  "Local Project"}
+              </h1>
 
-            {activeReport && (
-              <ClassificationBadge
-                classification={
-                  activeReport.classification ||
-                  (activeReport.source === "synthetic fixture"
-                    ? "demo"
-                    : "real")
-                }
-              />
-            )}
+              {activeReport && (
+                <ClassificationBadge
+                  classification={
+                    activeReport.classification ||
+                    (activeReport.source === "synthetic fixture"
+                      ? "demo"
+                      : "real")
+                  }
+                />
+              )}
 
-            {activeReport && (
-              <span
-                style={{
-                  fontSize: "12px",
-                  color: "var(--muted)",
-                  fontFamily: "var(--font-mono, monospace)",
-                }}
-              >
-                v{activeReport.version}
-              </span>
-            )}
-
-            {activeReport?.source_metadata?.source_type === "github" && (
-              <>
+              {activeReport && (
                 <span
                   style={{
-                    background: "rgba(99, 102, 241, 0.15)",
-                    color: "var(--accent, #6366f1)",
-                    padding: "2px 6px",
-                    borderRadius: "4px",
-                    fontSize: "11px",
-                    fontWeight: 600,
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "4px",
-                  }}
-                >
-                  <GitBranch size={11} /> {activeReport.source_metadata.branch}
-                </span>
-
-                <span
-                  style={{
-                    background: "rgba(255, 255, 255, 0.05)",
-                    padding: "2px 6px",
-                    borderRadius: "4px",
-                    fontSize: "11px",
-                    fontFamily: "monospace",
+                    fontSize: "12px",
                     color: "var(--muted)",
+                    fontFamily: "var(--font-mono, monospace)",
                   }}
                 >
-                  {activeReport.source_metadata.commit_sha.slice(0, 7)}
+                  v{activeReport.version}
                 </span>
+              )}
 
-                <a
-                  href={activeReport.source_metadata.repo_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "3px",
-                    fontSize: "11px",
-                    color: "var(--accent)",
-                    textDecoration: "none",
-                  }}
-                >
-                  <span>GitHub</span>
-                  <ExternalLink size={10} />
-                </a>
-              </>
-            )}
+              {activeReport?.source_metadata?.source_type === "github" && (
+                <>
+                  <span
+                    style={{
+                      background: "rgba(99, 102, 241, 0.15)",
+                      color: "var(--accent, #6366f1)",
+                      padding: "2px 6px",
+                      borderRadius: "4px",
+                      fontSize: "11px",
+                      fontWeight: 600,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "4px",
+                    }}
+                  >
+                    <GitBranch size={11} /> {activeReport.source_metadata.branch}
+                  </span>
+
+                  <span
+                    style={{
+                      background: "rgba(255, 255, 255, 0.05)",
+                      padding: "2px 6px",
+                      borderRadius: "4px",
+                      fontSize: "11px",
+                      fontFamily: "monospace",
+                      color: "var(--muted)",
+                    }}
+                  >
+                    {activeReport.source_metadata.commit_sha.slice(0, 7)}
+                  </span>
+
+                  <a
+                    href={activeReport.source_metadata.repo_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "3px",
+                      fontSize: "11px",
+                      color: "var(--accent)",
+                      textDecoration: "none",
+                    }}
+                  >
+                    <span>GitHub</span>
+                    <ExternalLink size={10} />
+                  </a>
+                </>
+              )}
+            </div>
+
+            <p
+              style={{
+                margin: 0,
+                fontSize: "12px",
+                color: "var(--muted)",
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+                flexWrap: "wrap",
+              }}
+            >
+              {activeReport && (
+                <>
+                  <span>Source: {activeReport.source}</span>
+                  <span>&bull;</span>
+                  <span>{activeReport.files_analyzed} files analyzed</span>
+                  <span>&bull;</span>
+                  <span>{deps?.totalResolved || 0} dependencies mapped</span>
+                  <span>&bull;</span>
+                  <span>
+                    Last scanned:{" "}
+                    {new Date(activeReport.created_at).toLocaleDateString()}
+                  </span>
+                </>
+              )}
+            </p>
           </div>
 
-          <p
+          {/* Primary Action Buttons */}
+          <div
             style={{
-              margin: 0,
-              fontSize: "12px",
-              color: "var(--muted)",
               display: "flex",
               alignItems: "center",
               gap: "8px",
               flexWrap: "wrap",
             }}
           >
-            {activeReport && (
-              <>
-                <span>Source: {activeReport.source}</span>
-                <span>&bull;</span>
-                <span>{activeReport.files_analyzed} files analyzed</span>
-                <span>&bull;</span>
-                <span>{deps?.totalResolved || 0} dependencies mapped</span>
-                <span>&bull;</span>
-                <span>
-                  Last scanned:{" "}
-                  {new Date(activeReport.created_at).toLocaleDateString()}
-                </span>
-              </>
+            {/* GitHub Rescan or Local folder connect/disconnect */}
+            {activeReport?.source_metadata?.source_type === "github" ? (
+              <button
+                onClick={handleRescan}
+                disabled={loading}
+                className="button secondary compact"
+                style={{
+                  fontSize: "12px",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                }}
+              >
+                <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
+                <span>Rescan Repository</span>
+              </button>
+            ) : projectData ? (
+              <button
+                onClick={handleDisconnect}
+                className="button secondary compact"
+                style={{ fontSize: "12px" }}
+              >
+                Disconnect Folder
+              </button>
+            ) : (
+              <button
+                onClick={handleConnectProject}
+                className="button secondary compact"
+                style={{
+                  fontSize: "12px",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                }}
+              >
+                <FolderOpen size={14} />
+                <span>Connect Local Folder</span>
+              </button>
             )}
-          </p>
+
+            {/* Remediation trigger */}
+            {activeReport && (
+              <button
+                onClick={() => openRemediationForFinding()}
+                className="button primary compact"
+                style={{
+                  fontSize: "12px",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                }}
+              >
+                <Wrench size={14} />
+                <span>Guardian Autopilot</span>
+              </button>
+            )}
+
+            {/* Guardian Handoff 1.0 */}
+            {activeReport && (
+              <button
+                onClick={() => openHandoff()}
+                className="button secondary compact"
+                style={{
+                  fontSize: "12px",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                }}
+                title="Export AI-agnostic remediation instructions for coding agents"
+              >
+                <Share2 size={14} color="var(--accent)" />
+                <span>Get AI Fix Instructions</span>
+              </button>
+            )}
+
+            {/* Intelligence trigger */}
+            {activeReport && (
+              <button
+                onClick={() => openIntelligenceForFinding()}
+                className="button secondary compact"
+                style={{
+                  fontSize: "12px",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                }}
+              >
+                <Sparkles size={14} />
+                <span>Guardian Intelligence</span>
+              </button>
+            )}
+
+            {onOpenReportView && activeReport && (
+              <button
+                onClick={() => onOpenReportView(activeReport)}
+                className="button secondary compact"
+                style={{ fontSize: "12px" }}
+              >
+                Standard Report View
+              </button>
+            )}
+          </div>
         </div>
 
-        {/* Workspace Actions & Selectors */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "10px",
-            flexWrap: "wrap",
-          }}
-        >
-          {/* Project Switcher */}
-          {uniqueProjects.length > 1 && (
-            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-              <span style={{ fontSize: "11px", color: "var(--muted)" }}>
-                Project:
-              </span>
-              <select
-                value={selectedProjectId}
-                onChange={(e) => setSelectedProjectId(e.target.value)}
-                style={{
-                  padding: "6px 10px",
-                  borderRadius: "6px",
-                  background: "var(--surface)",
-                  border: "1px solid var(--line)",
-                  color: "var(--text)",
-                  fontSize: "12px",
-                }}
+        {/* Bottom Row: Integrated Segmented Tabs & Contextual Selectors */}
+        <div className="workspace-header-bottom-row">
+          {/* Segmented Control Tabs */}
+          <div className="workspace-segmented-control" role="tablist">
+            {[
+              {
+                name: "Overview" as const,
+                icon: Layers,
+                count: deps?.totalResolved || 0,
+              },
+              {
+                name: "Vulnerabilities" as const,
+                icon: ShieldAlert,
+                count: breakdown?.advisories || 0,
+              },
+              {
+                name: "Behavioral Flows" as const,
+                icon: FileCode2,
+                count: breakdown?.dataFlows || 0,
+              },
+              {
+                name: "Remediation History" as const,
+                icon: Wrench,
+                count: undefined,
+              },
+              {
+                name: "Security Timeline" as const,
+                icon: Clock,
+                count: projectScans.length,
+              },
+            ].map(({ name, icon: Icon, count }) => (
+              <button
+                key={name}
+                role="tab"
+                aria-selected={activeTab === name}
+                className={`workspace-segmented-tab ${activeTab === name ? "active" : ""}`}
+                onClick={() => setActiveTab(name as WorkspaceTab)}
               >
-                {uniqueProjects.map((p) => {
-                  const duplicates = uniqueProjects.filter(
-                    (x) => x.name === p.name,
-                  );
-                  const label =
-                    duplicates.length > 1
-                      ? `${p.name} (${p.id.slice(0, 8)})`
-                      : p.name;
-                  return (
-                    <option key={p.id} value={p.id}>
-                      {label}
+                <Icon size={14} />
+                <span>{name}</span>
+                {count !== undefined && count > 0 && (
+                  <span className="workspace-tab-badge">{count}</span>
+                )}
+              </button>
+            ))}
+          </div>
+
+          {/* Contextual Selectors */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "10px",
+              flexWrap: "wrap",
+            }}
+          >
+            {/* Project Switcher */}
+            {uniqueProjects.length > 1 && (
+              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                <span style={{ fontSize: "11px", color: "var(--muted)" }}>
+                  Project:
+                </span>
+                <select
+                  value={selectedProjectId}
+                  onChange={(e) => setSelectedProjectId(e.target.value)}
+                  style={{
+                    padding: "4px 8px",
+                    borderRadius: "6px",
+                    background: "var(--surface)",
+                    border: "1px solid var(--line)",
+                    color: "var(--text)",
+                    fontSize: "12px",
+                  }}
+                >
+                  {uniqueProjects.map((p) => {
+                    const duplicates = uniqueProjects.filter(
+                      (x) => x.name === p.name,
+                    );
+                    const label =
+                      duplicates.length > 1
+                        ? `${p.name} (${p.id.slice(0, 8)})`
+                        : p.name;
+                    return (
+                      <option key={p.id} value={p.id}>
+                        {label}
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+            )}
+
+            {/* Historical Scan Version Switcher */}
+            {projectScans.length > 1 && (
+              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                <span style={{ fontSize: "11px", color: "var(--muted)" }}>
+                  Scan:
+                </span>
+                <select
+                  value={activeReportId}
+                  onChange={(e) => setActiveReportId(e.target.value)}
+                  style={{
+                    padding: "4px 8px",
+                    borderRadius: "6px",
+                    background: "var(--surface)",
+                    border: "1px solid var(--line)",
+                    color: "var(--text)",
+                    fontSize: "12px",
+                  }}
+                >
+                  {projectScans.map((s, idx) => (
+                    <option key={s.id} value={s.id}>
+                      #{projectScans.length - idx}: {s.source_metadata?.branch ? `[${s.source_metadata.branch}] ` : ""}v{s.version} (
+                      {new Date(s.created_at).toLocaleDateString()})
                     </option>
-                  );
-                })}
-              </select>
-            </div>
-          )}
-
-          {/* Historical Scan Version Switcher */}
-          {projectScans.length > 1 && (
-            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-              <span style={{ fontSize: "11px", color: "var(--muted)" }}>
-                Scan:
-              </span>
-              <select
-                value={activeReportId}
-                onChange={(e) => setActiveReportId(e.target.value)}
-                style={{
-                  padding: "6px 10px",
-                  borderRadius: "6px",
-                  background: "var(--surface)",
-                  border: "1px solid var(--line)",
-                  color: "var(--text)",
-                  fontSize: "12px",
-                }}
-              >
-                {projectScans.map((s, idx) => (
-                  <option key={s.id} value={s.id}>
-                    #{projectScans.length - idx}: {s.source_metadata?.branch ? `[${s.source_metadata.branch}] ` : ""}v{s.version} (
-                    {new Date(s.created_at).toLocaleDateString()})
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          {/* GitHub Rescan or Local folder connect/disconnect */}
-          {activeReport?.source_metadata?.source_type === "github" ? (
-            <button
-              onClick={handleRescan}
-              disabled={loading}
-              className="button secondary compact"
-              style={{
-                fontSize: "12px",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "6px",
-              }}
-            >
-              <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
-              <span>Rescan Repository</span>
-            </button>
-          ) : projectData ? (
-            <button
-              onClick={handleDisconnect}
-              className="button secondary compact"
-              style={{ fontSize: "12px" }}
-            >
-              Disconnect Folder
-            </button>
-          ) : (
-            <button
-              onClick={handleConnectProject}
-              className="button secondary compact"
-              style={{
-                fontSize: "12px",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "6px",
-              }}
-            >
-              <FolderOpen size={14} />
-              <span>Connect Local Folder</span>
-            </button>
-          )}
-
-          {/* Remediation trigger */}
-          {activeReport && (
-            <button
-              onClick={() => openRemediationForFinding()}
-              className="button primary compact"
-              style={{
-                fontSize: "12px",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "6px",
-              }}
-            >
-              <Wrench size={14} />
-              <span>Guardian Autopilot</span>
-            </button>
-          )}
-
-          {/* Guardian Handoff 1.0 */}
-          {activeReport && (
-            <button
-              onClick={() => openHandoff()}
-              className="button secondary compact"
-              style={{
-                fontSize: "12px",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "6px",
-              }}
-              title="Export AI-agnostic remediation instructions for coding agents"
-            >
-              <Share2 size={14} color="var(--accent)" />
-              <span>Get AI Fix Instructions</span>
-            </button>
-          )}
-
-          {/* Intelligence trigger */}
-          {activeReport && (
-            <button
-              onClick={() => openIntelligenceForFinding()}
-              className="button secondary compact"
-              style={{
-                fontSize: "12px",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "6px",
-              }}
-            >
-              <Sparkles size={14} />
-              <span>Guardian Intelligence</span>
-            </button>
-          )}
-
-          {onOpenReportView && activeReport && (
-            <button
-              onClick={() => onOpenReportView(activeReport)}
-              className="button secondary compact"
-              style={{ fontSize: "12px" }}
-            >
-              Standard Report View
-            </button>
-          )}
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -688,51 +749,6 @@ export default function ProjectWorkspace({
           </button>
         </div>
       )}
-
-      {/* 5 Workspace Navigation Tabs */}
-      <nav className="workspace-nav-bar" role="tablist">
-        {[
-          {
-            name: "Overview" as const,
-            icon: Layers,
-            count: deps?.totalResolved || 0,
-          },
-          {
-            name: "Vulnerabilities" as const,
-            icon: ShieldAlert,
-            count: breakdown?.advisories || 0,
-          },
-          {
-            name: "Behavioral Flows" as const,
-            icon: FileCode2,
-            count: breakdown?.dataFlows || 0,
-          },
-          {
-            name: "Remediation History" as const,
-            icon: Wrench,
-            count: undefined,
-          },
-          {
-            name: "Security Timeline" as const,
-            icon: Clock,
-            count: projectScans.length,
-          },
-        ].map(({ name, icon: Icon, count }) => (
-          <button
-            key={name}
-            role="tab"
-            aria-selected={activeTab === name}
-            className={`workspace-nav-tab ${activeTab === name ? "active" : ""}`}
-            onClick={() => setActiveTab(name as WorkspaceTab)}
-          >
-            <Icon size={15} />
-            <span>{name}</span>
-            {count !== undefined && count > 0 && (
-              <span className="workspace-tab-badge">{count}</span>
-            )}
-          </button>
-        ))}
-      </nav>
 
       {/* TAB 1: OVERVIEW & LIVE DEPENDENCY GRAPH */}
       {activeTab === "Overview" && activeReport && breakdown && deps && (

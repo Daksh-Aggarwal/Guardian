@@ -350,12 +350,12 @@ code {
   margin-top: 28px;
   margin-bottom: 12px;
 }
-nav {
+aside nav, .sidebar nav {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
-nav button {
+aside nav button, .sidebar nav button {
   display: flex;
   gap: 12px;
   align-items: center;
@@ -366,14 +366,14 @@ nav button {
   font-size: 12px;
   font-weight: 500;
 }
-nav button.active {
+aside nav button.active, .sidebar nav button.active {
   background: var(--accent-soft);
   color: var(--accent);
 }
-nav button:hover {
+aside nav button:hover, .sidebar nav button:hover {
   background: var(--subtle);
 }
-nav button span {
+aside nav button span, .sidebar nav button span {
   margin-left: auto;
   font-size: 12px;
   display: inline-flex;
@@ -5962,14 +5962,88 @@ select {
 
 .workspace-top-bar {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 16px;
+  flex-direction: column;
+  gap: 14px;
   padding: 18px 22px;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 12px;
+}
+
+.workspace-header-top-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  width: 100%;
+}
+
+.workspace-header-bottom-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  width: 100%;
+  padding-top: 14px;
+  border-top: 1px solid var(--line-subtle, rgba(255, 255, 255, 0.08));
+}
+
+.workspace-segmented-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px;
+  background: var(--surface-subtle, #2a2e2b);
+  border: 1px solid var(--line, #50564e);
+  border-radius: 8px;
+  width: fit-content;
+}
+
+.workspace-segmented-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted, #b4bbae);
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+  line-height: 1;
+}
+
+.workspace-segmented-tab:hover {
+  color: var(--text, #f0f2ea);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.workspace-segmented-tab.active {
+  color: var(--text, #f0f2ea);
+  background: var(--surface-card, #222623);
+  border-color: var(--line, #50564e);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+
+.workspace-segmented-tab .workspace-tab-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--muted, #b4bbae);
+  line-height: 1.2;
+}
+
+.workspace-segmented-tab.active .workspace-tab-badge {
+  background: var(--accent-soft, #303c23);
+  color: var(--accent, #c5f467);
+  border: 1px solid var(--accent-border, #71894b);
 }
 
 .workspace-project-info {
