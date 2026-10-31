@@ -934,7 +934,7 @@ export default function DependencyGraph({
       >
         <div style={{ flex: 1, height: "100%", background: "#090d16" }}>
           <ReactFlow
-            key={`${report?.target || "graph"}-${layoutMode}`}
+            key={`${report?.name || report?.id || "graph"}-${layoutMode}`}
             nodes={nodes}
             edges={edges}
             onNodesChange={onNodesChange}
