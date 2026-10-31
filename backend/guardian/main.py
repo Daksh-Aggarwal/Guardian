@@ -1,11 +1,12 @@
 import asyncio
 import json
+import os
 import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
-from fastapi import FastAPI, File, HTTPException, UploadFile, Form
+from fastapi import FastAPI, File, HTTPException, UploadFile, Form, Request
 from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -558,12 +559,30 @@ def github_connect():
         raise HTTPException(400, str(err))
 
 @app.get('/api/github/callback')
-def github_callback(installation_id: int, state: str, setup_action: Optional[str] = None):
+def github_callback(
+    request: Request,
+    installation_id: Optional[int] = None,
+    state: Optional[str] = None,
+    setup_action: Optional[str] = None,
+    code: Optional[str] = None
+):
     try:
-        github.handle_installation_callback(installation_id, state)
-        return RedirectResponse(url='/?github=connected', status_code=302)
+        github.handle_installation_callback(installation_id=installation_id, state=state)
+        host = request.headers.get("host", "")
+        if ":8000" in host:
+            redirect_url = os.getenv("GUARDIAN_FRONTEND_URL", "http://localhost:3000").rstrip('/') + "/?github=connected"
+        else:
+            redirect_url = "/?github=connected"
+        return RedirectResponse(url=redirect_url, status_code=302)
     except Exception as err:
         raise HTTPException(400, f"GitHub installation callback failed: {err}")
+
+@app.post('/api/github/sync')
+def github_sync():
+    try:
+        return github.sync_installations()
+    except Exception as err:
+        raise HTTPException(400, f"GitHub synchronization failed: {err}")
 
 @app.post('/api/github/disconnect')
 def github_disconnect():

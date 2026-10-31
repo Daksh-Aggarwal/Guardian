@@ -40,6 +40,7 @@ export default function GitHubConnectPanel({
 }) {
   const [status, setStatus] = useState<GitHubStatus | null>(null);
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [repos, setRepos] = useState<GitHubRepository[]>([]);
   const [loadingRepos, setLoadingRepos] = useState(false);
@@ -56,7 +57,18 @@ export default function GitHubConnectPanel({
     setLoading(true);
     setError(null);
     try {
-      const res = await api<GitHubStatus>("/github/status");
+      let res = await api<GitHubStatus>("/github/status");
+      // If configured but not marked connected, attempt automatic sync with GitHub App API
+      if (res.configured && !res.connected) {
+        try {
+          const syncRes = await api<GitHubStatus>("/github/sync", { method: "POST" });
+          if (syncRes.connected) {
+            res = syncRes;
+          }
+        } catch {
+          // ignore auto-sync failure and fallback to base status
+        }
+      }
       setStatus(res);
       if (res.connected) {
         fetchRepos();
@@ -65,6 +77,24 @@ export default function GitHubConnectPanel({
       setError((err as Error).message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSync = async () => {
+    setSyncing(true);
+    setError(null);
+    try {
+      const res = await api<GitHubStatus>("/github/sync", { method: "POST" });
+      setStatus(res);
+      if (res.connected) {
+        fetchRepos();
+      } else {
+        setError(res.reason || "No GitHub App installation found on your GitHub account. Ensure the app is installed at GitHub.");
+      }
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSyncing(false);
     }
   };
 
@@ -277,14 +307,26 @@ export default function GitHubConnectPanel({
           </div>
         )}
 
-        <button
-          onClick={handleConnect}
-          className="button primary"
-          style={{ display: "inline-flex", alignItems: "center", gap: "8px", marginTop: "4px" }}
-        >
-          <GitBranch size={16} />
-          <span>Install / Connect GitHub App</span>
-        </button>
+        <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", justifyContent: "center", marginTop: "4px" }}>
+          <button
+            onClick={handleConnect}
+            className="button primary"
+            style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}
+          >
+            <GitBranch size={16} />
+            <span>Install / Connect GitHub App</span>
+          </button>
+
+          <button
+            onClick={handleSync}
+            disabled={syncing}
+            className="button secondary"
+            style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}
+          >
+            <RefreshCw size={14} className={syncing ? "animate-spin" : ""} />
+            <span>{syncing ? "Checking GitHub..." : "Check Existing Installation"}</span>
+          </button>
+        </div>
       </div>
     );
   }
