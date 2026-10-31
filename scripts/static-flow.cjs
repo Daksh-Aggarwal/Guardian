@@ -52,7 +52,8 @@ function analyzeProject(files, overrides = {}) {
     ...overrides,
   };
   const modules = new Map(),
-    warnings = new Set();
+    warnings = new Set(),
+    projectStagedFiles = new Set();
   let nodes = 0,
     steps = 0,
     calls = 0,
@@ -177,6 +178,7 @@ function analyzeProject(files, overrides = {}) {
       socketRef: values.some((v) => v.socketRef),
       shellProcess: values.some((v) => v.shellProcess),
       envGate: values.some((v) => v.envGate),
+      stagedArtifact: values.some((v) => v.stagedArtifact),
     };
   }
   function trail(v, m, n, kind, detail, binding) {
@@ -235,9 +237,9 @@ function analyzeProject(files, overrides = {}) {
         ref: `env-value:${key}`,
         envGate: /^(CI|GITHUB_ACTIONS|NODE_ENV|USER|USERNAME|LOGNAME|HOSTNAME|COMPUTERNAME|GITLAB_CI|JENKINS_URL)$/i.test(key),
       };
-    if (v.ref) return { ...empty(), ref: v.ref + "." + key, paths: v.paths || [], hostPaths: v.hostPaths || [], hostInfo: v.hostInfo, socketRef: v.socketRef, shellProcess: v.shellProcess, remoteData: v.remoteData, encoded: v.encoded, fileRead: v.fileRead };
+    if (v.ref) return { ...empty(), ref: v.ref + "." + key, paths: v.paths || [], hostPaths: v.hostPaths || [], hostInfo: v.hostInfo, socketRef: v.socketRef, shellProcess: v.shellProcess, remoteData: v.remoteData, encoded: v.encoded, fileRead: v.fileRead, stagedArtifact: v.stagedArtifact };
     return v.paths?.length || v.hostPaths?.length
-      ? { ...empty(), paths: v.paths || [], hostPaths: v.hostPaths || [], hostInfo: v.hostInfo, remoteData: v.remoteData, encoded: v.encoded }
+      ? { ...empty(), paths: v.paths || [], hostPaths: v.hostPaths || [], hostInfo: v.hostInfo, remoteData: v.remoteData, encoded: v.encoded, stagedArtifact: v.stagedArtifact }
       : empty();
   }
   function names(pattern) {
@@ -991,9 +993,15 @@ function analyzeProject(files, overrides = {}) {
       return { ...chunkVal, ref: "http-response" };
     }
     if (/^http-response\.pipe$/.test(ref)) {
-      if (args.some((a) => a.ref === "fs-write-stream")) {
+      const dest = args.find((a) => a.ref === "fs-write-stream");
+      if (dest) {
         m.hasFileWrite = true;
         m.hasStagedDownload = true;
+        if (dest.filePath) {
+          m.stagedFiles.add(dest.filePath);
+          projectStagedFiles.add(dest.filePath);
+        }
+        return { ...dest, stagedArtifact: true };
       }
       return args[0] || empty();
     }
@@ -1045,7 +1053,7 @@ function analyzeProject(files, overrides = {}) {
       const mergedArgs = merge(args, m);
       const paths = allPaths(mergedArgs, m);
       const hPaths = allHostPaths(mergedArgs, m);
-      if (paths.length || hPaths.length || mergedArgs.encoded || mergedArgs.fileRead) {
+      if (paths.length || hPaths.length || mergedArgs.encoded) {
         emit(
           m,
           "dns-tunneling",
@@ -1064,14 +1072,6 @@ function analyzeProject(files, overrides = {}) {
     if (/^(net|tls)\.(Socket|connect|createConnection)$/.test(ref)) {
       emit(m, "network", n, `Raw socket connection via ${ref}`);
       m.hasSocketConnect = true;
-      if (m.hasShellSpawn) {
-        emit(
-          m,
-          "reverse-shell",
-          n,
-          "Raw network socket combined with interactive shell process",
-        );
-      }
       const sock = { ...empty(), ref: "net-socket", socketRef: true };
       runCallbacks(n, args, scope, m, [sock]);
       return sock;
@@ -1079,22 +1079,22 @@ function analyzeProject(files, overrides = {}) {
     if (/^net-socket\.(connect|on|once|write)$/.test(ref)) {
       emit(m, "network", n, `Socket operation via ${ref}`);
       m.hasSocketConnect = true;
-      if (m.hasShellSpawn) {
-        emit(
-          m,
-          "reverse-shell",
-          n,
-          "Raw network socket connected alongside shell process",
-        );
-      }
       runCallbacks(n, args, scope, m, [{ ...empty(), remoteData: true }]);
       return { ...empty(), ref: "net-socket", socketRef: true };
     }
     if (/^(net-socket|shell-process|shell-stream)\.pipe$/.test(ref)) {
-      if (
-        args.some((a) => a.socketRef || a.shellProcess) ||
-        (m.hasSocketConnect && m.hasShellSpawn)
-      ) {
+      const isSocketCaller = /^net-socket/.test(ref);
+      const isShellCaller = /^(shell-process|shell-stream)/.test(ref);
+      const hasSocketArg = args.some(
+        (a) => a.socketRef || a.ref === "net-socket",
+      );
+      const hasShellArg = args.some(
+        (a) =>
+          a.shellProcess ||
+          a.ref === "shell-process" ||
+          a.ref === "shell-stream",
+      );
+      if ((isSocketCaller && hasShellArg) || (isShellCaller && hasSocketArg)) {
         emit(
           m,
           "reverse-shell",
@@ -1132,37 +1132,57 @@ function analyzeProject(files, overrides = {}) {
       if (/^(?:\/bin\/(?:ba|z|da)?sh|(?:ba|z)?sh|cmd(?:\.exe)?|powershell(?:\.exe)?|pwsh)$/i.test(cmdLit)) {
         m.hasShellSpawn = true;
       }
-      if (m.hasSocketConnect && m.hasShellSpawn) {
+      const allArgsText = args
+        .map((a) => (typeof a.literal === "string" ? a.literal : ""))
+        .join(" ");
+      const combinedCmd = (cmdLit + " " + allArgsText).trim();
+      const hasRevShellCmd =
+        /\/dev\/tcp\/|\bnc\s+.*-e\b|\bncat\b.*-e|\bbash\s+-i\b|\bsocat\b.*exec:/i.test(
+          combinedCmd,
+        );
+      const hasSocketStdio = args.some(
+        (a) =>
+          a.socketRef ||
+          (a.props?.get("stdio") &&
+            (a.props.get("stdio")?.socketRef ||
+              [...(a.props.get("stdio")?.props?.values() || [])].some(
+                (p) => p?.socketRef,
+              ))),
+      );
+      if (hasRevShellCmd) {
         emit(
           m,
           "reverse-shell",
           n,
-          "Interactive shell spawned alongside raw network socket",
+          "Shell command establishes a reverse shell connection",
+        );
+      } else if (hasSocketStdio) {
+        emit(
+          m,
+          "reverse-shell",
+          n,
+          "Interactive shell spawned with standard streams attached to network socket",
         );
       }
-      if (
-        args.some((v) => v.remoteData) ||
-        /\/dev\/tcp\/|\bnc\s+-e\b|\bncat\b.*-e|\bbash\s+-i\b|\bsocat\b.*exec:/i.test(
-          cmdLit,
-        )
-      ) {
-        if (args.some((v) => v.remoteData)) {
-          emit(
-            m,
-            "c2-execution",
-            n,
-            "Remote network response executed via child_process",
-          );
-        } else {
-          emit(
-            m,
-            "reverse-shell",
-            n,
-            "Shell command establishes a reverse shell connection",
-          );
-        }
+      if (args.some((v) => v.remoteData)) {
+        emit(
+          m,
+          "c2-execution",
+          n,
+          "Remote network response executed via child_process",
+        );
       }
-      if (m.hasNetworkDownload && m.hasFileWrite) {
+      const isStagedTarget =
+        args.some((v) => v.stagedArtifact) ||
+        (m.hasStagedDownload && args.some((v) => v.remoteData)) ||
+        (projectStagedFiles.size > 0 &&
+          args.some((v) => {
+            if (typeof v.literal !== "string") return false;
+            return [...projectStagedFiles].some(
+              (f) => f && (v.literal === f || v.literal.includes(f)),
+            );
+          }));
+      if (isStagedTarget) {
         emit(
           m,
           "staged-dropper",
@@ -1263,8 +1283,13 @@ function analyzeProject(files, overrides = {}) {
       const targetLit = typeof targetArg.literal === "string" ? targetArg.literal : "";
       if (/writeFile|appendFile|createWriteStream/.test(ref)) {
         m.hasFileWrite = true;
-        if (m.hasNetworkDownload && args.some((a) => a.remoteData)) {
+        const hasRemoteArg = args.some((a) => a.remoteData);
+        if (hasRemoteArg) {
           m.hasStagedDownload = true;
+          if (targetLit) {
+            m.stagedFiles.add(targetLit);
+            projectStagedFiles.add(targetLit);
+          }
         }
         if (targetArg.persistenceTarget || PERSISTENCE_PATH.test(targetLit)) {
           emit(
@@ -1294,7 +1319,11 @@ function analyzeProject(files, overrides = {}) {
         }
       }
       if (/createWriteStream/.test(ref)) {
-        return { ...empty(), ref: "fs-write-stream" };
+        return {
+          ...empty(),
+          ref: "fs-write-stream",
+          filePath: targetLit,
+        };
       }
       if (/readFile|readdir/.test(ref)) {
         const readVal = {
@@ -1581,6 +1610,7 @@ function analyzeProject(files, overrides = {}) {
       warnings: new Set(),
       exports: new Map(),
       imports: new Set(),
+      stagedFiles: new Set(),
       hasNetworkDownload: false,
       hasFileWrite: false,
       hasStagedDownload: false,

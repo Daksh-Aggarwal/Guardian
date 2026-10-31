@@ -285,7 +285,12 @@ def analyze(files, limits=None, timeout=20):
             if kind not in rules:
                 continue
             rule, title, category, severity, explanation, implication, action = rules[kind]
-            f = finding(rule, title, category, severity, 'high', evidence[0].detail, explanation, implication, action, evidence[:12])
+            ev_conf = 'high'
+            for ev in item['events']:
+                if ev['kind'] == kind and 'confidence' in ev:
+                    ev_conf = ev['confidence']
+                    break
+            f = finding(rule, title, category, severity, ev_conf, evidence[0].detail, explanation, implication, action, evidence[:12])
             findings.append(f)
             file_findings_map.setdefault(item['file'], []).append(f)
         if any(e['kind'] == 'encoded-execution' for e in item['events']):
@@ -372,9 +377,25 @@ def assess(findings, coverage_incomplete=False, source_coverage_incomplete=None)
     if source_coverage_incomplete is None:
         source_coverage_incomplete = coverage_incomplete
     behavioral_findings = [f for f in findings if f.domain == 'behavior' and f.rule != 'OSV']
-    strongest = max((RANK[f.severity] for f in behavioral_findings), default=0)
+
+    # Calibrate risk score by balancing severity (impact) and confidence (evidence certainty).
+    # A critical finding with low confidence does not escalate to 'Critical concern'.
+    def _effective_score(f):
+        sev = RANK.get(f.severity, 0)
+        conf = getattr(f, 'confidence', 'high')
+        if sev == 4:  # critical
+            return 4 if conf in ('high', 'medium') else 2
+        elif sev == 3:  # high
+            return 3 if conf in ('high', 'medium') else 1
+        elif sev == 2:  # medium
+            return 2 if conf in ('high', 'medium') else 1
+        elif sev == 1:  # low
+            return 1
+        return 0
+
+    strongest = max((_effective_score(f) for f in behavioral_findings), default=0)
     risk = {0:'No elevated signals', 1:'Review suggested', 2:'Review recommended', 3:'High concern', 4:'Critical concern'}[strongest]
-    elevated = [f for f in behavioral_findings if RANK[f.severity] == strongest and strongest > 0]
+    elevated = [f for f in behavioral_findings if _effective_score(f) == strongest and strongest > 0]
     if elevated:
         suffix = ' Note that source inspection was incomplete; check coverage details.' if source_coverage_incomplete else ''
         rationale = 'Highest-priority evidence: ' + '; '.join(dict.fromkeys(f.title for f in elevated)) + '. This is a review priority, not a malware verdict.' + suffix
