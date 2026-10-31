@@ -39,7 +39,9 @@ export default function Home() {
     [loading, setLoading] = useState(true),
     [search, setSearch] = useState(""),
     [remediationOpen, setRemediationOpen] = useState(false),
-    [remediationFinding, setRemediationFinding] = useState<string | null>(null);
+    [remediationFinding, setRemediationFinding] = useState<string | null>(null),
+    [connectedDirectoryHandle, setConnectedDirectoryHandle] =
+      useState<FileSystemDirectoryHandle | null>(null);
   const busy =
     job?.status === "running" ||
     job?.status === "queued" ||
@@ -240,8 +242,10 @@ export default function Home() {
               {remediationOpen && (
                 <RemediationPanel
                   report={report}
+                  directoryHandle={connectedDirectoryHandle}
                   targetFindingId={remediationFinding}
                   onClose={() => setRemediationOpen(false)}
+                  onDirectoryHandleChange={setConnectedDirectoryHandle}
                   onFindingClick={(fid) => {
                     setRemediationOpen(false);
                     setTimeout(() => {
@@ -263,6 +267,7 @@ export default function Home() {
                 setReport(r);
                 refresh();
               }}
+              onDirectoryHandleChange={setConnectedDirectoryHandle}
             />
           ) : page === "How it works" ? (
             <Methodology />
@@ -341,7 +346,12 @@ export default function Home() {
                     />
                   </div>
                   <div className="home-grid">
-                    <ScanPanel onStart={start} busy={!!busy} job={job} />
+                    <ScanPanel
+                      onStart={start}
+                      busy={!!busy}
+                      job={job}
+                      onConnectFolder={() => navigate("Project workspace")}
+                    />
                     <section className="guide-card">
                       <div className="guide-visual" aria-hidden="true">
                         <div className="orbit orbit-one" />

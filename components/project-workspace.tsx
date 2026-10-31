@@ -38,9 +38,11 @@ import {
 export default function ProjectWorkspace({
   onBack,
   onReportGenerated,
+  onDirectoryHandleChange,
 }: {
   onBack: () => void;
   onReportGenerated?: (report: Report) => void;
+  onDirectoryHandleChange?: (handle: FileSystemDirectoryHandle | null) => void;
 }) {
   const [projectData, setProjectData] = useState<ProjectDirectoryResult | null>(
     null,
@@ -63,6 +65,8 @@ export default function ProjectWorkspace({
     try {
       const result = await openProjectDirectory();
       setProjectData(result);
+      if (onDirectoryHandleChange)
+        onDirectoryHandleChange(result.directoryHandle);
       setReport(null);
     } catch (err) {
       if ((err as Error).name !== "AbortError") {
@@ -77,6 +81,7 @@ export default function ProjectWorkspace({
     if (projectData && report) {
       api(`/projects/${report.id}`, { method: "DELETE" }).catch(() => {});
     }
+    if (onDirectoryHandleChange) onDirectoryHandleChange(null);
     setProjectData(null);
     setReport(null);
     setJob(null);
@@ -644,6 +649,9 @@ export default function ProjectWorkspace({
           directoryHandle={projectData?.directoryHandle}
           targetFindingId={targetFindingId}
           onClose={() => setRemediationOpen(false)}
+          onDirectoryHandleChange={(h) => {
+            if (onDirectoryHandleChange) onDirectoryHandleChange(h);
+          }}
           onFindingClick={(fid) => {
             setRemediationOpen(false);
             setTimeout(() => {

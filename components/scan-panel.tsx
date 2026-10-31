@@ -8,6 +8,7 @@ import {
   Loader2,
   Check,
   ShieldCheck,
+  FolderOpen,
 } from "lucide-react";
 import { api, ScanJob } from "@/lib/types";
 import { Note } from "./ui";
@@ -16,10 +17,12 @@ export default function ScanPanel({
   onStart,
   busy,
   job,
+  onConnectFolder,
 }: {
   onStart: (id: string) => void;
   busy: boolean;
   job: ScanJob | null;
+  onConnectFolder?: () => void;
 }) {
   const [tab, setTab] = useState<"upload" | "package">("upload"),
     [name, setName] = useState(""),
@@ -137,6 +140,24 @@ export default function ScanPanel({
             <span>Project ZIP, package.json, or package-lock.json</span>
             <small>Up to 10 MB · No code is executed</small>
           </button>
+          {onConnectFolder && (
+            <div style={{ marginTop: "10px", textAlign: "center" }}>
+              <button
+                type="button"
+                className="text-link"
+                onClick={onConnectFolder}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  fontSize: "12px",
+                }}
+              >
+                <FolderOpen size={14} />
+                Connect local folder with Autopilot (supports direct fixes) →
+              </button>
+            </div>
+          )}
         </>
       ) : (
         <div className="package-input">

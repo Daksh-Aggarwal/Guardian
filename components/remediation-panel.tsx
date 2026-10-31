@@ -17,6 +17,7 @@ import {
   X,
   FileCode,
   Terminal,
+  FolderOpen,
 } from "lucide-react";
 import {
   api,
@@ -36,11 +37,12 @@ import {
 
 export default function RemediationPanel({
   report,
-  directoryHandle,
+  directoryHandle: initialDirectoryHandle,
   targetFindingId,
   onClose,
   onFindingClick,
   onRescanRequested,
+  onDirectoryHandleChange,
 }: {
   report: Report;
   directoryHandle?: FileSystemDirectoryHandle | null;
@@ -48,7 +50,10 @@ export default function RemediationPanel({
   onClose: () => void;
   onFindingClick?: (findingId: string) => void;
   onRescanRequested?: () => Promise<Report | void>;
+  onDirectoryHandleChange?: (handle: FileSystemDirectoryHandle | null) => void;
 }) {
+  const [directoryHandle, setDirectoryHandle] =
+    useState<FileSystemDirectoryHandle | null>(initialDirectoryHandle || null);
   const [consent, setConsent] = useState(false);
   const [showConsentModal, setShowConsentModal] = useState(false);
   const [plan, setPlan] = useState<RemediationPlan | null>(null);
@@ -64,6 +69,40 @@ export default function RemediationPanel({
   );
   const [canUndo, setCanUndo] = useState(false);
   const [confirmApply, setConfirmApply] = useState(false);
+
+  useEffect(() => {
+    if (initialDirectoryHandle) {
+      setDirectoryHandle(initialDirectoryHandle);
+    }
+  }, [initialDirectoryHandle]);
+
+  async function connectFolder(): Promise<FileSystemDirectoryHandle | null> {
+    if (!isFileSystemAccessSupported()) {
+      setError(
+        "Direct disk access requires the File System Access API (available in Chrome, Edge, and Chromium-based browsers). In Firefox/Safari, use the downloaded .patch file.",
+      );
+      return null;
+    }
+    try {
+      setStage("Select your project folder on disk to grant access...");
+      const handle = await (window as any).showDirectoryPicker({
+        mode: "read",
+      });
+      setDirectoryHandle(handle);
+      if (onDirectoryHandleChange) onDirectoryHandleChange(handle);
+      setActionSuccess(
+        `Connected folder '${handle.name}'. You can now apply changes directly.`,
+      );
+      return handle;
+    } catch (err) {
+      if ((err as Error).name !== "AbortError") {
+        setError(`Could not select folder: ${(err as Error).message}`);
+      }
+      return null;
+    } finally {
+      setStage("");
+    }
+  }
 
   // Initialize consent from localStorage
   useEffect(() => {
@@ -137,13 +176,38 @@ export default function RemediationPanel({
   async function applyPlan() {
     if (!plan) return;
 
-    if (!directoryHandle) {
-      // Fallback: offer patch download if no directory handle is connected
-      downloadPatchFile(plan);
-      setActionSuccess(
-        "Direct disk access is unavailable without a connected folder handle. A unified .patch file has been downloaded for manual application.",
-      );
-      return;
+    let handle = directoryHandle;
+
+    // If no directory handle is currently active, prompt the user to pick their project folder on disk
+    if (!handle) {
+      if (isFileSystemAccessSupported()) {
+        try {
+          setLoading(true);
+          setStage(
+            "Please select your project folder on disk to grant access...",
+          );
+          handle = await (window as any).showDirectoryPicker({ mode: "read" });
+          setDirectoryHandle(handle);
+          if (onDirectoryHandleChange) onDirectoryHandleChange(handle);
+        } catch (err) {
+          setLoading(false);
+          setStage("");
+          if ((err as Error).name === "AbortError") {
+            return;
+          }
+          downloadPatchFile(plan);
+          setActionSuccess(
+            "Could not connect local folder handle. A unified .patch file has been downloaded for manual application.",
+          );
+          return;
+        }
+      } else {
+        downloadPatchFile(plan);
+        setActionSuccess(
+          "Direct disk access is not supported in this browser (Firefox/Safari). A unified .patch file has been downloaded for manual application.",
+        );
+        return;
+      }
     }
 
     setLoading(true);
@@ -157,9 +221,13 @@ export default function RemediationPanel({
         method: "POST",
       });
 
+      if (!handle) {
+        throw new Error("No folder handle available for file application.");
+      }
+
       // 2. Apply changes through browser handles with pre-check and IndexedDB backup
       setStage("Applying approved modifications & updating local files...");
-      const result = await applyPlanToFileSystem(directoryHandle, plan);
+      const result = await applyPlanToFileSystem(handle, plan);
 
       // 3. Record applied in backend
       const updatedPlan = await api<RemediationPlan>(
@@ -206,14 +274,19 @@ export default function RemediationPanel({
 
   // Revert changes from IndexedDB backup
   async function undoChanges() {
-    if (!plan || !directoryHandle) return;
+    if (!plan) return;
+    let handle = directoryHandle;
+    if (!handle) {
+      handle = await connectFolder();
+      if (!handle) return;
+    }
     setLoading(true);
     setError(null);
     setActionSuccess(null);
     setStage("Restoring original files from IndexedDB backup...");
 
     try {
-      const result = await undoPlanFromFileSystem(directoryHandle, plan);
+      const result = await undoPlanFromFileSystem(handle, plan);
       setCanUndo(false);
       setActionSuccess(
         `Successfully restored ${result.restoredFiles.length} file(s) to original state.`,
@@ -431,6 +504,99 @@ export default function RemediationPanel({
                 }}
               >
                 <X size={15} />
+              </button>
+            </div>
+          )}
+
+          {/* Folder Connection Status Banner */}
+          {!directoryHandle ? (
+            <div
+              style={{
+                padding: "12px 16px",
+                background: "rgba(59, 130, 246, 0.08)",
+                borderRadius: "8px",
+                border: "1px solid rgba(59, 130, 246, 0.25)",
+                fontSize: "12px",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: "12px",
+                flexWrap: "wrap",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: "10px",
+                }}
+              >
+                <FolderOpen
+                  size={18}
+                  color="var(--accent-blue, #3b82f6)"
+                  style={{ flexShrink: 0, marginTop: "2px" }}
+                />
+                <div>
+                  <strong style={{ color: "var(--foreground)" }}>
+                    Direct Disk Modification Available
+                  </strong>
+                  <p
+                    style={{
+                      margin: "2px 0 0",
+                      color: "var(--muted)",
+                      lineHeight: "1.5",
+                    }}
+                  >
+                    Standard browser uploads provide an in-memory copy only. To
+                    apply approved fixes directly to your local files, link your
+                    folder on disk.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={connectFolder}
+                className="button primary compact"
+                style={{
+                  fontSize: "11px",
+                  whiteSpace: "nowrap",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                }}
+              >
+                <FolderOpen size={13} />
+                Connect local folder
+              </button>
+            </div>
+          ) : (
+            <div
+              style={{
+                padding: "10px 14px",
+                background: "rgba(16, 185, 129, 0.06)",
+                borderRadius: "8px",
+                border: "1px solid rgba(16, 185, 129, 0.2)",
+                fontSize: "12px",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: "10px",
+              }}
+            >
+              <div
+                style={{ display: "flex", alignItems: "center", gap: "8px" }}
+              >
+                <FolderOpen size={16} color="var(--accent-green, #10b981)" />
+                <span>
+                  <strong>Connected Folder:</strong> {directoryHandle.name}{" "}
+                  (Direct in-place application enabled)
+                </span>
+              </div>
+              <button
+                onClick={connectFolder}
+                className="button secondary compact"
+                style={{ fontSize: "10px", padding: "2px 8px" }}
+              >
+                Change folder
               </button>
             </div>
           )}
