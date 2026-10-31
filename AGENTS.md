@@ -16,7 +16,7 @@
 
 ## Conventions and constraints
 
-Keep TypeScript strict, report contracts explicit and components focused. Keep detection policy in Python and syntax observation in the Babel adapter. Add explanatory fields and source evidence to any new rule. Simple/Advanced are presentations of the same finding IDs and assessment. The explanation provider must cite existing findings; it cannot change scanner verdicts. Keep documentation synchronized with behavior. Preserve explicit job lifecycle states (queued, running, cancelling, cancelled, complete, failed) and reconciled dependency accounting. Prefer minimal dependencies and local services; no Docker/auth/cloud scaffolding without an actual requirement.
+Keep TypeScript strict, report contracts explicit and components focused. Keep detection policy in Python and syntax observation in the Babel adapter. Add explanatory fields and source evidence to any new rule. Simple/Advanced are presentations of the same finding IDs and assessment. The explanation provider must cite existing findings; it cannot change scanner verdicts. Keep documentation synchronized with behavior. Preserve explicit job lifecycle states (queued, running, cancelling, cancelled, complete, failed), decoupled three-dimensional coverage semantics (source, dependency resolution, vulnerability intelligence), and reconciled dependency accounting. Prefer minimal dependencies and local services; no Docker/auth/cloud scaffolding without an actual requirement.
 
 ## Security requirements
 

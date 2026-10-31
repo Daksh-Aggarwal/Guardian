@@ -109,55 +109,116 @@ def lock_graph(files):
     if not paths:
         manifests=sorted((p for p in files if PurePosixPath(p).name=='package.json'),key=lambda p:(len(PurePosixPath(p).parts),p))
         root=json.loads(files[manifests[0]]) if manifests else {}
-        nodes=[PackageInspection(name=n,version=str(v),location='manifest:'+n,direct=True,status='unresolved',reason='No lockfile exact resolution available.') for n,v in list(declarations(root).items())[:MAX_DISCOVERED]]
+        root_decls = declarations(root)
+        nodes = []
+        for index, (n, v) in enumerate(root_decls.items()):
+            if index < MAX_DISCOVERED:
+                nodes.append(PackageInspection(name=n, version=str(v), location='manifest:'+n, direct=True, status='unresolved', reason='No lockfile exact resolution available.'))
+            else:
+                nodes.append(PackageInspection(name=n, version=str(v), location='manifest:'+n, direct=True, status='skipped', reason=f'Omitted: dependency graph inventory ceiling ({MAX_DISCOVERED}) reached.'))
+        if len(root_decls) > MAX_DISCOVERED:
+            warnings.append(f'Dependency graph inventory capped at {MAX_DISCOVERED} locations.')
         return nodes,{},['No modern lockfile: declared dependency source is uninspected.'] if nodes else []
     path=paths[0]; lock=json.loads(files[path]); packages=lock.get('packages')
     if not isinstance(packages,dict):
         return [],{},['Lockfile v1 has no modern packages graph; recursive inspection is unavailable.']
     if len(paths)>1:warnings.append('Only the shallowest package-lock.json graph is inspected; other project lockfiles are uninspected.')
-    if len(packages)>MAX_DISCOVERED+1:warnings.append(f'Dependency graph inventory capped at {MAX_DISCOVERED} locations.')
-    records={loc:p for loc,p in list(packages.items())[:MAX_DISCOVERED+1] if loc and isinstance(p,dict)}
+
     root=packages.get('',{})
     if not root:
         manifest_path=str(PurePosixPath(path).parent/'package.json')
         root=json.loads(files[manifest_path]) if manifest_path in files else {}
+    root_decls = declarations(root)
+
+    all_pkg_records = [(loc, p) for loc, p in packages.items() if loc and isinstance(p, dict)]
+    if len(all_pkg_records) > MAX_DISCOVERED:
+        warnings.append(f'Dependency graph inventory capped at {MAX_DISCOVERED} locations.')
+
+    traversable_records = {loc: p for loc, p in all_pkg_records[:MAX_DISCOVERED]}
+    omitted_records = {loc: p for loc, p in all_pkg_records[MAX_DISCOVERED:]}
+
     def resolve(parent,name):
         current=parent
         while True:
             candidate=(current+'/' if current else '')+'node_modules/'+name
-            if candidate in records:return candidate
+            if candidate in traversable_records:return candidate
             if not current:break
             current=current.rsplit('/node_modules/',1)[0] if '/node_modules/' in current else ''
         return None
-    nodes={loc:PackageInspection(name=p.get('name') or loc.split('node_modules/')[-1],version=str(p.get('version','unresolved')),location=loc,direct=False,status='unresolved',reason='Not reachable from the root dependency declarations.') for loc,p in records.items()}
-    queue=deque(); seen=set(); expected={}
-    for name,spec in declarations(root).items():
-        loc=resolve('',name)
+
+    nodes = {}
+    for loc, p in traversable_records.items():
+        name = p.get('name') or loc.split('node_modules/')[-1]
+        nodes[loc] = PackageInspection(
+            name=name,
+            version=str(p.get('version', 'unresolved')),
+            location=loc,
+            direct=False,
+            status='unresolved',
+            reason='Not reachable from the root dependency declarations.'
+        )
+
+    for loc, p in omitted_records.items():
+        name = p.get('name') or loc.split('node_modules/')[-1]
+        is_direct = (loc == 'node_modules/' + name and name in root_decls)
+        nodes[loc] = PackageInspection(
+            name=name,
+            version=str(p.get('version', 'unresolved')),
+            location=loc,
+            direct=is_direct,
+            status='skipped',
+            reason=f'Omitted: dependency graph inventory ceiling ({MAX_DISCOVERED}) reached.'
+        )
+
+    queue = deque()
+    seen = set()
+    expected = {}
+
+    for name, spec in root_decls.items():
+        loc = resolve('', name)
         if loc:
-            nodes[loc].direct=True;queue.append((loc,1))
+            nodes[loc].direct = True
+            queue.append((loc, 1))
         else:
-            loc='unresolved:'+name
-            nodes[loc]=PackageInspection(name=name,version=str(spec),location=loc,direct=True,status='unresolved',reason='Root dependency has no matching lockfile entry.')
+            loc = 'unresolved:' + name
+            if len(nodes) < MAX_DISCOVERED or loc in nodes:
+                nodes[loc] = PackageInspection(name=name, version=str(spec), location=loc, direct=True, status='unresolved', reason='Root dependency has no matching lockfile entry.')
+            else:
+                nodes[loc] = PackageInspection(name=name, version=str(spec), location=loc, direct=True, status='skipped', reason=f'Omitted: dependency graph inventory ceiling ({MAX_DISCOVERED}) reached.')
+
     while queue:
-        loc,depth=queue.popleft()
-        if loc in seen:continue
-        seen.add(loc);node=nodes[loc];node.depth=depth;entry=records[loc]
-        expected[loc]=entry.get('integrity')
-        node.integrity=IntegrityResult(expected=entry.get('integrity') if isinstance(entry.get('integrity'),str) else None,source='lockfile')
+        loc, depth = queue.popleft()
+        if loc in seen:
+            continue
+        seen.add(loc)
+        node = nodes[loc]
+        node.depth = depth
+        entry = traversable_records[loc]
+        expected[loc] = entry.get('integrity')
+        node.integrity = IntegrityResult(expected=entry.get('integrity') if isinstance(entry.get('integrity'), str) else None, source='lockfile')
         if entry.get('link') or not EXACT.fullmatch(node.version):
-            node.status='unresolved';node.reason='Workspace/link or non-exact version is not registry-resolvable.'
-        else:node.status='uninspected';node.reason='Awaiting bounded source inspection.'
-        for name,spec in declarations(entry).items():
-            target=resolve(loc,name)
+            node.status = 'unresolved'
+            node.reason = 'Workspace/link or non-exact version is not registry-resolvable.'
+        else:
+            node.status = 'uninspected'
+            node.reason = 'Awaiting bounded source inspection.'
+        for name, spec in declarations(entry).items():
+            target = resolve(loc, name)
             if target:
                 node.dependencies.append(target)
-                if target in seen:warnings.append(f'Reused/cyclic dependency edge: {loc} → {target}; visited once.')
-                else:queue.append((target,depth+1))
-            elif len(nodes)<MAX_DISCOVERED:
-                missing=loc+'/unresolved:'+name
-                nodes[missing]=PackageInspection(name=name,version=str(spec),location=missing,direct=False,depth=depth+1,status='unresolved',reason='Transitive dependency has no matching lockfile entry.')
+                if target in seen:
+                    warnings.append(f'Reused/cyclic dependency edge: {loc} → {target}; visited once.')
+                else:
+                    queue.append((target, depth + 1))
+            else:
+                missing = loc + '/unresolved:' + name
+                if len(nodes) < MAX_DISCOVERED or missing in nodes:
+                    nodes[missing] = PackageInspection(name=name, version=str(spec), location=missing, direct=False, depth=depth + 1, status='unresolved', reason='Transitive dependency has no matching lockfile entry.')
+                else:
+                    nodes[missing] = PackageInspection(name=name, version=str(spec), location=missing, direct=False, depth=depth + 1, status='skipped', reason=f'Omitted: dependency graph inventory ceiling ({MAX_DISCOVERED}) reached.')
                 node.dependencies.append(missing)
-    return list(nodes.values()),expected,warnings
+
+    return list(nodes.values()), expected, warnings
 
 
 def inspect_dependencies(files, analyzer, profile='fast', session=None, cancel=None):

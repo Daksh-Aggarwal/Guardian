@@ -10,6 +10,9 @@ from .models import Evidence, Advisory
 EXACT = re.compile(r'^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$')
 SEVERITIES = {'LOW': 'low', 'MODERATE': 'medium', 'MEDIUM': 'medium', 'HIGH': 'high', 'CRITICAL': 'critical'}
 VALID_CVSS_TYPES = {'CVSS_V2', 'CVSS_V3', 'CVSS_V4'}
+MAX_BATCH_SIZE = 4 * 1024 * 1024
+MAX_AGGREGATE_BATCH_BYTES = 8 * 1024 * 1024
+MAX_PAGES = 5
 
 def check_osv(dependencies):
     if os.getenv('GUARDIAN_OSV_ENABLED', 'true').lower() != 'true':
@@ -17,51 +20,186 @@ def check_osv(dependencies):
     unique = {(d.name, d.version): d for d in dependencies}
     eligible = [d for d in unique.values() if EXACT.fullmatch(d.version)]
     warnings = []
+    has_partial = False
     if len(eligible) != len(unique):
         warnings.append('OSV checks only exact versions. Upload a lockfile to resolve dependency ranges.')
+        has_partial = True
     if not eligible:
         return [], 'not checked', warnings + ['No exact package versions available for OSV.']
     if len(eligible) > 100:
         warnings.append('OSV checks limited to the first 100 exact dependency versions.')
+        has_partial = True
+
     started = time.monotonic()
-    details = {}
-    findings = []
+    submitted = eligible[:100]
+    batch_bytes = 0
+
     try:
         response = httpx.post(
             'https://api.osv.dev/v1/querybatch',
-            json={'queries': [{'package': {'name': d.name, 'ecosystem': 'npm'}, 'version': d.version} for d in eligible[:100]]},
+            json={'queries': [{'package': {'name': d.name, 'ecosystem': 'npm'}, 'version': d.version} for d in submitted]},
             timeout=12,
             follow_redirects=False
         )
         response.raise_for_status()
-        if len(response.content) > 4 * 1024 * 1024:
+        if len(response.content) > MAX_BATCH_SIZE:
             raise ValueError('OSV batch response exceeded 4 MB limit.')
+        batch_bytes += len(response.content)
         data = response.json()
         if not isinstance(data, dict) or not isinstance(data.get('results'), list):
             raise ValueError('Invalid OSV batch response structure.')
         results = data['results']
-        if len(results) != len(eligible[:100]):
+        if len(results) != len(submitted):
             raise ValueError('Incomplete OSV query-to-result response count.')
-    except (httpx.HTTPError, ValueError, KeyError, TypeError):
-        return [], 'unavailable', warnings + ['OSV could not be reached or returned an invalid response. Vulnerability status is unknown.']
+    except (httpx.HTTPError, ValueError, KeyError, TypeError) as err:
+        return [], 'unavailable', warnings + [f'OSV could not be reached or returned an invalid response ({err}). Vulnerability status is unknown.']
 
-    for dep, result in zip(eligible[:100], results):
+    dep_vulns = [[] for _ in submitted]
+    dep_tokens = [None for _ in submitted]
+    dep_pages = [1 for _ in submitted]
+    seen_tokens = [set() for _ in submitted]
+
+    for idx, (dep, result) in enumerate(zip(submitted, results)):
         if not isinstance(result, dict):
             warnings.append(f'Invalid OSV batch entry for {dep.name}; status unknown.')
+            has_partial = True
             continue
-        if result.get('next_page_token'):
-            warnings.append(f'{dep.name}: OSV reported additional unpaginated advisories; vulnerability assessment is partial.')
         vulns = result.get('vulns', [])
+        if vulns is None:
+            vulns = []
         if not isinstance(vulns, list):
             warnings.append(f'Invalid advisory list for {dep.name}; status unknown.')
+            has_partial = True
             continue
+        for v in vulns:
+            if not isinstance(v, dict):
+                warnings.append(f'{dep.name}: malformed advisory record.')
+                has_partial = True
+                continue
+            vid = v.get('id')
+            if not isinstance(vid, str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,150}', vid):
+                warnings.append(f'{dep.name}: OSV returned an unsupported advisory ID.')
+                has_partial = True
+                continue
+            if vid not in {existing['id'] for existing in dep_vulns[idx]}:
+                dep_vulns[idx].append(v)
+        token = result.get('next_page_token')
+        if isinstance(token, str) and token.strip():
+            dep_tokens[idx] = token.strip()
+        elif token is not None and not (isinstance(token, str) and token.strip()):
+            warnings.append(f'{dep.name}: invalid page token; status partial.')
+            has_partial = True
+
+    # Handle pagination
+    while any(dep_tokens[idx] is not None for idx in range(len(submitted))):
+        active_indices = [idx for idx in range(len(submitted)) if dep_tokens[idx] is not None]
+        to_query = []
+        for idx in active_indices:
+            d = submitted[idx]
+            tok = dep_tokens[idx]
+            if dep_pages[idx] >= MAX_PAGES:
+                warnings.append(f'{d.name}: OSV pagination limit ({MAX_PAGES} pages) reached; vulnerability assessment is partial.')
+                has_partial = True
+                dep_tokens[idx] = None
+                continue
+            if tok in seen_tokens[idx]:
+                warnings.append(f'{d.name}: OSV pagination loop detected; vulnerability assessment is partial.')
+                has_partial = True
+                dep_tokens[idx] = None
+                continue
+            seen_tokens[idx].add(tok)
+            to_query.append((idx, d, tok))
+
+        if not to_query:
+            break
+
+        remaining_time = 15 - (time.monotonic() - started)
+        if remaining_time <= 0.5:
+            warnings.append('OSV pagination time budget reached; vulnerability assessment is partial.')
+            has_partial = True
+            break
+        if batch_bytes >= MAX_AGGREGATE_BATCH_BYTES:
+            warnings.append('OSV pagination response-size budget reached; vulnerability assessment is partial.')
+            has_partial = True
+            break
+
+        try:
+            sub_payload = {
+                'queries': [
+                    {'package': {'name': d.name, 'ecosystem': 'npm'}, 'version': d.version, 'page_token': tok}
+                    for _, d, tok in to_query
+                ]
+            }
+            sub_res = httpx.post(
+                'https://api.osv.dev/v1/querybatch',
+                json=sub_payload,
+                timeout=min(6.0, remaining_time),
+                follow_redirects=False
+            )
+            sub_res.raise_for_status()
+            if len(sub_res.content) > MAX_BATCH_SIZE:
+                warnings.append('OSV pagination response exceeded 4 MB limit; vulnerability assessment is partial.')
+                has_partial = True
+                break
+            batch_bytes += len(sub_res.content)
+            sub_data = sub_res.json()
+            if not isinstance(sub_data, dict) or not isinstance(sub_data.get('results'), list):
+                warnings.append('OSV pagination returned invalid structure; vulnerability assessment is partial.')
+                has_partial = True
+                break
+            sub_results = sub_data['results']
+            if len(sub_results) != len(to_query):
+                warnings.append('OSV pagination query-to-result count mismatch; vulnerability assessment is partial.')
+                has_partial = True
+                break
+
+            for (idx, d, _), s_result in zip(to_query, sub_results):
+                dep_pages[idx] += 1
+                dep_tokens[idx] = None
+                if not isinstance(s_result, dict):
+                    warnings.append(f'{d.name}: invalid pagination entry; status partial.')
+                    has_partial = True
+                    continue
+                s_vulns = s_result.get('vulns', [])
+                if s_vulns is None:
+                    s_vulns = []
+                if not isinstance(s_vulns, list):
+                    warnings.append(f'{d.name}: invalid advisory list in pagination; status partial.')
+                    has_partial = True
+                    continue
+                for v in s_vulns:
+                    if not isinstance(v, dict):
+                        warnings.append(f'{d.name}: malformed advisory record in pagination.')
+                        has_partial = True
+                        continue
+                    vid = v.get('id')
+                    if not isinstance(vid, str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,150}', vid):
+                        warnings.append(f'{d.name}: unsupported advisory ID in pagination.')
+                        has_partial = True
+                        continue
+                    if vid not in {existing['id'] for existing in dep_vulns[idx]}:
+                        dep_vulns[idx].append(v)
+                new_tok = s_result.get('next_page_token')
+                if isinstance(new_tok, str) and new_tok.strip():
+                    dep_tokens[idx] = new_tok.strip()
+                elif new_tok is not None and not (isinstance(new_tok, str) and new_tok.strip()):
+                    warnings.append(f'{d.name}: invalid page token; status partial.')
+                    has_partial = True
+        except Exception:
+            warnings.append('OSV pagination request failed; vulnerabilities may be incomplete.')
+            has_partial = True
+            break
+
+    details = {}
+    findings = []
+
+    for idx, dep in enumerate(submitted):
+        vulns = dep_vulns[idx]
         if len(vulns) > 30:
             warnings.append(f'OSV findings capped at 30 advisories for {dep.name}.')
+            has_partial = True
         for vuln in vulns[:30]:
-            vid = vuln.get('id') if isinstance(vuln, dict) else None
-            if not isinstance(vid, str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,150}', vid):
-                warnings.append('OSV returned an unsupported advisory ID.')
-                continue
+            vid = vuln['id']
             if vid not in details:
                 details[vid] = None
                 remaining_time = 20 - (time.monotonic() - started)
@@ -81,8 +219,10 @@ def check_osv(dependencies):
                         details[vid] = detail
                     except (httpx.HTTPError, ValueError, TypeError):
                         warnings.append(f'{vid}: advisory details unavailable; batch match retained.')
+                        has_partial = True
                 else:
                     warnings.append(f'{vid}: advisory enrichment budget reached; batch match retained.')
+                    has_partial = True
             detail = details[vid]
             advisory = Advisory(id=vid)
             refs = ['https://osv.dev/vulnerability/' + vid]
@@ -104,6 +244,7 @@ def check_osv(dependencies):
                 if not affected:
                     warnings.append(f'{vid}: advisory detail package mismatch (expected npm package {dep.name}); details refused.')
                     observed_desc = f'{vid} (unverified details) matches {dep.name}@{dep.version}'
+                    has_partial = True
                 else:
                     advisory.detail_status = 'available'
                     confidence = 'high'
@@ -162,6 +303,7 @@ def check_osv(dependencies):
             if advisory.detail_status != 'available':
                 f.limitations.append('Advisory enrichment was unavailable; affected ranges and fixed versions could not be verified.')
             findings.append(f)
+
     unique_warnings = list(dict.fromkeys(warnings))
-    status = 'partial' if unique_warnings else 'checked'
+    status = 'partial' if has_partial else 'checked'
     return findings, status, unique_warnings

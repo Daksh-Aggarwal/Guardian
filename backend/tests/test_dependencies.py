@@ -125,3 +125,128 @@ def test_unresolved_and_workspace_entries():
     assert nodes[0].status=='unresolved'
     nodes,_,warnings=lock_graph({'package.json':'{"dependencies":{"alpha":"^1.0.0"}}'})
     assert nodes[0].status=='unresolved' and warnings
+
+def _assert_reconciliation(summary):
+    assert (
+        summary.inspected
+        + summary.skipped
+        + summary.unavailable
+        + summary.unresolved
+        + summary.integrity_failed
+        + summary.not_attempted
+    ) == summary.total
+    assert (summary.direct + summary.transitive) == summary.total
+
+def test_graph_just_below_discovery_cap(monkeypatch):
+    monkeypatch.setattr('backend.guardian.dependencies.MAX_DISCOVERED', 20)
+    entries = {f'node_modules/pkg_{i}': {'version': '1.0.0'} for i in range(19)}
+    files = {'package-lock.json': json.dumps({'name': 'proj', 'lockfileVersion': 3, 'packages': {'': {'dependencies': {'pkg_0': '1.0.0'}}, **entries}})}
+    nodes, summary, _, warnings, _ = inspect_dependencies(files, analyze)
+    _assert_reconciliation(summary)
+    assert summary.total == 19
+    assert not any('inventory capped' in w for w in warnings)
+
+def test_graph_exactly_at_discovery_cap(monkeypatch):
+    monkeypatch.setattr('backend.guardian.dependencies.MAX_DISCOVERED', 20)
+    entries = {f'node_modules/pkg_{i}': {'version': '1.0.0'} for i in range(20)}
+    files = {'package-lock.json': json.dumps({'name': 'proj', 'lockfileVersion': 3, 'packages': {'': {'dependencies': {'pkg_0': '1.0.0'}}, **entries}})}
+    nodes, summary, _, warnings, _ = inspect_dependencies(files, analyze)
+    _assert_reconciliation(summary)
+    assert summary.total == 20
+
+def test_graph_above_discovery_cap(monkeypatch):
+    monkeypatch.setattr('backend.guardian.dependencies.MAX_DISCOVERED', 20)
+    entries = {f'node_modules/pkg_{i}': {'version': '1.0.0'} for i in range(35)}
+    files = {'package-lock.json': json.dumps({'name': 'proj', 'lockfileVersion': 3, 'packages': {'': {'dependencies': {'pkg_0': '1.0.0'}}, **entries}})}
+    nodes, summary, _, warnings, _ = inspect_dependencies(files, analyze)
+    _assert_reconciliation(summary)
+    assert summary.total == 35
+    assert summary.skipped >= 15
+    assert any('inventory capped' in w for w in warnings)
+    omitted = [n for n in nodes if 'ceiling' in n.reason]
+    assert len(omitted) == 15
+    assert all(n.status == 'skipped' for n in omitted)
+
+def test_multiple_root_dependency_declarations():
+    entries = {f'node_modules/root_{i}': {'version': '1.0.0'} for i in range(5)}
+    root_deps = {f'root_{i}': '1.0.0' for i in range(5)}
+    files = {'package-lock.json': json.dumps({'name': 'proj', 'lockfileVersion': 3, 'packages': {'': {'dependencies': root_deps}, **entries}})}
+    nodes, summary, _, _, _ = inspect_dependencies(files, analyze)
+    _assert_reconciliation(summary)
+    assert summary.direct == 5
+    assert summary.transitive == 0
+    assert summary.total == 5
+
+def test_duplicate_package_references():
+    entries = {
+        'node_modules/alpha': {'version': '1.0.0', 'dependencies': {'shared': '1.0.0'}},
+        'node_modules/beta': {'version': '1.0.0', 'dependencies': {'shared': '1.0.0'}},
+        'node_modules/shared': {'version': '1.0.0'}
+    }
+    files = {'package-lock.json': json.dumps({'name': 'proj', 'lockfileVersion': 3, 'packages': {'': {'dependencies': {'alpha': '1.0.0', 'beta': '1.0.0'}}, **entries}})}
+    nodes, summary, _, _, _ = inspect_dependencies(files, analyze)
+    _assert_reconciliation(summary)
+    assert summary.total == 3
+    assert summary.direct == 2
+    assert summary.transitive == 1
+
+def test_cyclic_dependencies_reconciled():
+    entries = {
+        'node_modules/a': {'version': '1.0.0', 'dependencies': {'b': '1.0.0'}},
+        'node_modules/b': {'version': '1.0.0', 'dependencies': {'c': '1.0.0'}},
+        'node_modules/c': {'version': '1.0.0', 'dependencies': {'a': '1.0.0'}}
+    }
+    files = {'package-lock.json': json.dumps({'name': 'proj', 'lockfileVersion': 3, 'packages': {'': {'dependencies': {'a': '1.0.0'}}, **entries}})}
+    nodes, summary, _, warnings, _ = inspect_dependencies(files, analyze)
+    _assert_reconciliation(summary)
+    assert summary.total == 3
+    assert any('cyclic' in w for w in warnings)
+
+def test_nested_node_modules_resolution_reconciled():
+    entries = {
+        'node_modules/a': {'version': '1.0.0', 'dependencies': {'b': '2.0.0'}},
+        'node_modules/a/node_modules/b': {'version': '2.0.0'},
+        'node_modules/b': {'version': '1.0.0'}
+    }
+    files = {'package-lock.json': json.dumps({'name': 'proj', 'lockfileVersion': 3, 'packages': {'': {'dependencies': {'a': '1.0.0', 'b': '1.0.0'}}, **entries}})}
+    nodes, summary, _, _, _ = inspect_dependencies(files, analyze)
+    _assert_reconciliation(summary)
+    assert summary.total == 3
+    assert summary.direct == 2
+    assert summary.transitive == 1
+
+def test_workspace_link_dependencies_reconciled():
+    entries = {
+        'node_modules/local-pkg': {'version': '1.0.0', 'link': True, 'resolved': '../local'},
+        'node_modules/reg-pkg': {'version': '1.0.0'}
+    }
+    files = {'package-lock.json': json.dumps({'name': 'proj', 'lockfileVersion': 3, 'packages': {'': {'dependencies': {'local-pkg': '1.0.0', 'reg-pkg': '1.0.0'}}, **entries}})}
+    nodes, summary, _, _, _ = inspect_dependencies(files, analyze)
+    _assert_reconciliation(summary)
+    assert summary.unresolved >= 1
+
+def test_missing_lockfile_references_reconciled():
+    entries = {
+        'node_modules/alpha': {'version': '1.0.0', 'dependencies': {'missing-transitive': '1.0.0'}}
+    }
+    files = {'package-lock.json': json.dumps({'name': 'proj', 'lockfileVersion': 3, 'packages': {'': {'dependencies': {'alpha': '1.0.0', 'missing-root': '2.0.0'}}, **entries}})}
+    nodes, summary, _, _, _ = inspect_dependencies(files, analyze)
+    _assert_reconciliation(summary)
+    assert summary.unresolved >= 2
+    assert summary.total == 3
+
+def test_budget_exhaustion_traversal_and_retrieval(monkeypatch):
+    raw = tarball()
+    registry(monkeypatch, {'alpha': raw, 'beta': raw, 'gamma': raw})
+    entries = {
+        'node_modules/alpha': {'version': '1.0.0', 'dependencies': {'beta': '1.0.0'}},
+        'node_modules/beta': {'version': '1.0.0', 'dependencies': {'gamma': '1.0.0'}},
+        'node_modules/gamma': {'version': '1.0.0'}
+    }
+    files = {'package-lock.json': json.dumps({'name': 'proj', 'lockfileVersion': 3, 'packages': {'': {'dependencies': {'alpha': '1.0.0'}}, **entries}})}
+    session = RegistrySession(Budget(packages=1))
+    nodes, summary, _, warnings, _ = inspect_dependencies(files, analyze, session=session)
+    _assert_reconciliation(summary)
+    assert summary.inspected == 1
+    assert summary.skipped == 2
+    assert any('incomplete' in w for w in warnings)

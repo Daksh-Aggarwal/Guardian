@@ -4,7 +4,7 @@
 
 Severity is potential review priority. Confidence measures strength of observed evidence, never probability that the author is malicious. Ordinary capabilities remain informational. The overall behavioral verdict follows the maximum severity of behavioral findings and names its supporting rules. Independent domains (behavior, vulnerabilities, integrity) are never collapsed into a single score. Critical is reserved in the contract; current rules emit up to high.
 
-When dependency or source inspection is incomplete (e.g. packages skipped due to budget, uninspected transitive nodes, or retrieval failures), the behavioral assessment rationale explicitly notes that inspection was partial and that an absence of signals in uninspected files does not certify package safety.
+When source inspection is incomplete (e.g. parser timeout, unparsed files, or manifest-only scan), the behavioral assessment rationale explicitly notes that source inspection was partial and that an absence of signals in uninspected files does not certify package safety. Source coverage is decoupled from external OSV intelligence availability and dependency graph budgets.
 
 | Rule | Evidence and rationale | Priority / confidence | Domain |
 |---|---|---|---|

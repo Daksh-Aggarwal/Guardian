@@ -270,12 +270,174 @@ export default function ReportView({
               <p>
                 These boundaries are part of the assessment, not fine print.
               </p>
-              {report.coverage.map((c, i) => (
-                <div className="coverage-item" key={i}>
-                  <Info size={17} />
-                  <p>{c}</p>
+
+              <div
+                className="coverage-dimensions"
+                style={{
+                  marginTop: "20px",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "14px",
+                }}
+              >
+                <div
+                  className="card"
+                  style={{
+                    padding: "16px",
+                    background: "var(--surface-muted, rgba(255,255,255,0.02))",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      marginBottom: "8px",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "8px",
+                      }}
+                    >
+                      <FileCode2 size={16} />
+                      <strong style={{ fontSize: "12px" }}>
+                        Source & Behavioral Inspection
+                      </strong>
+                    </div>
+                    <span className="status-chip">
+                      {report.assessments?.behavior?.coverage_status ||
+                        "complete"}
+                    </span>
+                  </div>
+                  <p
+                    style={{
+                      fontSize: "11px",
+                      color: "var(--muted)",
+                      margin: "0",
+                      lineHeight: "1.6",
+                    }}
+                  >
+                    {advanced
+                      ? `${report.files_analyzed} source files analyzed under Node.js Babel AST inspection with bounded call depth (8) and module limit (100). Status: ${report.assessments?.behavior?.coverage_status || "complete"}.`
+                      : report.files_analyzed > 0
+                        ? `Guardian inspected ${report.files_analyzed} source files directly for behavioral signals like credential access and sensitive data flow.`
+                        : "Manifest-only scan: no package source code was analyzed."}
+                  </p>
                 </div>
-              ))}
+
+                <div
+                  className="card"
+                  style={{
+                    padding: "16px",
+                    background: "var(--surface-muted, rgba(255,255,255,0.02))",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      marginBottom: "8px",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "8px",
+                      }}
+                    >
+                      <Package size={16} />
+                      <strong style={{ fontSize: "12px" }}>
+                        Dependency Graph Resolution
+                      </strong>
+                    </div>
+                    <span className="status-chip">
+                      {report.assessments?.inspection?.status || "complete"}
+                    </span>
+                  </div>
+                  <p
+                    style={{
+                      fontSize: "11px",
+                      color: "var(--muted)",
+                      margin: "0",
+                      lineHeight: "1.6",
+                    }}
+                  >
+                    {advanced
+                      ? `${report.inspection_summary?.inspected || 0}/${report.inspection_summary?.total || 0} packages inspected (${report.inspection_summary?.skipped || 0} skipped, ${report.inspection_summary?.unavailable || 0} unavailable, ${report.inspection_summary?.unresolved || 0} unresolved, ${report.inspection_summary?.integrity_failed || 0} integrity failed, ${report.inspection_summary?.not_attempted || 0} not attempted).`
+                      : report.inspection_summary &&
+                          report.inspection_summary.total > 0
+                        ? `${report.inspection_summary.inspected} of ${report.inspection_summary.total} dependency locations inspected under the ${report.inspection_summary.profile || "fast"} budget profile.`
+                        : "No external dependencies declared."}
+                  </p>
+                </div>
+
+                <div
+                  className="card"
+                  style={{
+                    padding: "16px",
+                    background: "var(--surface-muted, rgba(255,255,255,0.02))",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      marginBottom: "8px",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "8px",
+                      }}
+                    >
+                      <Network size={16} />
+                      <strong style={{ fontSize: "12px" }}>
+                        Vulnerability Intelligence (OSV)
+                      </strong>
+                    </div>
+                    <span className="status-chip">
+                      {report.assessments?.vulnerabilities?.status ||
+                        report.intelligence}
+                    </span>
+                  </div>
+                  <p
+                    style={{
+                      fontSize: "11px",
+                      color: "var(--muted)",
+                      margin: "0",
+                      lineHeight: "1.6",
+                    }}
+                  >
+                    {advanced
+                      ? `Exact-version queries evaluated against OSV database. Intelligence status: ${report.assessments?.vulnerabilities?.status || report.intelligence}. Matches: ${report.assessments?.vulnerabilities?.count ?? report.findings.filter((f) => f.rule === "OSV").length}.`
+                      : (report.assessments?.vulnerabilities?.status ||
+                            report.intelligence) === "checked"
+                        ? "OSV vulnerability database was queried for exact package versions."
+                        : (report.assessments?.vulnerabilities?.status ||
+                              report.intelligence) === "partial"
+                          ? "Vulnerability intelligence is partial; some dependencies or advisories could not be completely resolved."
+                          : "Vulnerability intelligence was unavailable during this scan."}
+                  </p>
+                </div>
+              </div>
+
+              <div style={{ marginTop: "24px" }}>
+                <Eyebrow>ANALYSIS LIMITATIONS & NOTICES</Eyebrow>
+                {report.coverage.map((c, i) => (
+                  <div className="coverage-item" key={i}>
+                    <Info size={17} />
+                    <p>{c}</p>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
           <Explainer key={report.id} report={report} onFinding={focus} />

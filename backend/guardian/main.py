@@ -77,24 +77,77 @@ def run(job_id, loader, source, profile):
         findings += known
         findings.sort(key=lambda f: RANK[f.severity], reverse=True)
         stage(job_id, 'Building evidence-backed report')
-        coverage_incomplete = bool(inspection_summary and inspection_summary.inspected < inspection_summary.total) or bool(warnings or dep_warnings or intel_warnings)
-        risk, rationale = assess(findings, coverage_incomplete=coverage_incomplete)
-        report = Report(id=job_id, name=name, version=version, created_at=datetime.now(timezone.utc).isoformat(), source=source, risk=risk, rationale=rationale, findings=findings, dependencies=deps, files_analyzed=count, coverage=warnings[:30]+coverage+intel_warnings, intelligence=intelligence, duration_ms=int((time.monotonic()-started)*1000), engine_version='2', inspections=inspections, inspection_summary=inspection_summary, root_integrity=root_integrity,
-            assessments={'behavior': {'risk':risk,'rationale':rationale},
-                         'vulnerabilities':{'count':len(known),'status':intelligence},
-                         'integrity':{'concerns':sum(f.domain=='integrity' for f in findings),'root_status':root_integrity.status if root_integrity else 'not applicable'},
-                         'inspection':{
-                             'total': inspection_summary.total,
-                             'direct': inspection_summary.direct,
-                             'transitive': inspection_summary.transitive,
-                             'inspected': inspection_summary.inspected,
-                             'skipped': inspection_summary.skipped,
-                             'unavailable': inspection_summary.unavailable,
-                             'unresolved': inspection_summary.unresolved,
-                             'integrity_failed': inspection_summary.integrity_failed,
-                             'not_attempted': inspection_summary.not_attempted,
-                             'status': 'complete' if inspection_summary.total > 0 and inspection_summary.inspected == inspection_summary.total else ('no dependencies' if inspection_summary.total == 0 else 'incomplete')
-                         }})
+        source_warnings = [w for w in warnings if 'Skipped non-UTF-8' in w or 'Skipped unsupported' in w or 'No supported source' in w]
+        parser_issues = [c for c in coverage if 'JavaScript parser unavailable' in c or 'Could not parse' in c]
+        is_manifest_only = any('Manifest-only scan' in c for c in coverage)
+        dep_source_failures = bool(inspection_summary and (inspection_summary.unavailable > 0 or inspection_summary.integrity_failed > 0))
+        source_coverage_incomplete = bool(source_warnings or parser_issues or is_manifest_only or dep_source_failures)
+
+        risk, rationale = assess(findings, source_coverage_incomplete=source_coverage_incomplete)
+
+        source_coverage_status = 'incomplete' if source_coverage_incomplete else ('manifest_only' if is_manifest_only else 'complete')
+        inspection_status = (
+            'complete' if (inspection_summary and inspection_summary.total > 0 and inspection_summary.inspected == inspection_summary.total)
+            else ('no dependencies' if (not inspection_summary or inspection_summary.total == 0) else 'incomplete')
+        )
+
+        report = Report(
+            id=job_id,
+            name=name,
+            version=version,
+            created_at=datetime.now(timezone.utc).isoformat(),
+            source=source,
+            risk=risk,
+            rationale=rationale,
+            findings=findings,
+            dependencies=deps,
+            files_analyzed=count,
+            coverage=warnings[:30] + coverage + intel_warnings,
+            intelligence=intelligence,
+            duration_ms=int((time.monotonic() - started) * 1000),
+            engine_version='2',
+            inspections=inspections,
+            inspection_summary=inspection_summary,
+            root_integrity=root_integrity,
+            assessments={
+                'behavior': {
+                    'risk': risk,
+                    'rationale': rationale,
+                    'coverage_status': source_coverage_status,
+                    'files_inspected': count,
+                },
+                'vulnerabilities': {
+                    'count': len(known),
+                    'status': intelligence,
+                    'rationale': (
+                        'Known vulnerabilities were checked against OSV.' if intelligence == 'checked'
+                        else ('Vulnerability intelligence is partial; some advisories or versions were uninspected.' if intelligence == 'partial'
+                        else ('Vulnerability intelligence was unavailable; known vulnerabilities could not be checked.' if intelligence == 'unavailable'
+                        else 'Vulnerability intelligence was not checked.'))
+                    ),
+                },
+                'integrity': {
+                    'concerns': sum(f.domain == 'integrity' for f in findings),
+                    'root_status': root_integrity.status if root_integrity else 'not applicable',
+                },
+                'inspection': {
+                    'total': inspection_summary.total if inspection_summary else 0,
+                    'direct': inspection_summary.direct if inspection_summary else 0,
+                    'transitive': inspection_summary.transitive if inspection_summary else 0,
+                    'inspected': inspection_summary.inspected if inspection_summary else 0,
+                    'skipped': inspection_summary.skipped if inspection_summary else 0,
+                    'unavailable': inspection_summary.unavailable if inspection_summary else 0,
+                    'unresolved': inspection_summary.unresolved if inspection_summary else 0,
+                    'integrity_failed': inspection_summary.integrity_failed if inspection_summary else 0,
+                    'not_attempted': inspection_summary.not_attempted if inspection_summary else 0,
+                    'status': inspection_status,
+                    'rationale': (
+                        f'{inspection_summary.inspected}/{inspection_summary.total} dependencies inspected.' if inspection_summary and inspection_summary.total > 0
+                        else 'No external dependencies to inspect.'
+                    ),
+                },
+            }
+        )
         with LOCK:
             if cancel.is_set() or JOBS[job_id]['status'] in ('cancelling', 'cancelled'):
                 return

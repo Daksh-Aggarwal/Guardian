@@ -201,3 +201,46 @@ def test_legacy_report_compatibility():
     # Scan history includes legacy report
     history = client.get('/api/scans').json()
     assert any(r['id'] == legacy_id for r in history)
+
+def test_cancellation_while_persistence_in_progress(monkeypatch):
+    import threading
+    from backend.guardian import storage
+    save_started = threading.Event()
+    save_proceed = threading.Event()
+    original_save = storage.save
+
+    def delayed_save(report):
+        save_started.set()
+        save_proceed.wait(timeout=2.0)
+        return original_save(report)
+
+    monkeypatch.setattr(storage, 'save', delayed_save)
+    res = client.post('/api/scans/example/benign')
+    assert res.status_code == 202
+    job_id = res.json()['id']
+
+    assert save_started.wait(timeout=2.0)
+    cancel_res_holder = []
+
+    def call_cancel():
+        cancel_res_holder.append(client.post(f'/api/jobs/{job_id}/cancel'))
+
+    t = threading.Thread(target=call_cancel)
+    t.start()
+    time.sleep(0.05)  # give thread time to block waiting on LOCK
+    save_proceed.set()
+    t.join(timeout=2.0)
+
+    assert len(cancel_res_holder) == 1
+    assert cancel_res_holder[0].status_code == 200
+    assert cancel_res_holder[0].json()['status'] == 'complete'
+    assert client.get(f'/api/scans/{job_id}').status_code == 200
+
+def test_osv_outage_does_not_make_source_coverage_incomplete(monkeypatch):
+    monkeypatch.setenv('GUARDIAN_OSV_ENABLED', 'true')
+    monkeypatch.setattr(httpx, 'post', lambda *a, **kw: (_ for _ in ()).throw(httpx.ConnectError('OSV offline')))
+    report = completed(client.post('/api/scans/example/benign'))
+    assert report['assessments']['behavior']['coverage_status'] == 'complete'
+    assert report['assessments']['vulnerabilities']['status'] == 'unavailable'
+    assert report['risk'] == 'No elevated signals'
+    assert 'source inspection was incomplete' not in report['rationale']

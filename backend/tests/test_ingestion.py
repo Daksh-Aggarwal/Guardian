@@ -117,3 +117,45 @@ def test_aggregate_decompression_limit():
             z.writestr(f'file_{i}.js', chunk)
     with pytest.raises(ValueError, match='expanded limit'):
         archive(data.getvalue())
+
+def test_zip_socket_and_device_rejected():
+    import stat
+    for s_type in [stat.S_IFSOCK, stat.S_IFBLK, stat.S_IFCHR]:
+        data = io.BytesIO()
+        with zipfile.ZipFile(data, 'w') as z:
+            entry = zipfile.ZipInfo('device.js')
+            entry.create_system = 3
+            entry.external_attr = s_type << 16
+            z.writestr(entry, '')
+        with pytest.raises(ValueError, match='links and special files'):
+            archive(data.getvalue())
+
+def test_normalized_path_redundant_slashes_and_dots():
+    data = io.BytesIO()
+    with zipfile.ZipFile(data, 'w') as z:
+        z.writestr('dir/./foo.js', 'console.log(1);')
+        z.writestr('dir/foo.js', 'console.log(2);')
+    with pytest.raises(ValueError, match='duplicate'):
+        archive(data.getvalue())
+
+def test_nested_archive_not_recursively_extracted():
+    inner_zip = zipdata([('inner.js', 'console.log("inner");')])
+    outer = zipdata([
+        ('index.js', 'console.log("outer");'),
+        ('nested.zip', inner_zip)
+    ])
+    files, warnings = archive(outer)
+    assert 'index.js' in files
+    assert 'nested.zip' not in files
+    assert 'inner.js' not in files
+    assert any('nested.zip' in w for w in warnings)
+
+def test_tar_devices_and_fifo_rejected():
+    for ftype in [tarfile.FIFOTYPE, tarfile.CHRTYPE, tarfile.BLKTYPE]:
+        data = io.BytesIO()
+        with tarfile.open(fileobj=data, mode='w:gz') as t:
+            entry = tarfile.TarInfo('special.js')
+            entry.type = ftype
+            t.addfile(entry)
+        with pytest.raises(ValueError, match='links and special files'):
+            archive(data.getvalue(), 'tar')

@@ -13,10 +13,27 @@ export type ScanJob = {
   error?: string;
 };
 export type ReportAssessments = {
-  behavior?: { risk: string; rationale: string };
-  vulnerabilities?: { count: number; status: string };
+  behavior?: {
+    risk: string;
+    rationale: string;
+    coverage_status?: string;
+    files_inspected?: number;
+  };
+  vulnerabilities?: { count: number; status: string; rationale?: string };
   integrity?: { concerns: number; root_status: string };
-  inspection?: { inspected: number; total: number; status: string };
+  inspection?: {
+    total: number;
+    direct: number;
+    transitive: number;
+    inspected: number;
+    skipped: number;
+    unavailable: number;
+    unresolved: number;
+    integrity_failed: number;
+    not_attempted: number;
+    status: string;
+    rationale?: string;
+  };
 };
 export type Finding = {
   id: string;

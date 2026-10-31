@@ -18,11 +18,13 @@
 - [x] Safe scan cancellation endpoint (`POST /api/jobs/{id}/cancel`) and interactive UI control.
 - [x] Simple and Advanced report modes over identical finding models.
 - [x] Deterministic contextual explanation provider citing stored findings.
-- [x] Synthetic demonstration fixtures and comprehensive test suite (120 automated tests).
+- [x] Synthetic demonstration fixtures and comprehensive test suite (151 automated tests).
 - [x] Cooperative thread-safe scan cancellation with explicit job lifecycle states (`queued`, `running`, `cancelling`, `cancelled`, `complete`, `failed`) and atomic pre-persistence checks.
-- [x] Reconciled disjoint dependency inspection accounting across direct/transitive packages and six mutually exclusive statuses.
-- [x] Adversarially hardened OSV intelligence with batch/detail response caps, npm ecosystem validation, CVSS verification, withdrawn advisory filtering, and graceful batch match preservation.
-- [x] Archive ingestion hardening with normalized path collision rejection, control character detection, symlink/hardlink/special entry rejection, and aggregate decompression bomb protection.
+- [x] Reconciled disjoint dependency inspection accounting across direct/transitive packages and six mutually exclusive statuses, guaranteed even at discovery ceilings.
+- [x] Correct OSV querybatch contract validation (0, 1, or multiple vulnerabilities per query; strict positional correspondence; graceful malformed-record handling).
+- [x] OSV bounded pagination (`next_page_token` traversal up to 5 pages per dependency, loop detection, aggregate byte budgets, resilient partial results).
+- [x] Decoupled three-dimensional coverage semantics throughout models and UI (source/behavioral, dependency resolution, vulnerability intelligence).
+- [x] Archive ingestion hardening with normalized path collision rejection, control character detection, symlink/hardlink/special entry rejection, aggregate decompression bomb protection, and unextracted nested archive handling.
 
 ## Next priorities
 

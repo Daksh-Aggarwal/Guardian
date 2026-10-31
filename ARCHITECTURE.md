@@ -64,22 +64,22 @@ The static-flow engine tracks:
 
 Static data-flow findings (`SENSITIVE_TRANSMISSION`) include structured `data_flows` containing ordered `FlowStep` records (source, assignment, argument, parameter, return, sink), variable bindings, and explicit analysis limitations. Statically inferred paths are explicitly labeled as static inference, not proof of runtime execution.
 
-Assessment areas remain strictly independent:
-- **Behavioral assessment**: Evaluates static code behavior findings (excluding OSV and integrity), producing a risk rating (`No elevated signals`, `Review suggested`, `Review recommended`, `High concern`, `Critical concern`) and evidence-backed rationale. If source or dependency coverage is incomplete, the rationale explicitly notes the gap and refuses to imply completeness.
-- **Known vulnerabilities**: Tracks exact-version OSV advisory matches, validated CVSS vectors, and fixed boundaries. Valid batch matches are preserved when advisory enrichment is unavailable, marked with `detail_status = 'unavailable'`.
+Assessment areas and coverage dimensions remain strictly independent (Intelligence Engine 2.1.1):
+- **Behavioral assessment & source coverage**: Evaluates static code behavior findings (excluding OSV and integrity), producing a risk rating (`No elevated signals`, `Review suggested`, `Review recommended`, `High concern`, `Critical concern`) and evidence-backed rationale. If source inspection is incomplete (e.g. parser timeout, unparsed files, or manifest-only scan), the rationale explicitly notes that source inspection was partial. Source coverage status is decoupled from external OSV or dependency retrieval outages.
+- **Known vulnerabilities (OSV)**: Tracks exact-version OSV advisory matches via `/v1/querybatch` with strict 1:1 positional result validation, independent result handling (0, 1, or multiple vulnerabilities), and bounded pagination up to 5 pages per dependency with loop detection. Valid batch matches are preserved when advisory enrichment is unavailable, marked with `detail_status = 'unavailable'`.
 - **Package integrity**: Tracks SRI validation results for the root package and all inspected dependencies.
-- **Source inspection**: Tracks coverage using reconciled status counts (`inspected`, `skipped`, `unavailable`, `unresolved`, `integrity_failed`, `not_attempted`) satisfying strict totals consistency (`direct + transitive == total` and the status sum == `total`).
+- **Dependency inspection coverage**: Tracks lockfile traversal and retrieval using reconciled status counts (`inspected`, `skipped`, `unavailable`, `unresolved`, `integrity_failed`, `not_attempted`) satisfying strict totals consistency (`direct + transitive == total` and the status sum == `total`), guaranteed even when the discovery ceiling (`MAX_DISCOVERED = 2000`) is reached.
 
 ## Security boundaries
 
 - Never execute package code, install dependencies from uploaded manifests, or invoke lifecycle commands.
-- Archive members are read in memory, never extracted to the filesystem. Reject absolute/traversal/Windows paths, control characters (ASCII < 32), null bytes, links, FIFOs, sockets, character/block devices, and duplicate normalized path collisions (`seen_paths`).
+- Archive members are read in memory, never extracted to the filesystem. Reject absolute/traversal/Windows paths, control characters (ASCII < 32), null bytes, links, FIFOs, sockets, character/block devices, and duplicate normalized path collisions (`seen_paths`). Nested archives are treated as unextracted non-source files and skipped.
 - Streaming decompression bomb protection tracks actual bytes read against 1 MB per file and 25 MB aggregate expanded archive limits.
 - Strict Subresource Integrity (SRI): validates compressed bytes using `hashlib` and `hmac.compare_digest` against supplied lockfile and registry hashes across SHA-512, SHA-384, SHA-256, and SHA-1. Extraction is refused upon digest mismatch.
 - Limits: 10 MB input total, 11 MB entire HTTP request, 25 MB expanded archive, 1 MB per file, 500 archive entries.
 - Registry downloads are strictly HTTPS `registry.npmjs.org` only, standard port, no redirects, bounded downloads (20 MB fast / 50 MB deep). No arbitrary URL fetching.
-- OSV responses are bounded: 4 MB batch cap, 2 MB detail cap, 15-second total timeout, query count validation, npm package/ecosystem check, CVSS type verification, and HTTPS-only reference URLs.
+- OSV responses are bounded: 4 MB batch cap, 8 MB aggregate batch pagination cap, 2 MB detail cap, 5-page per-dependency limit, 15-second total timeout, query count validation, npm package/ecosystem check, CVSS type verification, and HTTPS-only reference URLs.
 - Trusted parser uses fixed argv, stdin source data, no shell, 20-second timeout, and 256 MB heap. Bounded call depth (default 8) and module limits (default 100) prevent resource exhaustion.
-- At most two concurrent analysis jobs via `BoundedSemaphore(2)`. Cooperative scan cancellation releases the semaphore slot exactly once.
+- At most two concurrent analysis jobs via `BoundedSemaphore(2)`. Cooperative scan cancellation releases the semaphore slot exactly once. Atomic persistence lock ensures cancellations accepted before persistence discard the report, while scans already persisting under lock complete safely.
 - OSV sends names and versions only; source snippets stay local.
 - Local-only server binding (127.0.0.1) and no authentication. Do not expose this prototype to untrusted network clients.
