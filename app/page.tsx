@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useMemo } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import {
   LayoutDashboard,
   History,
@@ -51,12 +51,14 @@ import ProjectWorkspace from "@/components/project-workspace";
 import RemediationPanel from "@/components/remediation-panel";
 
 export default function Home() {
+  const reducedMotion = useReducedMotion();
   const [reports, setReports] = useState<Report[]>([]);
   const [report, setReport] = useState<Report | null>(null);
   const [page, setPage] = useState<
     "Overview" | "Project workspace" | "Scan history" | "How it works"
   >("Overview");
-  const [dark, setDark] = useState(false);
+  const [dark, setDark] = useState(true);
+  const [themeReady, setThemeReady] = useState(false);
   const [job, setJob] = useState<ScanJob | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -102,9 +104,9 @@ export default function Home() {
     const storedTheme = localStorage.getItem("guardian-theme");
     const isDark =
       storedTheme === "dark" ||
-      (!storedTheme &&
-        window.matchMedia("(prefers-color-scheme: dark)").matches);
+      !storedTheme;
     setDark(isDark);
+    setThemeReady(true);
 
     const storedFilter = sessionStorage.getItem("guardian-dataset-filter") as
       "all" | "real" | "demo" | null;
@@ -148,9 +150,10 @@ export default function Home() {
   }, [datasetFilter]);
 
   useEffect(() => {
+    if (!themeReady) return;
     document.documentElement.dataset.theme = dark ? "dark" : "light";
     localStorage.setItem("guardian-theme", dark ? "dark" : "light");
-  }, [dark]);
+  }, [dark, themeReady]);
 
   const openReport = useCallback((r: Report) => {
     setReport(r);
@@ -682,9 +685,9 @@ export default function Home() {
           ) : (
             /* VIEW 4: COMMAND CENTRE (Overview or Scan History) */
             <motion.div
-              initial={{ opacity: 0, y: 10 }}
+              initial={false}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.2 }}
+              transition={{ duration: reducedMotion ? 0 : 0.32 }}
             >
               {/* Command Centre Page Header */}
               <div className="page-heading">
@@ -1246,7 +1249,7 @@ export default function Home() {
                                   style={{
                                     background: "rgba(99, 102, 241, 0.12)",
                                     border: "1px solid rgba(99, 102, 241, 0.3)",
-                                    color: "#818cf8",
+                                    color: "var(--accent)",
                                     borderRadius: "4px",
                                     padding: "3px 8px",
                                     fontSize: "11px",

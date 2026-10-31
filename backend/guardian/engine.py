@@ -3,6 +3,7 @@ import re
 import subprocess
 from pathlib import Path
 from uuid import uuid4
+import yaml
 from .models import Dependency, Evidence, Finding, DataFlow
 from .config import parser_limits
 
@@ -31,46 +32,66 @@ def typo(name):
 def analyze(files, limits=None, timeout=20):
     findings, dependencies, coverage, count = [], [], [], 0
     name, version = 'Uploaded project', 'unversioned'
-    manifests = sorted((p for p in files if Path(p).name in {'package.json', 'package-lock.json'}), key=lambda p: (len(Path(p).parts), Path(p).name != 'package.json', p))
+    manifests = sorted(
+        (p for p in files if Path(p).name in {'package.json', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock'}),
+        key=lambda p: (len(Path(p).parts), Path(p).name != 'package.json', p)
+    )
     for index, path in enumerate(manifests):
         try:
-            manifest = json.loads(files[path])
+            p_name = Path(path).name
+            if p_name.endswith('.json'):
+                manifest = json.loads(files[path])
+            elif p_name in {'pnpm-lock.yaml', 'yarn.lock'}:
+                manifest = yaml.safe_load(files[path])
+            else:
+                continue
+
             if not isinstance(manifest, dict):
                 raise ValueError('Manifest must be an object')
-            if index == 0:
+            if index == 0 and p_name == 'package.json':
                 name, version = str(manifest.get('name', name)), str(manifest.get('version', version))
             scripts = manifest.get('scripts', {})
             if not isinstance(scripts, dict):
                 raise ValueError('scripts must be an object')
             for stage in ['preinstall', 'install', 'postinstall', 'prepare']:
-                command = scripts.get(stage)
-                if not command:
-                    continue
-                if not isinstance(command, str):
-                    raise ValueError('Script commands must be strings')
-                remote = bool(re.search(r'\b(curl|wget)\b.*https?://', command))
-                execution = bool(re.search(r'\|\s*(sh|bash)|\beval\b|\bnode\s+-e', command))
-                evidence = Evidence(file=path, line=next((i+1 for i,l in enumerate(files[path].splitlines()) if '"'+stage+'"' in l), 1), snippet=command[:500], detail=stage + ' lifecycle command')
-                findings.append(finding('INSTALL_SCRIPT', 'Runs code during installation', 'Installation', 'info', 'high', f'{stage}: {command[:200]}', 'This package can run a command automatically when it is installed. Many legitimate packages do this.', 'The command runs with the permissions of the person installing the package.', 'Review this command and its referenced files before installation. Consider npm install --ignore-scripts.', [evidence]))
-                if remote:
-                    findings.append(finding('INSTALL_REMOTE', 'Installation downloads a remote payload', 'Execution', 'high' if execution else 'medium', 'high', 'An installation command downloads from a remote URL' + (' and pipes to a shell.' if execution else '.'), 'The installer retrieves code or data from outside the package.' + (' It sends the download directly to a command interpreter.' if execution else ''), 'Remote content can change independently of the package and may run with your permissions.', 'Do not run the installer until you have verified the remote source and command. Prefer a reviewed, pinned artifact.', [evidence]))
+                    command = scripts.get(stage)
+                    if not command:
+                        continue
+                    if not isinstance(command, str):
+                        raise ValueError('Script commands must be strings')
+                    remote = bool(re.search(r'\b(curl|wget)\b.*https?://', command))
+                    execution = bool(re.search(r'\|\s*(sh|bash)|\beval\b|\bnode\s+-e', command))
+                    evidence = Evidence(file=path, line=next((i+1 for i,l in enumerate(files[path].splitlines()) if '"'+stage+'"' in l), 1), snippet=command[:500], detail=stage + ' lifecycle command')
+                    findings.append(finding('INSTALL_SCRIPT', 'Runs code during installation', 'Installation', 'info', 'high', f'{stage}: {command[:200]}', 'This package can run a command automatically when it is installed. Many legitimate packages do this.', 'The command runs with the permissions of the person installing the package.', 'Review this command and its referenced files before installation. Consider npm install --ignore-scripts.', [evidence]))
+                    if remote:
+                        findings.append(finding('INSTALL_REMOTE', 'Installation downloads a remote payload', 'Execution', 'high' if execution else 'medium', 'high', 'An installation command downloads from a remote URL' + (' and pipes to a shell.' if execution else '.'), 'The installer retrieves code or data from outside the package.' + (' It sends the download directly to a command interpreter.' if execution else ''), 'Remote content can change independently of the package and may run with your permissions.', 'Do not run the installer until you have verified the remote source and command. Prefer a reviewed, pinned artifact.', [evidence]))
             for field in ['dependencies', 'devDependencies', 'optionalDependencies']:
                 group = manifest.get(field, {})
-                if not isinstance(group, dict):
-                    raise ValueError(field + ' must be an object')
-                for dep, spec in group.items():
-                    if isinstance(spec, str):
-                        dependencies.append(Dependency(name=dep, version=spec, direct=True, source=path))
-                    elif isinstance(spec, dict) and 'version' in spec:  # lockfile v1
-                        dependencies.append(Dependency(name=dep, version=str(spec['version']), direct=False, source=path))
+                if isinstance(group, dict):
+                    for dep, spec in group.items():
+                        if isinstance(spec, str):
+                            dependencies.append(Dependency(name=dep, version=spec, direct=True, source=path))
+                        elif isinstance(spec, dict) and 'version' in spec:  # lockfile v1
+                            dependencies.append(Dependency(name=dep, version=str(spec['version']), direct=False, source=path))
             packages = manifest.get('packages', {})
-            if not isinstance(packages, dict):
-                raise ValueError('packages must be an object')
-            direct_names = set(packages.get('', {}).get('dependencies', {})) if isinstance(packages.get('', {}), dict) else set()
-            for location, package in packages.items():
-                if location and isinstance(package, dict) and package.get('version'):
-                    dep = package.get('name') or location.split('node_modules/')[-1]
-                    dependencies.append(Dependency(name=dep, version=str(package['version']), direct=dep in direct_names, source=path))
+            if isinstance(packages, dict):
+                direct_names = set(packages.get('', {}).get('dependencies', {})) if isinstance(packages.get('', {}), dict) else set()
+                for location, package in packages.items():
+                    if location and isinstance(package, dict) and package.get('version'):
+                        dep = package.get('name') or location.split('node_modules/')[-1]
+                        dependencies.append(Dependency(name=dep, version=str(package['version']), direct=dep in direct_names, source=path))
+                    elif location and isinstance(package, dict) and '@' in location:
+                        from .dependencies import _parse_pnpm_key
+                        dep_name, dep_ver = _parse_pnpm_key(location, package)
+                        dependencies.append(Dependency(name=dep_name, version=dep_ver, direct=False, source=path))
+
+            if '__metadata' in manifest:
+                from .dependencies import _parse_yarn_descriptor
+                for yk, yv in manifest.items():
+                    if yk != '__metadata' and isinstance(yv, dict) and yv.get('version'):
+                        descriptors = [_parse_yarn_descriptor(d) for d in yk.split(',')]
+                        primary_name = descriptors[0][0]
+                        dependencies.append(Dependency(name=primary_name, version=str(yv['version']), direct=False, source=path))
         except (ValueError, TypeError, AttributeError) as error:
             raise ValueError(f'Invalid manifest {path}: {error}')
     py_manifests = sorted(
