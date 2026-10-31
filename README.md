@@ -58,7 +58,22 @@
   - Strict citation validation: every citation must reference an existing report finding; fabricated citations are automatically rejected.
   - Resilient provider fallback: graceful degradation to local deterministic explanations upon missing API key, AI disablement, network failure, or API quota/timeout.
   - Coverage-aware behavioral presentation distinguishing complete source coverage, partial coverage, and unavailable assessments.
-- Eight synthetic fixtures, including benign HTTP/environment access, sensitive data flow, and installer behaviors. Fixture source is test data: never execute it.
+- Guardian Autopilot — Remediation Agent 1.0 (Local Project Remediation):
+  - Local project connection using modern Browser File System Access API (`window.showDirectoryPicker` in read-only mode).
+  - Deterministic project understanding: manifests, lockfiles, framework detection (Next.js, Express, React, Vite, NestJS, Fastify, etc.), runtime engines, language detection (TypeScript/JavaScript), and test configurations.
+  - Configurable snapshot boundaries: max 250 files, 1 MB per file, 10 MB aggregate snapshot, with automatic rejection of path traversal, secret-bearing files (`.env`, private keys), and standard exclusions (`.git`, `node_modules`, binaries).
+  - Ephemeral in-memory project snapshots with 30-minute inactivity TTL and LRU session eviction; source files are never persisted into SQLite.
+  - Dedicated, unchecked-by-default project-code consent modal for external AI remediation planning, completely decoupled from conversational AI consent.
+  - Structured remediation plans powered by Gemini (or local deterministic planner fallback) with Pydantic validation: summary, expected outcome, trade-offs, potential regressions, assumptions, manual steps, and verification strategies.
+  - Strict text-edit validation: exact verbatim `old_text` -> `new_text` replacements, requiring anchors to appear exactly once, non-overlapping edits, SHA-256 pre-verification, and standard unified diff generation.
+  - Interactive unified diff viewer with additions, deletions, line numbers, file-by-file navigation, and downloadable `.patch` bundles.
+  - Explicit user approval workflow with Git branch advisory and rollback safeguard warnings.
+  - Browser-side file modification requesting `readwrite` permission only upon user approval, verifying SHA-256 before modification, capturing local IndexedDB backup snapshots, applying sequential writes, and providing automatic partial-write rollback.
+  - Safe Undo operation verifying post-application file states before restoring originals from IndexedDB.
+  - Deterministic outcome verification: rescans modified code, compares pre-remediation vs post-remediation findings, categorizing resolved, persistent, and newly introduced signals.
+  - Strict execution boundaries: safe static analysis only; manual package commands (e.g. `npm install`, `npm test`) are presented clearly but never automatically executed.
+  - Cross-browser compatibility fallback for non-Chromium browsers with ZIP archive inspection and `.patch` bundle export.
+- Nine synthetic fixtures, including benign HTTP/environment access, sensitive data flow, installer behaviors, and full remediation demonstration. Fixture source is test data: never execute it.
 
 ## Setup
 
@@ -141,9 +156,19 @@ Webpack mode is selected explicitly because Turbopack's CSS worker could not bin
 1. Click **Everyday package**. The actual fixture is analyzed: environment and public HTTP access are observations, not elevated risk.
 2. Click **Sensitive data flow**. Open the sensitive-transmission finding, switch to **Advanced**, and inspect the step-by-step source-to-sink path, intermediate variable bindings, line/column numbers, and analysis limitations.
 3. Click **Suspicious installer**. See multiple independent and correlated signals. Ask **What should I do next?** and follow a citation back to its finding.
-4. Upload `fixtures/postinstall.zip`, or inspect a real npm package by name/version. Select **Fast** or **Deeper** dependency inspection budget.
-5. Review **Dependencies** tab to see direct/transitive dependency trees, lockfile and registry checksum verifications, and findings attributed per dependency.
-6. Review **Coverage**, particularly if OSV is unavailable or budget limits were reached.
+4. Click **Project workspace** in the sidebar (or **Open project folder** on the dashboard).
+   - Select `fixtures/remediation-demo` (or upload its ZIP).
+   - See detected project metadata (Jest test runner), file counts, and exclusions.
+   - Click **Inspect project** to run a real scan.
+   - Review findings (e.g. `INSTALL_REMOTE` lifecycle execution risk).
+   - Click **Prepare a fix with Guardian**.
+   - Review the generated remediation plan, trade-offs, manual steps (`npm install`), and inspect the exact unified diff removing the dangerous hook.
+   - Click **Approve and apply** to write the change to disk with automatic IndexedDB rollback backup.
+   - Click **Rescan & verify outcome** to verify that the installer finding is resolved!
+   - Test **Undo latest changes** to safely restore original files.
+5. Upload `fixtures/postinstall.zip`, or inspect a real npm package by name/version. Select **Fast** or **Deeper** dependency inspection budget.
+6. Review **Dependencies** tab to see direct/transitive dependency trees, lockfile and registry checksum verifications, and findings attributed per dependency.
+7. Review **Coverage**, particularly if OSV is unavailable or budget limits were reached.
 
 Example scans are explicitly marked synthetic. No prefilled or fabricated report data is used.
 
@@ -156,7 +181,7 @@ Verified production screenshot: [Advanced report](docs/screenshots/advanced-repo
 - Production `npm run build`: passed (Next.js 16.4.3 / webpack).
 - `npm run typecheck`: passed (strict TypeScript 5.9).
 - `npm run format`: passed (Prettier).
-- `pytest backend/tests -q`: 151 tests passed in ~4.8s.
+- `pytest backend/tests -q`: 180 tests passed in ~4.9s.
 - Integration tests verified:
   1. Benign synthetic package (observations only).
   2. Sensitive-data source-to-sink flow (step-by-step trace).
@@ -174,6 +199,8 @@ Verified production screenshot: [Advanced report](docs/screenshots/advanced-repo
   14. Fast and deep inspection profiles (bounded depth/package budgets).
   15. Simple and Advanced report rendering (everyday vs technical evidence).
   16. JSON export & legacy report compatibility (backward compatibility with legacy v1 reports).
+  17. Guardian Cognitive Intelligence 1.0 (Gemini 3.8 Flash, secret redaction, citation validation, deterministic fallback).
+  18. Guardian Autopilot Remediation 1.0 (Local project access, bounds, edit validation, unified diffs, approval, browser application, IndexedDB backup rollback, safe undo, and verification).
 
 `backend/requirements.lock.txt` records the tested Python dependency versions; install it instead of `requirements.txt` to reproduce this environment.
 

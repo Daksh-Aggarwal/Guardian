@@ -29,6 +29,15 @@
 - [x] Privacy-first context management: explicit user consent controls, automated secret redaction layer, and compact context minimization.
 - [x] Multi-turn report-scoped conversation sessions stored in SQLite with strict report isolation and bounded turn limits.
 - [x] Coverage-aware behavioral assessment presentation and duplicate advisory aggregation.
+- [x] Guardian Autopilot — Remediation Agent 1.0: Local project connection via Browser File System Access API (`window.showDirectoryPicker` in read-only initial mode).
+- [x] Ephemeral in-memory project snapshot retention (30-min inactivity TTL, 20-session LRU ceiling) with deterministic project understanding (frameworks, runtime, language, test runners).
+- [x] Decoupled project-code AI consent boundary with automated secret redaction.
+- [x] Structured remediation planning with Pydantic schemas, prompt-injection defense fences, and resilient deterministic fallback.
+- [x] Strict text-edit validation: exact verbatim `old_text` -> `new_text` replacements, requiring anchors to appear exactly once, non-overlapping edit checks, SHA-256 pre-verification, and unified diff generation.
+- [x] Polished interactive unified diff viewer with additions, deletions, line numbers, file tabs, and downloadable `.patch` bundles.
+- [x] Explicit user approval workflow with Git branch advisories.
+- [x] Browser-side `readwrite` file application with SHA-256 pre-flight checks, automatic IndexedDB rollback backups, partial-write recovery, and safe undo verification.
+- [x] Deterministic rescan & outcome verification comparing pre-remediation and post-remediation security findings.
 
 ## Next priorities
 

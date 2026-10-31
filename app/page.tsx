@@ -19,11 +19,15 @@ import {
   Search,
   X,
   AlertCircle,
+  FolderOpen,
+  Wrench,
 } from "lucide-react";
-import { api, Report, ScanJob } from "@/lib/types";
+import { api, Report, ScanJob, Finding } from "@/lib/types";
 import { Brand, Eyebrow, Empty, Note } from "@/components/ui";
 import ScanPanel from "@/components/scan-panel";
 import ReportView from "@/components/report";
+import ProjectWorkspace from "@/components/project-workspace";
+import RemediationPanel from "@/components/remediation-panel";
 export default function Home() {
   const [reports, setReports] = useState<Report[]>([]),
     [report, setReport] = useState<Report | null>(null),
@@ -33,7 +37,9 @@ export default function Home() {
     [error, setError] = useState(""),
     [connected, setConnected] = useState(false),
     [loading, setLoading] = useState(true),
-    [search, setSearch] = useState("");
+    [search, setSearch] = useState(""),
+    [remediationOpen, setRemediationOpen] = useState(false),
+    [remediationFinding, setRemediationFinding] = useState<string | null>(null);
   const busy =
     job?.status === "running" ||
     job?.status === "queued" ||
@@ -146,6 +152,7 @@ export default function Home() {
         <nav>
           {[
             { name: "Overview", icon: LayoutDashboard },
+            { name: "Project workspace", icon: FolderOpen },
             { name: "Scan history", icon: History },
             { name: "How it works", icon: BookOpen },
           ].map(({ name, icon: Icon }) => (
@@ -220,10 +227,42 @@ export default function Home() {
             </div>
           )}
           {report ? (
-            <ReportView
-              key={report.id}
-              report={report}
-              onBack={() => navigate("Scan history")}
+            <>
+              <ReportView
+                key={report.id}
+                report={report}
+                onBack={() => navigate("Scan history")}
+                onPrepareFix={(f) => {
+                  setRemediationFinding(f.id);
+                  setRemediationOpen(true);
+                }}
+              />
+              {remediationOpen && (
+                <RemediationPanel
+                  report={report}
+                  targetFindingId={remediationFinding}
+                  onClose={() => setRemediationOpen(false)}
+                  onFindingClick={(fid) => {
+                    setRemediationOpen(false);
+                    setTimeout(() => {
+                      document
+                        .getElementById("finding-" + fid)
+                        ?.scrollIntoView({
+                          behavior: "smooth",
+                          block: "center",
+                        });
+                    }, 100);
+                  }}
+                />
+              )}
+            </>
+          ) : page === "Project workspace" ? (
+            <ProjectWorkspace
+              onBack={() => navigate("Overview")}
+              onReportGenerated={(r) => {
+                setReport(r);
+                refresh();
+              }}
             />
           ) : page === "How it works" ? (
             <Methodology />
@@ -246,22 +285,38 @@ export default function Home() {
                       : "Every inspection, with its evidence intact."}
                   </p>
                 </div>
-                <button
-                  className="button primary"
-                  onClick={() => {
-                    navigate("Overview");
-                    setTimeout(
-                      () =>
-                        document
-                          .getElementById("new-scan")
-                          ?.scrollIntoView({ behavior: "smooth" }),
-                      50,
-                    );
-                  }}
+                <div
+                  style={{ display: "flex", gap: "10px", alignItems: "center" }}
                 >
-                  <Plus size={17} />
-                  New scan
-                </button>
+                  <button
+                    className="button secondary"
+                    onClick={() => navigate("Project workspace")}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "6px",
+                    }}
+                  >
+                    <FolderOpen size={16} />
+                    Open project folder
+                  </button>
+                  <button
+                    className="button primary"
+                    onClick={() => {
+                      navigate("Overview");
+                      setTimeout(
+                        () =>
+                          document
+                            .getElementById("new-scan")
+                            ?.scrollIntoView({ behavior: "smooth" }),
+                        50,
+                      );
+                    }}
+                  >
+                    <Plus size={17} />
+                    New scan
+                  </button>
+                </div>
               </div>
               {page === "Overview" && (
                 <>

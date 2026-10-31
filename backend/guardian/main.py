@@ -12,6 +12,18 @@ from .engine import analyze, assess, RANK, finding
 from .explanations import EvidenceExplainer
 from .intelligence import check_osv
 from .models import Dependency, PackageRequest, Question, Report, Evidence, AskRequest, AdvisorResponse, FindingCitation, AIStatus
+from .remediation_models import (
+    ProjectIngestRequest,
+    PlanGenerationRequest,
+    PlanApprovalRequest,
+    PlanAppliedRecord,
+    VerificationResult,
+    VerificationRequest,
+    RemediationPlan,
+    ProjectMetadata
+)
+from .projects import project_manager
+from .remediation import remediation_planner
 from .limits import RequestSizeLimit
 from .dependencies import RegistrySession, Retrieved, inspect_dependencies
 from .config import Budget
@@ -177,10 +189,11 @@ def run(job_id, loader, source, profile):
                 JOBS[job_id].update(status='cancelled', stage='Scan cancelled')
         SLOTS.release()
 
-def submit(loader, source, profile="fast"):
+def submit(loader, source, profile="fast", job_id=None):
     if not SLOTS.acquire(blocking=False):
         raise HTTPException(429, 'Two scans are already running. Try again shortly.')
-    job_id = uuid4().hex
+    if not job_id:
+        job_id = uuid4().hex
     with LOCK:
         # Only retain the most recent completed job states; reports stay in SQLite.
         if len(JOBS) >= 100:
@@ -361,3 +374,111 @@ def cancel_job(job_id: str):
         if state['status'] == 'cancelling':
             return dict(state)
         return dict(state)
+
+@app.post('/api/scans/project', status_code=202)
+def scan_project(request: ProjectIngestRequest):
+    if not request.files:
+        raise HTTPException(400, 'Project must contain at least one file.')
+    job_id = uuid4().hex
+    try:
+        snapshot = project_manager.save_snapshot(job_id, request.name, request.files)
+    except ValueError as err:
+        raise HTTPException(400, str(err))
+
+    try:
+        return submit(lambda: (dict(snapshot.files), []), f"local project: {request.name}", profile=request.profile, job_id=job_id)
+    except Exception:
+        project_manager.discard_snapshot(job_id)
+        raise
+
+@app.get('/api/projects/{scan_id}/metadata')
+def project_metadata(scan_id: str):
+    snap = project_manager.get_snapshot(scan_id)
+    if not snap:
+        raise HTTPException(404, 'Project snapshot not found or has expired.')
+    return snap.metadata
+
+@app.delete('/api/projects/{scan_id}')
+def discard_project(scan_id: str):
+    discarded = project_manager.discard_snapshot(scan_id)
+    return {'status': 'discarded' if discarded else 'not_found'}
+
+@app.post('/api/scans/{scan_id}/remediation/plan')
+def create_remediation_plan(scan_id: str, request: PlanGenerationRequest):
+    rep = storage.get(scan_id)
+    if not rep:
+        raise HTTPException(404, 'Report not found')
+    snap = project_manager.get_snapshot(scan_id)
+    if not snap:
+        raise HTTPException(400, 'Project snapshot is not available or has expired (30-minute inactivity limit). Please rescan or reconnect the project to prepare a remediation plan.')
+
+    # Validate finding_ids if passed
+    if request.finding_ids:
+        valid_ids = {f.id for f in rep.findings}
+        invalid = [fid for fid in request.finding_ids if fid not in valid_ids]
+        if invalid:
+            raise HTTPException(404, f"Findings not found in report: {invalid}")
+
+    plan = remediation_planner.generate_plan(
+        report=rep,
+        snapshot=snap,
+        finding_ids=request.finding_ids,
+        consent=request.consent,
+        instructions=request.instructions
+    )
+    storage.save_plan(plan)
+    return plan
+
+@app.get('/api/remediation/plans/{plan_id}')
+def get_remediation_plan(plan_id: str):
+    plan = storage.get_plan(plan_id)
+    if not plan:
+        raise HTTPException(404, 'Remediation plan not found')
+    return plan
+
+@app.post('/api/remediation/plans/{plan_id}/approve')
+def approve_remediation_plan(plan_id: str):
+    plan = storage.update_plan_status(plan_id, 'approved')
+    if not plan:
+        raise HTTPException(404, 'Remediation plan not found')
+    return plan
+
+@app.post('/api/remediation/plans/{plan_id}/reject')
+def reject_remediation_plan(plan_id: str):
+    plan = storage.update_plan_status(plan_id, 'rejected')
+    if not plan:
+        raise HTTPException(404, 'Remediation plan not found')
+    return plan
+
+@app.post('/api/remediation/plans/{plan_id}/applied')
+def mark_plan_applied(plan_id: str, record: PlanAppliedRecord):
+    status = 'applied' if record.success else 'failed'
+    plan = storage.update_plan_status(plan_id, status)
+    if not plan:
+        raise HTTPException(404, 'Remediation plan not found')
+    return plan
+
+@app.post('/api/remediation/plans/{plan_id}/verification')
+def verify_remediation_plan(plan_id: str, req: VerificationRequest):
+    plan = storage.get_plan(plan_id)
+    if not plan:
+        raise HTTPException(404, 'Remediation plan not found')
+    orig_rep = storage.get(plan.scan_id)
+    if not orig_rep:
+        raise HTTPException(404, 'Original report not found')
+    rescanned_rep = storage.get(req.rescanned_scan_id)
+    if not rescanned_rep:
+        raise HTTPException(404, 'Rescanned report not found')
+
+    verification = remediation_planner.verify_plan(plan, orig_rep, rescanned_rep)
+    storage.update_plan_status(plan_id, 'verified')
+    storage.save_verification(verification)
+    return verification
+
+@app.get('/api/remediation/plans/{plan_id}/verification')
+def get_plan_verification(plan_id: str):
+    verification = storage.get_verification(plan_id)
+    if not verification:
+        raise HTTPException(404, 'Verification record not found')
+    return verification
+

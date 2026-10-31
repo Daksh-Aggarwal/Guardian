@@ -21,6 +21,14 @@
 - `backend/guardian/intelligence.py`: exact-version OSV batch queries, bounded advisory enrichment (CVSS, ranges, fixes), validation guards, and coverage tracking.
 - `backend/guardian/explanations.py`: `EvidenceExplainer` deterministic provider citing existing findings.
 - `backend/guardian/advisor.py`: `GeminiAdvisor` provider using `google-genai` SDK, structured output parsing, citation validation, prompt-injection defense fences, and provider factory (`get_advisor`).
+- `backend/guardian/projects.py`: ephemeral in-memory project snapshots (30-min inactivity TTL, 20-session LRU ceiling), deterministic project understanding (frameworks, runtime, language, test framework), and safe path normalization.
+- `backend/guardian/remediation.py`: structured remediation planning (Gemini and deterministic fallbacks), strict text-edit validation (`old_text` -> `new_text` uniqueness and hash verification), unified diff generation, and pre/post scan verification comparison.
+- `backend/guardian/remediation_models.py`: Pydantic contracts for remediation plans, proposed file changes, text edits, project metadata, and verification results.
+- `lib/fs-access.ts`: browser File System Access API integration, permission lifecycle (`read` on open, `readwrite` only upon approved apply), SHA-256 pre-check, partial-write rollback, and patch bundle generation.
+- `lib/indexeddb-backup.ts`: browser IndexedDB persistence for local recovery snapshots and safe undo operations.
+- `components/project-workspace.tsx`: local project directory picker, exclusion inventory drawer, and project scan orchestration.
+- `components/remediation-panel.tsx`: remediation approval workflow, project-code AI consent modal, git branch advisory, apply execution, undo, and rescan verification.
+- `components/remediation-plan.tsx` and `components/diff-viewer.tsx`: structured plan presentation and interactive unified diff viewer.
 - `backend/guardian/context.py`: privacy-first context builder, duplicate advisory aggregation, relevant finding selection, and bounded conversation history.
 - `backend/guardian/redact.py`: automated secret redaction layer stripping API keys, tokens, JWTs, private keys, passwords, and auth headers before external transmission.
 - `backend/guardian/storage.py`: SQLite report persistence, historical retrieval, and report-scoped multi-turn conversation and message persistence.
@@ -59,6 +67,16 @@ Workers perform an atomic check under concurrency lock immediately before callin
 | DELETE | `/api/scans/{id}/conversation` | Clear conversation history for report |
 | POST | `/api/scans/{id}/conversation/new` | Start a new conversation session for report |
 | POST | `/api/scans/{id}/explain` | Contextual grounded explanation query (legacy compatibility) |
+| POST | `/api/scans/project` | Ingest local project snapshot and trigger scan |
+| GET | `/api/projects/{id}/metadata` | Deterministic project metadata (framework, runtime, language, test framework) |
+| DELETE | `/api/projects/{id}` | Discard ephemeral in-memory project snapshot |
+| POST | `/api/scans/{id}/remediation/plan` | Generate and validate structured remediation plan (Gemini / deterministic) |
+| GET | `/api/remediation/plans/{id}` | Retrieve stored remediation plan |
+| POST | `/api/remediation/plans/{id}/approve` | Mark remediation plan as approved by user |
+| POST | `/api/remediation/plans/{id}/reject` | Mark remediation plan as rejected by user |
+| POST | `/api/remediation/plans/{id}/applied` | Record plan application result from browser |
+| POST | `/api/remediation/plans/{id}/verification` | Compare baseline and rescanned reports to verify remediation outcomes |
+| GET | `/api/remediation/plans/{id}/verification` | Retrieve stored verification record |
 
 ## Analysis and risk
 

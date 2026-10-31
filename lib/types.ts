@@ -203,3 +203,89 @@ export type Advisory = {
   aliases: string[];
   detail_status: string;
 };
+
+export type TextEdit = {
+  old_text: string;
+  new_text: string;
+};
+
+export type ProposedFileChange = {
+  file_path: string;
+  operation: "update" | "create";
+  original_sha256: string;
+  proposed_sha256: string;
+  edits: TextEdit[];
+  diff: string;
+  rationale: string;
+  finding_ids: string[];
+  expected_result: string;
+  created_content?: string | null;
+};
+
+export type RemediationPlan = {
+  plan_id: string;
+  scan_id: string;
+  title: string;
+  summary: string;
+  priority: "critical" | "high" | "medium" | "low";
+  expected_outcome: string;
+  findings_addressed: string[];
+  proposed_changes: ProposedFileChange[];
+  tradeoffs: string[];
+  potential_risks: string[];
+  assumptions: string[];
+  manual_steps: string[];
+  recommended_verification: string[];
+  limitations: string[];
+  status:
+    | "proposed"
+    | "approved"
+    | "rejected"
+    | "applying"
+    | "applied"
+    | "verified"
+    | "failed"
+    | "stale";
+  created_at: string;
+};
+
+export type PlanGenerationRequest = {
+  finding_ids?: string[] | null;
+  consent?: boolean;
+  instructions?: string | null;
+};
+
+export type PlanAppliedRecord = {
+  applied_at: string;
+  modified_files: string[];
+  success: boolean;
+  error?: string | null;
+};
+
+export type VerificationResult = {
+  plan_id: string;
+  scan_id: string;
+  rescanned_scan_id: string;
+  verified_at: string;
+  resolved_findings: string[];
+  persistent_findings: string[];
+  new_findings: string[];
+  coverage_changed: boolean;
+  source_coverage_status: string;
+  summary: string;
+  outstanding_manual_steps: string[];
+};
+
+export type ProjectMetadata = {
+  scan_id: string;
+  name: string;
+  framework?: string | null;
+  runtime?: string | null;
+  language?: string | null;
+  test_framework?: string | null;
+  total_files: number;
+  total_bytes: number;
+  manifest_paths: string[];
+  created_at: string;
+  expires_at: string;
+};

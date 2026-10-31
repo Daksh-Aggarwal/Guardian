@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import List, Optional
 from uuid import uuid4
 from .models import Report, ConversationMessage, ConversationSession, FindingCitation
+from .remediation_models import RemediationPlan, VerificationResult
 
 def connection():
     path = os.getenv('GUARDIAN_DB', str(Path(__file__).resolve().parents[1] / 'guardian.sqlite3'))
@@ -35,6 +36,24 @@ def connection():
         )
     ''')
     db.execute('CREATE INDEX IF NOT EXISTS idx_messages_scan ON messages(scan_id, conversation_id, created_at)')
+    db.execute('''
+        CREATE TABLE IF NOT EXISTS remediation_plans (
+            plan_id TEXT PRIMARY KEY,
+            scan_id TEXT NOT NULL,
+            status TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            plan_json TEXT NOT NULL
+        )
+    ''')
+    db.execute('CREATE INDEX IF NOT EXISTS idx_plans_scan ON remediation_plans(scan_id)')
+    db.execute('''
+        CREATE TABLE IF NOT EXISTS verification_results (
+            plan_id TEXT PRIMARY KEY,
+            scan_id TEXT NOT NULL,
+            verified_at TEXT NOT NULL,
+            result_json TEXT NOT NULL
+        )
+    ''')
     return db
 
 def save(report: Report):
@@ -172,3 +191,46 @@ def clear_conversation(scan_id: str, conversation_id: Optional[str] = None):
         else:
             db.execute('DELETE FROM messages WHERE scan_id = ?', (scan_id,))
             db.execute('DELETE FROM conversations WHERE scan_id = ?', (scan_id,))
+
+def save_plan(plan: RemediationPlan):
+    with connection() as db:
+        db.execute(
+            'INSERT OR REPLACE INTO remediation_plans (plan_id, scan_id, status, created_at, plan_json) '
+            'VALUES (?, ?, ?, ?, ?)',
+            (plan.plan_id, plan.scan_id, plan.status, plan.created_at, plan.model_dump_json())
+        )
+
+def get_plan(plan_id: str) -> Optional[RemediationPlan]:
+    with connection() as db:
+        row = db.execute('SELECT plan_json FROM remediation_plans WHERE plan_id = ?', (plan_id,)).fetchone()
+    if row:
+        return RemediationPlan.model_validate_json(row[0])
+    return None
+
+def get_plans_for_scan(scan_id: str) -> List[RemediationPlan]:
+    with connection() as db:
+        rows = db.execute('SELECT plan_json FROM remediation_plans WHERE scan_id = ? ORDER BY created_at DESC', (scan_id,)).fetchall()
+    return [RemediationPlan.model_validate_json(r[0]) for r in rows]
+
+def update_plan_status(plan_id: str, status: str) -> Optional[RemediationPlan]:
+    plan = get_plan(plan_id)
+    if not plan:
+        return None
+    plan.status = status
+    save_plan(plan)
+    return plan
+
+def save_verification(verification: VerificationResult):
+    with connection() as db:
+        db.execute(
+            'INSERT OR REPLACE INTO verification_results (plan_id, scan_id, verified_at, result_json) '
+            'VALUES (?, ?, ?, ?)',
+            (verification.plan_id, verification.scan_id, verification.verified_at, verification.model_dump_json())
+        )
+
+def get_verification(plan_id: str) -> Optional[VerificationResult]:
+    with connection() as db:
+        row = db.execute('SELECT result_json FROM verification_results WHERE plan_id = ?', (plan_id,)).fetchone()
+    if row:
+        return VerificationResult.model_validate_json(row[0])
+    return None
