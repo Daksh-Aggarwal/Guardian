@@ -15,7 +15,7 @@ MAX_UPLOAD = 10 * 1024 * 1024
 MAX_EXPANDED = 25 * 1024 * 1024
 MAX_FILE = 1024 * 1024
 MAX_FILES = 500
-EXTENSIONS = {'.js', '.cjs', '.mjs', '.jsx', '.ts', '.tsx', '.json', '.yaml', '.yml', '.lock', '.py', '.pyw', '.toml', '.txt'}
+EXTENSIONS = {'.js', '.cjs', '.mjs', '.jsx', '.ts', '.tsx', '.json', '.yaml', '.yml', '.lock', '.py', '.pyw', '.pth', '.start', '.toml', '.cfg', '.md', '.txt'}
 SUPPORTED_MANIFESTS = {'package.json', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock'}
 
 def safe_name(name):

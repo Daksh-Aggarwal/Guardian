@@ -321,7 +321,7 @@ class RemediationPlanner:
             # Case 2: INSTALL_SCRIPT or INSTALL_REMOTE in package.json
             elif f.rule.startswith("INSTALL_") and pkg_json_content:
                 # Find the lifecycle script in package.json
-                for stage in ['preinstall', 'install', 'postinstall', 'prepare']:
+                for stage in ['preinstall', 'install', 'postinstall', 'prepare', 'preuninstall', 'uninstall', 'postuninstall', 'prepack', 'postpack', 'prepublish', 'prepublishOnly']:
                     stage_pattern = rf'("{stage}"\s*:\s*"[^"]+")'
                     m = re.search(stage_pattern, pkg_json_content)
                     if m:
