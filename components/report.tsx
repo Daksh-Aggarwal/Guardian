@@ -38,6 +38,7 @@ import {
   Evidence,
   DataFlow,
   Advisory,
+  api,
 } from "@/lib/types";
 import {
   Badge,
@@ -68,6 +69,8 @@ export default function ReportView({
   onInvestigateProject,
   onHandoffFinding,
   onHandoffScan,
+  cloudMode = false,
+  handoffRequest,
 }: {
   report: Report;
   onBack: () => void;
@@ -75,6 +78,8 @@ export default function ReportView({
   onInvestigateProject?: (report: Report) => void;
   onHandoffFinding?: (findingId: string) => void;
   onHandoffScan?: () => void;
+  cloudMode?: boolean;
+  handoffRequest?: typeof api;
 }) {
   const [advanced, setAdvanced] = useState(false);
   const [tab, setTab] = useState<
@@ -1124,7 +1129,7 @@ export default function ReportView({
       </div>
 
       {/* Persistent Collapsible Right-Side Guardian Intelligence Panel */}
-      <IntelligencePanel
+      {!cloudMode && <IntelligencePanel
         report={report}
         isOpen={copilotOpen}
         onClose={() => setCopilotOpen(false)}
@@ -1135,7 +1140,7 @@ export default function ReportView({
           setCopilotFindingId(fid);
         }}
         advanced={advanced}
-      />
+      />}
 
       {/* Guardian Handoff 1.0 Modal */}
       {handoffOpen && (
@@ -1143,6 +1148,7 @@ export default function ReportView({
           report={report}
           isOpen={handoffOpen}
           initialFindingId={handoffFindingId}
+          request={handoffRequest}
           onClose={() => setHandoffOpen(false)}
         />
       )}

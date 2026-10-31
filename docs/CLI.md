@@ -57,9 +57,9 @@ guardian report
 guardian report --json
 guardian report --output guardian-report.json
 guardian status
-guardian login                               # explicit unavailable-feature error
+guardian login                               # browser PKCE + OS credential manager
 guardian logout                              # confirms local mode/no stored credentials
-guardian sync                                # explicit unavailable-feature error
+guardian sync                                # explicit sanitized account report sync
 ```
 
 `check` and `audit` never change installation state. Online audit acquires declared dependency artifacts; it does not attest bytes already in `node_modules` or `site-packages`. npm includes existing declared dependencies when adding a package; PyPI preserves existing supported project constraints. Neither executes project scripts.
@@ -152,7 +152,7 @@ Export JSON, open **Open a Guardian CLI report** on the website overview, choose
 
 `POST /api/cli/reports` accepts `{report, consent:true}`, validates CLI metadata and enforces an 8 MB import limit. `GET /api/cli/capabilities` advertises actual capabilities.
 
-**No Guardian account identity, device approval, revocable account-token service, cloud storage or cross-device sharing exists.** GitHub installation sessions are not CLI account credentials. `login`/`sync` explicitly fail; `status`/`logout` honestly describe local mode without storing tokens. Authenticated connected scenario F is not demonstrated. A future backend needs browser device approval, identity-scoped report ownership, expiry/revocation, OS credential storage and explicit sync consent. There are no fake tokens or plaintext project credentials.
+Optional Supabase GitHub account login, PKCE CLI device authorization, revocation and explicit sanitized report sync are now implemented. GitHub App sessions remain separate. See [account setup, credential fallback, migrations and deployment](ACCOUNTS-DEPLOYMENT.md). Local scanning still requires no account. Live provider OAuth and hosted deployment need your dashboard configuration.
 
 The GitHub audit removed HTTP global-installation fallbacks and sole-installation auto-authorization. Valid sessions must authorize the exact report installation for report/job/snapshot/remediation/conversation/history/Handoff access. Another app installation is insufficient. Legacy GitHub reports lacking installation identity require a rescan. Concurrent session-storage work in this checkout persists sessions in SQLite; integration guards validate expiry before reading authorization. This is a single-user loopback service; the existing GitHub installation handshake is not a general public account service.
 
@@ -175,7 +175,7 @@ Synthetic registries in `test_cli_npm.py`/`test_cli_pypi.py` serve inert in-memo
 | C benign npm install | CLI + real offline npm installs inspected bytes with exact lock and disabled hooks. |
 | D benign PyPI install | CLI + real pip installs inspected wheel into temporary venv; adapter test repairs same-version substituted bytes. |
 | E independent website | Existing upload/project/package API tests and production frontend build, no CLI/account. |
-| F authenticated sync | Not implemented: no suitable account/device backend. Explicit local import is separately tested/labeled. |
+| F authenticated sync | CLI-to-API account/device sync tested with real loopback and mocked Supabase; live provider demo requires configuration. |
 | G offline local | CLI scans acquired archives and project source, saves/exports reports without Guardian services. |
 
 These are reproducible local tests, not live public-registry production claims. Static analysis is bounded: callbacks, dynamic imports, computed behavior, uncalled functions and native code may be uninspected. Actual parser/flow omissions require REVIEW. Even supported complete static coverage cannot prove runtime reachability, benign intent, author identity, registry trustworthiness or host safety.

@@ -15,6 +15,7 @@ from . import ingestion, storage, advisor, github
 from .core import analyze_sources as analyze
 from .engine import assess, RANK, finding
 from .cli_bridge import router as cli_router
+from .account_api import router as account_router
 from .explanations import EvidenceExplainer
 from .intelligence import check_osv
 from .models import Dependency, PackageRequest, Question, Report, Evidence, AskRequest, AdvisorResponse, FindingCitation, AIStatus
@@ -40,8 +41,9 @@ from typing import Literal, Optional
 
 app = FastAPI(title='Guardian', version='0.1.0')
 app.include_router(cli_router)
+app.include_router(account_router)
 app.add_middleware(RequestSizeLimit)
-app.add_middleware(CORSMiddleware, allow_origins=['http://localhost:3000','http://127.0.0.1:3000'], allow_methods=['GET','POST'], allow_headers=['*'])
+app.add_middleware(CORSMiddleware, allow_origins=[origin.strip() for origin in os.getenv('GUARDIAN_ALLOWED_ORIGINS','http://localhost:3000,http://127.0.0.1:3000').split(',') if origin.strip()], allow_credentials=True, allow_methods=['GET','POST','DELETE','PATCH'], allow_headers=['Authorization','Content-Type','X-Guardian-Session'])
 JOBS = {}
 CANCELLATIONS = {}
 JOB_INSTALLATIONS = {}
@@ -533,6 +535,27 @@ def _require_github_session(request: Request) -> str:
     if not session_id:
         raise HTTPException(401, 'GitHub session is missing, invalid or expired. Connect GitHub in this browser session.')
     return session_id
+
+
+@app.middleware('http')
+async def account_deployment_boundary(request: Request, call_next):
+    path = request.url.path
+    if path.startswith('/api/account/') and request.method == 'POST':
+        limit = 8 * 1024 * 1024 + 262144 if path == '/api/account/scans' else 65536
+        body = bytearray()
+        async for chunk in request.stream():
+            body.extend(chunk)
+            if len(body) > limit:
+                return JSONResponse({'detail':'Account request exceeded its size limit.'},status_code=413)
+        request._body = bytes(body)
+    if os.getenv('GUARDIAN_CLOUD_MODE', 'false').lower() == 'true':
+        if not (path == '/api/health' or path.startswith('/api/account/') or request.method == 'OPTIONS'):
+            return JSONResponse({'detail': 'This deployment serves account/device/report sync. Use the local Guardian service for source uploads and GitHub App workspaces.'}, status_code=403)
+    response = await call_next(request)
+    if request.url.path.startswith('/api/account/'):
+        response.headers['Cache-Control'] = 'no-store'
+        response.headers['Referrer-Policy'] = 'no-referrer'
+    return response
 
 
 @app.middleware('http')

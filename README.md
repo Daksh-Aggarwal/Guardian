@@ -2,7 +2,7 @@
 
 **Know what you trust.** A local, explainable npm and PyPI supply-chain security platform. Guardian reads source and manifests, connects behavioral signals, verifies package integrity, traverses dependency graphs, and presents evidence and practical next steps. It does not certify packages as safe or execute uploaded code.
 
-Guardian 0.2 adds a pre-installation CLI with shared static analysis, exact verified npm/wheel installation, private local reports, and explicit report import into the independent website. npm scripts remain disabled; Python source builds are refused. Guardian account login/cloud sync are unavailable. See the [CLI guide, security boundaries and demonstrated scenarios](docs/CLI.md).
+Guardian 0.2 adds a pre-installation CLI with shared static analysis, exact verified npm/wheel installation, private local reports, and explicit report import into the independent website. npm scripts remain disabled; Python source builds are refused. Optional Supabase GitHub login, CLI device authorization and explicit report sync are available; see the [account setup and Vercel/Render deployment guide](docs/ACCOUNTS-DEPLOYMENT.md). See the [CLI guide, security boundaries and demonstrated scenarios](docs/CLI.md).
 
 The [npm acquisition regression guide](docs/CLI-BUDGETS.md) documents separate upload/package archive limits, unique-artifact versus installation-location budgets, structured diagnostics, and actual Lodash/Express smoke results.
 
@@ -224,7 +224,7 @@ The [npm acquisition regression guide](docs/CLI-BUDGETS.md) documents separate u
 
 ## Setup
 
-Requires Node.js 20.9+ (tested on 26), Python 3.9+ (tested on 3.9.6), and npm. No Docker, database service, account or LLM key required.
+Requires Node.js 22+ for the account SDK (tested on 26), Python 3.9+ (tested on 3.9.6), and npm. No Docker, database service, account or LLM key required.
 
 ```sh
 cd Guardian
@@ -361,6 +361,6 @@ This is a single-user, loopback-only prototype without authentication. Do not ex
 
 Static data flow simulates module initialization and directly invoked call paths; loops, callbacks, dynamic imports (`import()`), dynamic requires (`require(x)`), and runtime framework lifecycles remain unmodeled. Static inference does not establish runtime execution or malicious intent.
 
-Website dependencies are inspected via bounded lockfile resolution; packages without exact lockfile versions remain uninspected. Integrity verification confirms byte consistency with the digest, not that the code is benign. Website OSV checks exact versions only; semver ranges are disclosed as uninspected. The CLI separately resolves supported npm/PyPI graphs before installation, with vulnerability intelligence explicitly not checked. There is no runtime sandbox execution, required LLM service, source-build sandbox, Guardian account/cloud sync, or public multi-tenant service. See [CLI limitations](docs/CLI.md).
+Website dependencies are inspected via bounded lockfile resolution; packages without exact lockfile versions remain uninspected. Integrity verification confirms byte consistency with the digest, not that the code is benign. Website OSV checks exact versions only; semver ranges are disclosed as uninspected. The CLI separately resolves supported npm/PyPI graphs before installation, with vulnerability intelligence explicitly not checked. There is no runtime sandbox execution, required LLM service, source-build sandbox or public cloud source-execution service. The optional public account service stores explicitly synchronized reports; source analysis remains local. See [CLI limitations](docs/CLI.md).
 
 See [architecture](ARCHITECTURE.md), [detection rules](DETECTION_RULES.md), [product requirements](PRD.md), and [roadmap](ROADMAP.md).

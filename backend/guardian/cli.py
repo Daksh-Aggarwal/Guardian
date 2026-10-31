@@ -1,4 +1,4 @@
-"""Guardian local CLI. Nothing is uploaded; installers receive only approved plans."""
+"""Guardian local CLI. Account uploads require explicit sync; installers receive only approved plans."""
 import argparse
 import hashlib
 import json
@@ -6,6 +6,10 @@ import os
 import sys
 from contextlib import contextmanager
 from pathlib import Path
+from .environment import load_environment
+
+load_environment()
+
 from . import local_reports
 from .core import analyze_plan
 from .ingestion import EXTENSIONS, MAX_FILE, MAX_FILES, MAX_EXPANDED
@@ -15,10 +19,6 @@ from .supply_models import Artifact, Plan, AcquisitionError, IntegrityError, Ins
 VERSION = '0.2.0'
 # Stable exit codes: security block, review, acquisition, integrity, internal, install.
 EXIT_BLOCK, EXIT_REVIEW, EXIT_ACQUIRE, EXIT_INTEGRITY, EXIT_INTERNAL, EXIT_INSTALL = 2, 3, 4, 5, 6, 7
-CONNECTED_REASON = ('Guardian account/device authorization and remote sync are unavailable: '
-                    'this backend has GitHub installation sessions, not Guardian accounts. '
-                    'Export with guardian report --output report.json and explicitly import it in the local website.')
-
 
 @contextmanager
 def installation_guard(project):
@@ -39,10 +39,19 @@ def parser():
     result = argparse.ArgumentParser(prog='guardian', description='Local npm + PyPI pre-installation static security analysis.')
     result.add_argument('--version', action='version', version='Guardian ' + VERSION)
     commands = result.add_subparsers(dest='command', required=True)
-    for command in ('install', 'check', 'audit', 'report', 'login', 'logout', 'status', 'sync'):
+    for command in ('install', 'check', 'audit', 'report', 'login', 'logout', 'status', 'sync', 'devices'):
         sub = commands.add_parser(command)
         if command in ('install', 'check'):
             sub.add_argument('packages', nargs='*')
+        if command == 'login':
+            sub.add_argument('--allow-file-credentials', action='store_true', help='Explicitly use private plaintext credentials instead of the OS keychain.')
+            sub.add_argument('--no-browser', action='store_true', help='Print the login URL for manual opening.')
+            sub.add_argument('--device-name', help='Name shown in the account dashboard.')
+            sub.add_argument('--new-device', action='store_true', help='Create a new device identity when switching accounts.')
+        if command == 'devices':
+            sub.add_argument('--revoke', metavar='DEVICE_ID', help='Revoke one of your registered devices.')
+        if command == 'report':
+            sub.add_argument('--sync', action='store_true', help='Explicitly synchronize the latest sanitized report.')
         sub.add_argument('--ecosystem', choices=('npm', 'pypi'))
         sub.add_argument('--json', action='store_true', help='Emit only a JSON report or error.')
         sub.add_argument('--output', type=Path, help='Export JSON to this file (private permissions).')
@@ -138,12 +147,42 @@ def emit(report, args):
 
 
 def execute(args):
-    if args.command in ('login', 'sync'):
-        raise AcquisitionError(CONNECTED_REASON)
-    if args.command in ('logout', 'status'):
-        data = {'mode': 'local', 'authenticated': False, 'automatic_sync': False,
-                'reason': CONNECTED_REASON, 'version': VERSION}
-        print(json.dumps(data) if args.json else 'Guardian ' + VERSION + '\nLocal mode. No stored account credentials. Automatic sync disabled.\n' + CONNECTED_REASON)
+    if args.command in ('login', 'logout', 'status', 'devices', 'sync') or (args.command == 'report' and args.sync):
+        from .connected import AccountClient, saved_reports
+        if args.offline and args.command != 'status':
+            raise AcquisitionError('This account operation requires network access; local check/audit/report still work offline.')
+        if args.no_sync and (args.command == 'sync' or getattr(args, 'sync', False)):
+            raise AcquisitionError('Choose synchronization or --no-sync, not both.')
+        client = AccountClient(getattr(args,'allow_file_credentials',False),getattr(args,'new_device',False))
+        if args.command == 'login':
+            result=client.login(VERSION,args.no_browser,args.device_name)
+        elif args.command == 'logout':
+            result=client.logout()
+        elif args.command == 'status':
+            result=client.status(args.offline)
+        elif args.command == 'devices':
+            result=client.devices(args.revoke)
+        elif args.command == 'report':
+            report=local_reports.latest()
+            if args.output: local_reports.write_private(args.output,report.model_dump_json(indent=2))
+            result=client.sync([report])
+        else:
+            result=client.sync(saved_reports())
+        if args.json:
+            print(json.dumps(result))
+        elif args.command == 'devices':
+            for device in result:
+                print(f"{device['id']}  {device['device_name']}  {device['operating_system']}  {'revoked' if device['revoked_at'] else 'connected'}")
+            if not result: print('No CLI devices registered yet. Run guardian login.')
+        elif result.get('status') == 'synchronized':
+            print(f"Synchronized {result['count']} report(s). Source snippets were withheld; local reports were preserved.")
+        else:
+            print('Guardian Status')
+            print('Authentication: '+result.get('authentication','Local'))
+            if result.get('account'): print('Account: '+''.join(c if c.isprintable() else '?' for c in str(result['account'])))
+            if result.get('device'): print('Device: '+result['device']['device_name'])
+            print('Report Sync: '+result.get('report_sync','Sign in with guardian login'))
+            print('Automatic synchronization: disabled')
         return 0
     if args.command == 'report':
         report = local_reports.latest()

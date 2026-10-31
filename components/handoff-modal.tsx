@@ -42,6 +42,7 @@ interface HandoffModalProps {
   initialFindingIds?: string[] | null;
   initialMode?: RemediationMode;
   initialTarget?: HandoffTarget;
+  request?: typeof api;
 }
 
 const TARGET_OPTIONS: {
@@ -96,6 +97,7 @@ export default function HandoffModal({
   initialFindingIds,
   initialMode = "focused_fix",
   initialTarget = "universal",
+  request = api,
 }: HandoffModalProps) {
   const [target, setTarget] = useState<HandoffTarget>(initialTarget);
   const [mode, setMode] = useState<RemediationMode>(initialMode);
@@ -140,7 +142,7 @@ export default function HandoffModal({
     setError(null);
 
     try {
-      const response = await api<HandoffExportResponse>(
+      const response = await request<HandoffExportResponse>(
         `/scans/${report.id}/handoff`,
         {
           method: "POST",
@@ -164,7 +166,7 @@ export default function HandoffModal({
         setLoading(false);
       }
     }
-  }, [isOpen, report?.id, target, mode, activeFindingIds]);
+  }, [isOpen, report?.id, target, mode, activeFindingIds, request]);
 
   useEffect(() => {
     if (isOpen) {

@@ -53,6 +53,7 @@ import {
 import ScanPanel from "@/components/scan-panel";
 import ReportView from "@/components/report";
 import CliReportImport from "@/components/cli-report-import";
+import { AccountButton } from "@/components/account-provider";
 import ProjectWorkspace from "@/components/project-workspace";
 import RemediationPanel from "@/components/remediation-panel";
 
@@ -614,6 +615,7 @@ export default function Home() {
           </div>
 
           <div className="top-actions">
+            <AccountButton />
             <button
               type="button"
               className="btn-get-started"

@@ -13,13 +13,14 @@ router = APIRouter(prefix='/api/cli', tags=['CLI'])
 
 @router.get('/capabilities')
 def capabilities():
+    from .account_auth import configured
+    enabled=configured()
     return {
         'local_import': True,
-        'authentication': False,
-        'synchronization': False,
-        'reason': 'Guardian has no account identity or revocable device-token service. '
-                  'Export a CLI JSON report and explicitly import it into the local website. '
-                  'GitHub installation sessions are not Guardian accounts.',
+        'authentication': enabled,
+        'synchronization': enabled,
+        'reason': ('Supabase account login and explicit report sync are available through /api/account.' if enabled
+                   else 'Configure Supabase account settings to enable login/sync. Local imports and scanning remain available.'),
     }
 
 
