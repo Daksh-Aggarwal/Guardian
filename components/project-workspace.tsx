@@ -30,6 +30,9 @@ import {
   FileText,
   Search,
   Package,
+  RefreshCw,
+  ExternalLink,
+  GitPullRequest,
 } from "lucide-react";
 import { api, Report, ScanJob, ProjectMetadata, Finding } from "@/lib/types";
 import { getDependencyAccounting, getFindingBreakdown } from "@/lib/accounting";
@@ -298,6 +301,26 @@ export default function ProjectWorkspace({
   }
 
   async function handleRescan(): Promise<Report | void> {
+    if (activeReport?.source_metadata?.source_type === "github") {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await api<{ id: string }>("/scans/github", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            repository_id: activeReport.source_metadata.repository_id,
+            branch: activeReport.source_metadata.branch,
+            profile,
+          }),
+        });
+        setJob({ id: res.id, status: "queued", stage: "Queued" });
+      } catch (err) {
+        setError((err as Error).message);
+        setLoading(false);
+      }
+      return;
+    }
     if (!projectData) return;
     const reloaded = await openProjectDirectory();
     setProjectData(reloaded);
@@ -354,6 +377,56 @@ export default function ProjectWorkspace({
               >
                 v{activeReport.version}
               </span>
+            )}
+
+            {activeReport?.source_metadata?.source_type === "github" && (
+              <>
+                <span
+                  style={{
+                    background: "rgba(99, 102, 241, 0.15)",
+                    color: "var(--accent, #6366f1)",
+                    padding: "2px 6px",
+                    borderRadius: "4px",
+                    fontSize: "11px",
+                    fontWeight: 600,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "4px",
+                  }}
+                >
+                  <GitBranch size={11} /> {activeReport.source_metadata.branch}
+                </span>
+
+                <span
+                  style={{
+                    background: "rgba(255, 255, 255, 0.05)",
+                    padding: "2px 6px",
+                    borderRadius: "4px",
+                    fontSize: "11px",
+                    fontFamily: "monospace",
+                    color: "var(--muted)",
+                  }}
+                >
+                  {activeReport.source_metadata.commit_sha.slice(0, 7)}
+                </span>
+
+                <a
+                  href={activeReport.source_metadata.repo_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "3px",
+                    fontSize: "11px",
+                    color: "var(--accent)",
+                    textDecoration: "none",
+                  }}
+                >
+                  <span>GitHub</span>
+                  <ExternalLink size={10} />
+                </a>
+              </>
             )}
           </div>
 
@@ -450,7 +523,7 @@ export default function ProjectWorkspace({
               >
                 {projectScans.map((s, idx) => (
                   <option key={s.id} value={s.id}>
-                    #{projectScans.length - idx}: v{s.version} (
+                    #{projectScans.length - idx}: {s.source_metadata?.branch ? `[${s.source_metadata.branch}] ` : ""}v{s.version} (
                     {new Date(s.created_at).toLocaleDateString()})
                   </option>
                 ))}
@@ -458,8 +531,23 @@ export default function ProjectWorkspace({
             </div>
           )}
 
-          {/* Local folder connect/disconnect */}
-          {projectData ? (
+          {/* GitHub Rescan or Local folder connect/disconnect */}
+          {activeReport?.source_metadata?.source_type === "github" ? (
+            <button
+              onClick={handleRescan}
+              disabled={loading}
+              className="button secondary compact"
+              style={{
+                fontSize: "12px",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+              }}
+            >
+              <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
+              <span>Rescan Repository</span>
+            </button>
+          ) : projectData ? (
             <button
               onClick={handleDisconnect}
               className="button secondary compact"

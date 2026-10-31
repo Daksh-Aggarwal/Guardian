@@ -18,6 +18,8 @@ import {
   FileCode,
   Terminal,
   FolderOpen,
+  GitPullRequest,
+  ExternalLink,
 } from "lucide-react";
 import {
   api,
@@ -383,6 +385,85 @@ export default function RemediationPanel({
       setConfirmApply(true);
       setActionSuccess(
         "Target files validated on disk. Please review the diff and confirm reapplication.",
+      );
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoading(false);
+      setStage("");
+    }
+  }
+
+  const isGitHubTarget = Boolean(
+    report.source_metadata?.source_type === "github" || plan?.repository_id
+  );
+
+  async function applyGitHubPR() {
+    if (!plan) return;
+    setLoading(true);
+    setError(null);
+    setActionSuccess(null);
+    setStage("Verifying target branch commit & creating Git objects...");
+
+    try {
+      const res = await api<{
+        plan_id: string;
+        pr_number: number;
+        pr_url: string;
+        remediation_branch: string;
+        commit_sha: string;
+        status: string;
+      }>(`/remediation/plans/${plan.plan_id}/apply-github`, {
+        method: "POST",
+      });
+
+      setPlan((prev) =>
+        prev
+          ? {
+              ...prev,
+              status: "applied",
+              pr_number: res.pr_number,
+              pr_url: res.pr_url,
+              remediation_branch: res.remediation_branch,
+              remediation_commit_sha: res.commit_sha,
+              pr_state: "open",
+            }
+          : null
+      );
+      setConfirmApply(false);
+      setActionSuccess(
+        `Successfully created Pull Request #${res.pr_number} on GitHub!`
+      );
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoading(false);
+      setStage("");
+    }
+  }
+
+  async function closeGitHubPR() {
+    if (!plan || !plan.pr_number) return;
+    setLoading(true);
+    setError(null);
+    setActionSuccess(null);
+    setStage("Closing Pull Request on GitHub...");
+
+    try {
+      await api(`/remediation/plans/${plan.plan_id}/close-github-pr`, {
+        method: "POST",
+      });
+      setPlan((prev) =>
+        prev
+          ? {
+              ...prev,
+              status: "reverted",
+              pr_state: "closed",
+            }
+          : null
+      );
+      setActionSuccess(
+        `Pull Request #${plan.pr_number} was closed. Plan status marked reverted.`
       );
     } catch (err) {
       setError((err as Error).message);
@@ -1014,13 +1095,74 @@ export default function RemediationPanel({
                 </div>
               )}
 
-              {/* Git Branch & Backup Warning before Approval */}
+              {/* GitHub Pull Request Link Banner if applied */}
+              {plan && plan.pr_url && (
+                <div
+                  style={{
+                    padding: "14px 18px",
+                    background: "rgba(16, 185, 129, 0.1)",
+                    border: "1px solid rgba(16, 185, 129, 0.3)",
+                    borderRadius: "8px",
+                    fontSize: "12px",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    flexWrap: "wrap",
+                    gap: "10px",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <GitPullRequest size={16} style={{ color: "#10b981" }} />
+                    <strong style={{ color: "#10b981" }}>
+                      Pull Request #{plan.pr_number} ({plan.pr_state || "open"}):
+                    </strong>
+                    <span style={{ color: "var(--text)" }}>
+                      Remediation branch <code>{plan.remediation_branch}</code>
+                    </span>
+                  </div>
+
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <a
+                      href={plan.pr_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="button primary compact"
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "6px",
+                        textDecoration: "none",
+                        fontSize: "12px",
+                      }}
+                    >
+                      <span>View on GitHub</span>
+                      <ExternalLink size={12} />
+                    </a>
+                    {plan.pr_state !== "closed" && (
+                      <button
+                        onClick={closeGitHubPR}
+                        disabled={loading}
+                        className="button secondary compact"
+                        style={{ fontSize: "12px", color: "#f87171" }}
+                      >
+                        Close PR
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Pre-application Advisory before Approval */}
               {confirmApply && (
                 <div
                   style={{
                     padding: "14px 18px",
-                    background: "rgba(249, 115, 22, 0.1)",
-                    border: "1px solid rgba(249, 115, 22, 0.3)",
+                    background: isGitHubTarget
+                      ? "rgba(99, 102, 241, 0.1)"
+                      : "rgba(249, 115, 22, 0.1)",
+                    border: isGitHubTarget
+                      ? "1px solid rgba(99, 102, 241, 0.3)"
+                      : "1px solid rgba(249, 115, 22, 0.3)",
                     borderRadius: "8px",
                     fontSize: "12px",
                     display: "flex",
@@ -1035,33 +1177,79 @@ export default function RemediationPanel({
                       gap: "8px",
                     }}
                   >
-                    <GitBranch
-                      size={16}
-                      color="var(--accent-orange, #f97316)"
-                    />
-                    <strong style={{ color: "var(--accent-orange, #f97316)" }}>
-                      Pre-application advisory:
+                    {isGitHubTarget ? (
+                      <GitPullRequest
+                        size={16}
+                        color="var(--accent, #6366f1)"
+                      />
+                    ) : (
+                      <GitBranch
+                        size={16}
+                        color="var(--accent-orange, #f97316)"
+                      />
+                    )}
+                    <strong
+                      style={{
+                        color: isGitHubTarget
+                          ? "var(--accent, #6366f1)"
+                          : "var(--accent-orange, #f97316)",
+                      }}
+                    >
+                      {isGitHubTarget
+                        ? "GitHub Autopilot Remediation Advisory:"
+                        : "Pre-application advisory:"}
                     </strong>
                   </div>
                   <p style={{ margin: 0, lineHeight: "1.5" }}>
-                    Guardian will write exact file modifications to your local
-                    project. It is strongly recommended to work on a dedicated
-                    Git branch and ensure untracked files are committed. A local
-                    IndexedDB recovery backup will be captured automatically
-                    before modification.
+                    {isGitHubTarget ? (
+                      <>
+                        Guardian Autopilot will create a dedicated remediation branch (
+                        <code>guardian/remediation/{plan.plan_id.slice(0, 8)}</code>)
+                        from commit{" "}
+                        <code>
+                          {(
+                            report.source_metadata?.commit_sha ||
+                            plan.commit_sha ||
+                            ""
+                          ).slice(0, 7)}
+                        </code>
+                        , apply atomic Git tree modifications, and open a Pull
+                        Request against{" "}
+                        <code>
+                          {report.source_metadata?.branch || plan.branch || "main"}
+                        </code>
+                        . Guardian will never directly modify the default branch or
+                        automatically merge pull requests.
+                      </>
+                    ) : (
+                      <>
+                        Guardian will write exact file modifications to your local
+                        project. It is strongly recommended to work on a dedicated
+                        Git branch and ensure untracked files are committed. A
+                        local IndexedDB recovery backup will be captured
+                        automatically before modification.
+                      </>
+                    )}
                   </p>
                   <div
                     style={{ display: "flex", gap: "10px", marginTop: "4px" }}
                   >
                     <button
-                      onClick={applyPlan}
+                      onClick={isGitHubTarget ? applyGitHubPR : applyPlan}
+                      disabled={loading}
                       className="button primary compact"
                       style={{
-                        background: "var(--accent-green, #10b981)",
-                        borderColor: "var(--accent-green, #10b981)",
+                        background: isGitHubTarget
+                          ? "var(--accent, #6366f1)"
+                          : "var(--accent-green, #10b981)",
+                        borderColor: isGitHubTarget
+                          ? "var(--accent, #6366f1)"
+                          : "var(--accent-green, #10b981)",
                       }}
                     >
-                      {plan.status === "reverted"
+                      {isGitHubTarget
+                        ? "Confirm and Create Pull Request"
+                        : plan.status === "reverted"
                         ? "Confirm and reapply modifications"
                         : "Confirm and apply modifications"}
                     </button>
@@ -1155,9 +1343,36 @@ export default function RemediationPanel({
                   gap: "6px",
                 }}
               >
-                <CheckCircle2 size={16} />
-                Approve and apply
+                {isGitHubTarget ? (
+                  <>
+                    <GitPullRequest size={16} />
+                    Approve and Create Pull Request
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 size={16} />
+                    Approve and apply
+                  </>
+                )}
               </button>
+            )}
+
+            {plan && plan.status === "applied" && isGitHubTarget && plan.pr_url && (
+              <a
+                href={plan.pr_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="button secondary compact"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  textDecoration: "none",
+                }}
+              >
+                <ExternalLink size={14} />
+                Open PR #{plan.pr_number}
+              </a>
             )}
 
             {plan && plan.status === "reverted" && !confirmApply && (

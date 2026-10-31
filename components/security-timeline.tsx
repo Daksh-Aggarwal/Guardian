@@ -14,6 +14,7 @@ import {
   CheckCircle2,
   AlertTriangle,
   Info,
+  GitBranch,
 } from "lucide-react";
 import { Report, getFindingSignature, compareSemver } from "@/lib/types";
 import { getDependencyAccounting, getFindingBreakdown } from "@/lib/accounting";
@@ -174,7 +175,18 @@ export default function SecurityTimeline({
       }
     });
 
+    const isCrossBranch = Boolean(
+      baseReport.source_metadata?.branch &&
+      targetReport.source_metadata?.branch &&
+      baseReport.source_metadata.branch !== targetReport.source_metadata.branch
+    );
+
     return {
+      isCrossBranch,
+      baseBranch: baseReport.source_metadata?.branch,
+      targetBranch: targetReport.source_metadata?.branch,
+      baseCommit: baseReport.source_metadata?.commit_sha,
+      targetCommit: targetReport.source_metadata?.commit_sha,
       resolvedFindings,
       newFindings,
       persistentFindings,
@@ -425,6 +437,20 @@ export default function SecurityTimeline({
 
               <div>
                 <strong style={{ fontSize: "13px" }}>v{scan.version}</strong>
+                {scan.source_metadata?.branch && (
+                  <span
+                    style={{
+                      marginLeft: "6px",
+                      fontSize: "10px",
+                      padding: "1px 5px",
+                      borderRadius: "3px",
+                      background: "rgba(99, 102, 241, 0.15)",
+                      color: "var(--accent, #6366f1)",
+                    }}
+                  >
+                    {scan.source_metadata.branch} @ {scan.source_metadata.commit_sha.slice(0, 7)}
+                  </span>
+                )}
                 <p
                   style={{
                     margin: "2px 0 0",
@@ -539,7 +565,7 @@ export default function SecurityTimeline({
               >
                 {sortedScans.map((s, i) => (
                   <option key={s.id} value={s.id}>
-                    #{i + 1} - v{s.version} (
+                    #{i + 1} {s.source_metadata?.branch ? `[${s.source_metadata.branch}] ` : ""}- v{s.version} (
                     {new Date(s.created_at).toLocaleDateString()})
                   </option>
                 ))}
@@ -566,7 +592,7 @@ export default function SecurityTimeline({
               >
                 {sortedScans.map((s, i) => (
                   <option key={s.id} value={s.id}>
-                    #{i + 1} - v{s.version} (
+                    #{i + 1} {s.source_metadata?.branch ? `[${s.source_metadata.branch}] ` : ""}- v{s.version} (
                     {new Date(s.created_at).toLocaleDateString()})
                   </option>
                 ))}
@@ -580,6 +606,30 @@ export default function SecurityTimeline({
           <div
             style={{ display: "flex", flexDirection: "column", gap: "14px" }}
           >
+            {/* Cross-Branch Comparison Notice */}
+            {comparison.isCrossBranch && (
+              <div
+                style={{
+                  padding: "12px 16px",
+                  borderRadius: "6px",
+                  background: "rgba(245, 158, 11, 0.12)",
+                  border: "1px solid rgba(245, 158, 11, 0.3)",
+                  fontSize: "12px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "10px",
+                }}
+              >
+                <GitBranch size={16} style={{ color: "#f59e0b", flexShrink: 0 }} />
+                <span>
+                  <strong>Cross-Branch Comparison:</strong> Comparing branch{" "}
+                  <code>{comparison.baseBranch}</code> ({comparison.baseCommit?.slice(0, 7)}) with branch{" "}
+                  <code>{comparison.targetBranch}</code> ({comparison.targetCommit?.slice(0, 7)}).
+                  Findings may reflect divergent branch histories rather than sequential fixes.
+                </span>
+              </div>
+            )}
+
             {/* Diff Counters */}
             <div
               style={{

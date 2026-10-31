@@ -29,6 +29,8 @@
 - `backend/guardian/intelligence.py`: exact-version OSV batch queries, bounded advisory enrichment (CVSS, ranges, fixes), validation guards, and coverage tracking.
 - `backend/guardian/explanations.py`: `EvidenceExplainer` deterministic provider citing existing findings.
 - `backend/guardian/advisor.py`: `GeminiAdvisor` provider using `google-genai` SDK, structured output parsing, citation validation, prompt-injection defense fences, and provider factory (`get_advisor`).
+- `backend/guardian/github.py`: GitHub App authentication (RS256 JWT, short-lived tokens in memory, CSRF state lifecycle), repository discovery, bounded Git tree/blob ingestion, and Autopilot pull request remediation.
+- `components/github-connect-panel.tsx`: GitHub connection launcher, installation account chip, repository browser with search, and branch-to-commit resolver.
 - `backend/guardian/projects.py`: ephemeral in-memory project snapshots (30-min inactivity TTL, 20-session LRU ceiling), deterministic project understanding (frameworks, runtime, language, test framework), and safe path normalization.
 - `backend/guardian/remediation.py`: structured remediation planning (Gemini and deterministic fallbacks), strict text-edit validation (`old_text` -> `new_text` uniqueness and hash verification), unified diff generation, and pre/post scan verification comparison.
 - `backend/guardian/remediation_models.py`: Pydantic contracts for remediation plans, proposed file changes, text edits, project metadata, and verification results.
@@ -87,6 +89,16 @@ Workers perform an atomic check under concurrency lock immediately before callin
 | POST | `/api/remediation/plans/{id}/applied` | Record plan application result from browser |
 | POST | `/api/remediation/plans/{id}/verification` | Compare baseline and rescanned reports to verify remediation outcomes |
 | GET | `/api/remediation/plans/{id}/verification` | Retrieve stored verification record |
+| GET | `/api/github/status` | GitHub App configuration and active installation connection status |
+| POST | `/api/github/connect` | Generate installation flow URL with single-use CSRF state |
+| GET | `/api/github/callback` | OAuth / installation callback handler and session establishment |
+| POST | `/api/github/disconnect` | Disconnect active GitHub installation |
+| GET | `/api/github/repositories` | List accessible GitHub repositories with search |
+| GET | `/api/github/repositories/{id}` | Repository metadata by GitHub repository ID |
+| GET | `/api/github/repositories/{id}/branches` | List repository branches with default branch indicator |
+| POST | `/api/scans/github` | Ingest bounded GitHub repository contents and trigger scan |
+| POST | `/api/remediation/plans/{id}/apply-github` | Apply remediation plan via dedicated branch and pull request |
+| POST | `/api/remediation/plans/{id}/close-github-pr` | Safely close Guardian remediation pull request preserving audit |
 
 ## Data accounting & semantics
 
