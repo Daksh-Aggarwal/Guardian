@@ -183,22 +183,44 @@ Assessment areas and coverage dimensions remain strictly independent (Intelligen
 - OSV responses are bounded: 4 MB batch cap, 8 MB aggregate batch pagination cap, 2 MB detail cap, 5-page per-dependency limit, 15-second total timeout, query count validation, npm package/ecosystem check, CVSS type verification, and HTTPS-only reference URLs.
 - Trusted parser uses fixed argv, stdin source data, no shell, 20-second timeout, and 256 MB heap. Bounded call depth (default 8) and module limits (default 100) prevent resource exhaustion.
 
-## Guardian Handoff 1.0 Architecture
+## Guardian Handoff 1.0.1 Architecture & Hardening
 
-Guardian Handoff 1.0 provides an AI-agnostic bridge between Guardian's authoritative security scanner and external coding agents (Universal Markdown, Claude Code, Cursor, OpenAI Codex, and GitHub Copilot).
+Guardian Handoff provides an AI-agnostic bridge between Guardian's authoritative security scanner and external coding agents (Universal Markdown, Claude Code, Cursor, OpenAI Codex, and GitHub Copilot). Version 1.0.1 hardens evidence accuracy, input validation, dependency identity, coverage accounting, and adversarial security.
 
 ### Core Architectural Principles
 1. **Single Canonical Handoff Model**: All target formats derive from `CanonicalHandoff` (`backend/guardian/handoff_models.py`). Target adapters do not make independent assumptions or invent evidence.
-2. **Authoritative Evidence Grounding**: Findings, advisories, fixed versions, and file locations originate directly from Guardian scan reports stored in SQLite. Missing data is represented explicitly as unavailable.
+2. **Strict Finding Scope & Input Validation**:
+   - Zero silent fallback: requesting finding IDs that do not exist raises explicit validation errors (`404 Not Found` in API, `ValueError` in builder).
+   - Empty lists (`finding_ids: []`) are strictly rejected (`400 Bad Request`); full scans require explicit omission (`finding_ids: None`).
+   - Duplicate finding IDs are normalized while preserving canonical report order.
+   - Scope is accurately classified: `finding` for exactly 1 finding, `findings` for multiple, and `scan` for the entire scan.
 3. **Decoupled Remediation Modes**:
-   - `focused_fix`: Minimal safe edits, direct finding verification, backward compatibility preservation, and regression test requirements.
-   - `deep_remediation`: Architectural and systemic investigation including direct/transitive relationships, shared dependency trees, lockfile consistency, repository-wide pattern searches, and package integrity.
-4. **Machine-Readable Appendix**: Every export contains a `## Guardian Evidence Appendix` fenced JSON block with versioned schema `1.0.0` allowing programmatic consumption by downstream tooling.
-5. **Security & Redaction Guarantees**:
-   - Automated secret redaction via `redact.py` removes credentials, tokens, and private keys.
-   - HTML and markdown injection sanitization neutralizes malicious scripts or formatting tags in third-party metadata.
-   - Adversarial prompt-injection defense instructs receiving agents to treat all repository excerpts and package metadata as inert untrusted data.
-   - Zero automatic filesystem writes or Git commits: instructions are portable and require explicit developer review.
+   - `focused_fix`: Minimal safe edits strictly constrained to affected files/lines, direct checkout verification, backward compatibility preservation, and focused regression tests.
+   - `deep_remediation`: Substantive architectural investigation including direct/transitive relationships, shared dependency trees, lockfile consistency, repository-wide pattern searches, package integrity, and blast radius assessments.
+4. **Evidence-Grounded Recommendations & Classification**:
+   - Differentiates: (1) Confirmed Scanner Observations, (2) Advisory / Registry Evidence, (3) Remediation Hypotheses, (4) Unverified Assumptions, and (5) Required Verifications.
+   - Candidate upgrades state `compatibility_status: "unverified"`; never claims an upgrade is universally safe.
+   - Lifecycle scripts caution that scripts may build native bindings (e.g. `node-gyp`) and should not be removed blindly.
+   - Behavioral findings require workspace dataflow tracing before modifications.
+5. **Exact Ecosystem-Aware Dependency Matching**:
+   - Replaces substring checks (`d.name in f.package`) with exact, normalized package identity matching.
+   - Follows PEP 503 for PyPI packages (`flask_cors` matches `flask-cors`) and handles scoped npm packages (`@babel/core`).
+   - Keeps npm and PyPI ecosystems strictly separate to prevent cross-ecosystem collisions.
+6. **Reconciled Coverage & Dependency Accounting**:
+   - Classifies coverage as `complete` vs `partial` based on authoritative dependency accounting (`inspected`, `skipped`, `unavailable`, `unresolved`, `integrity_failed`, `not_attempted`).
+   - Distinguishes projects with zero dependencies from unresolved dependencies.
+7. **Evidence-Based Scan Provenance**:
+   - Discloses that findings reflect the scan snapshot commit SHA without fabricating staleness warnings.
+   - Differentiates in-memory local snapshots from expired snapshots.
+8. **Adversarial Markdown & Prompt Injection Defense**:
+   - Context-aware inline escaping neutralizes HTML angle brackets and Markdown links.
+   - Dynamic code-fence backtick scaling wraps snippets with $N+1$ backticks, preventing code-fence breakout.
+   - Table cell pipe escaping (`\|`) prevents Markdown table breakout.
+   - Explicit prompt-injection defensive framing instructs receiving agents to treat all scanner evidence as inert untrusted data.
+9. **Ecosystem-Aware Validation Guidance**:
+   - Generates tailored validation commands based on detected project ecosystem (`npm test` for npm; `pytest`, `pip check` for PyPI; manifest inspection for unknown).
+   - Advises agents to inspect project scripts before running any commands.
+10. **Machine-Readable Appendix**: Every export contains a `## Guardian Evidence Appendix` fenced JSON block with versioned schema `1.0.0` allowing programmatic consumption by downstream tooling.
 - At most two concurrent analysis jobs via `BoundedSemaphore(2)`. Cooperative scan cancellation releases the semaphore slot exactly once. Atomic persistence lock ensures cancellations accepted before persistence discard the report, while scans already persisting under lock complete safely.
 - OSV sends names and versions only; source snippets stay local.
 - Local-only server binding (127.0.0.1) and no authentication. Do not expose this prototype to untrusted network clients.

@@ -57,6 +57,10 @@ class ProposedRemediation(BaseModel):
     action_type: Literal['upgrade_dependency', 'remove_script', 'source_patch', 'investigate_manual']
     description: str
     rationale: str
+    affected_version: Optional[str] = None
+    candidate_upgrade: Optional[str] = None
+    compatibility_status: str = 'unverified'
+    evidence_classification: Dict[str, str] = Field(default_factory=dict)
     expected_benefits: List[str] = Field(default_factory=list)
     risks_and_tradeoffs: List[str] = Field(default_factory=list)
     alternatives: List[str] = Field(default_factory=list)
@@ -77,6 +81,7 @@ class FollowUpInvestigation(BaseModel):
 class ProjectProvenance(BaseModel):
     project_id: Optional[str] = None
     name: str
+    ecosystem: str = 'npm'
     framework: Optional[str] = None
     runtime: Optional[str] = None
     language: Optional[str] = None
@@ -88,6 +93,8 @@ class ProjectProvenance(BaseModel):
     github_commit_sha: Optional[str] = None
     github_repo_url: Optional[str] = None
     is_snapshot_stale_warning: bool = False
+    snapshot_verification_status: Literal['verified_match', 'unverified_against_workspace', 'snapshot_expired'] = 'unverified_against_workspace'
+    staleness_detail: str = "Findings reflect the scan snapshot. Current workspace synchronization is unverified."
 
 class ScanProvenance(BaseModel):
     scan_id: str
@@ -105,10 +112,13 @@ class CoverageProvenance(BaseModel):
     total_dependencies: int = 0
     direct_dependencies: int = 0
     transitive_dependencies: int = 0
+    unique_names_count: int = 0
     inspected_count: int = 0
     skipped_count: int = 0
     unavailable_count: int = 0
+    unresolved_count: int = 0
     integrity_failed_count: int = 0
+    not_attempted_count: int = 0
     limitations: List[str] = Field(default_factory=list)
 
 class CanonicalHandoff(BaseModel):

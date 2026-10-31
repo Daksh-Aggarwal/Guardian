@@ -219,7 +219,7 @@ def test_token_caching_and_refresh(github_env):
         call_count += 1
         return {
             "token": f"ghs_token_{call_count}",
-            "expires_at": "2026-10-31T20:00:00Z",
+            "expires_at": "2030-01-01T00:00:00Z",
             "permissions": {"contents": "write", "pull_requests": "write", "metadata": "read"}
         }
 

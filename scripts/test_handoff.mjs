@@ -105,3 +105,31 @@ test("4. Supported targets and modes enumeration", () => {
   assert.ok(targets.includes("github_copilot"));
   assert.ok(targets.includes("universal"));
 });
+
+test("5. Code fence breakout prevention calculates safe fence delimiter", () => {
+  function getSafeFence(code) {
+    const runs = code.match(/`+/g) || [];
+    const maxRun = runs.reduce((max, r) => Math.max(max, r.length), 0);
+    return "`".repeat(Math.max(3, maxRun + 1));
+  }
+
+  const normalCode = "console.log('hello');";
+  assert.equal(getSafeFence(normalCode), "```");
+
+  const adversarialCode = "```\nconsole.log('breakout');\n```";
+  assert.equal(getSafeFence(adversarialCode), "````");
+
+  const ultraAdversarial = "``````\nconst x = 1;\n``````";
+  assert.equal(getSafeFence(ultraAdversarial), "```````");
+});
+
+test("6. Markdown table cell escaping prevents pipe breakout", () => {
+  function escapeTableCell(text) {
+    return text.replace(/\|/g, "\\|").replace(/\r?\n/g, " ").trim();
+  }
+  const untrustedDesc = "malicious|pipe|injection\nnew line";
+  const escaped = escapeTableCell(untrustedDesc);
+  assert.equal(escaped.includes("\n"), false);
+  assert.equal(escaped, "malicious\\|pipe\\|injection new line");
+});
+
