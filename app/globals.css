@@ -6438,44 +6438,62 @@ h1,h2,h3,h4,h5,h6 {line-height:1.2 !important;}
 
 /* Overview Single-Page Viewport Constraints (Strictly Non-Scrollable & Spacious) */
 .main-overview {
-  padding: 12px 40px 0 !important;
+  padding: 10px 40px 0 !important;
   overflow: hidden;
   height: calc(100vh - 74px);
   max-height: calc(100vh - 74px);
   display: flex;
   flex-direction: column;
 }
+.main-overview > div {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
 .main-overview .heatmap-hero-card {
   padding: 0 !important;
-  margin: 0 auto 10px auto !important;
+  margin: 0 auto 8px auto !important;
+  flex-shrink: 0;
 }
 .main-overview .heatmap-header {
-  margin-bottom: 8px !important;
+  margin-bottom: 6px !important;
 }
 .main-overview .scan-launchpad-section {
   margin-bottom: 0 !important;
   display: flex;
+  flex-direction: column;
   justify-content: center;
+  align-items: center;
   width: 100%;
+  flex: 1;
+  min-height: 0;
 }
 .main-overview .scan-launchpad-card {
   width: 65% !important;
   max-width: 960px !important;
   min-width: min(100%, 640px);
   margin: 0 auto !important;
-  padding: 16px 24px !important;
+  padding: 18px 26px !important;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  max-height: 600px;
 }
 @media (max-width: 768px) {
   .main-overview .scan-launchpad-card {
     width: 100% !important;
     min-width: 0;
+    max-height: none;
   }
 }
 .main-overview .launchpad-header {
   margin-bottom: 10px !important;
   display: flex;
   align-items: center;
+  flex-shrink: 0;
 }
 .main-overview .launchpad-title {
   font-size: 18px !important;
@@ -6485,10 +6503,19 @@ h1,h2,h3,h4,h5,h6 {line-height:1.2 !important;}
 }
 .main-overview .launchpad-tabs {
   margin-bottom: 10px !important;
+  flex-shrink: 0;
 }
-.main-overview .dropzone-box {
-  padding: 24px 20px !important;
-  min-height: 180px !important;
+.main-overview .launchpad-upload-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.main-overview .dropzone-box,
+.main-overview .launchpad-upload-area [class*="min-h-"] {
+  min-height: 220px !important;
+  flex: 1 !important;
+  padding: 28px 20px !important;
   display: flex !important;
   flex-direction: column !important;
   justify-content: center !important;
@@ -6504,14 +6531,11 @@ h1,h2,h3,h4,h5,h6 {line-height:1.2 !important;}
 }
 .main-overview .launchpad-footer {
   margin-top: 10px !important;
-}
-
-.main-overview .launchpad-upload-area [class*="min-h-"] {
-  min-height: 188px !important;
+  flex-shrink: 0;
 }
 
 .main-overview footer {
-  margin-top: auto !important;
+  margin-top: 14px !important;
   padding: 10px 0 12px !important;
   flex-shrink: 0;
 }
