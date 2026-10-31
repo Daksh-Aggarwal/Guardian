@@ -6,27 +6,37 @@
 
 - Next.js/React/TypeScript interface with self-hosted Inter, Tailwind CSS, Lucide icons, Framer Motion, responsive layouts and persistent dark-mode preference.
 - Independent security assessments: Behavioral findings, Known vulnerabilities (OSV), Package integrity (SRI), and Dependency inspection coverage are kept distinct and never collapsed into a misleading score.
-- Advanced static data-flow engine (Intelligence Engine 2.0):
+- Advanced static data-flow engine (Intelligence Engine 2.0 / 2.1):
   - Scope-aware lexical binding, variable reassignment and shadowing.
   - Function call argument-to-parameter propagation and return value tracing.
   - Object property field tracking and destructuring assignment.
   - Static ES module (`import`/`export`) and CommonJS (`require`/`module.exports`/`exports`) cross-file data flow.
   - Structured evidence with step-by-step source-to-sink paths (`FlowStep`), file/line/column locations, snippets, bindings, and explicit limitation disclosures.
-- Bounded dependency inspection:
+- Bounded and reconciled dependency inspection (Intelligence Engine 2.1):
   - Modern lockfile (`package-lock.json` v2/v3) traversal resolving direct and transitive dependencies with nearest `node_modules` lookup.
+  - Strict status reconciliation across six disjoint categories: `inspected`, `skipped` (due to budget), `unavailable` (retrieval/analysis failure), `unresolved`, `integrity_failed`, and `not_attempted`.
   - Dependency inspection profiles: **Fast** (up to 6 packages / 2 levels) and **Deep** (up to 20 packages / 4 levels), with operator-configurable ceilings (`GUARDIAN_MAX_PACKAGES`, `GUARDIAN_MAX_DEPTH`, etc.).
   - Deduplicated, memory-only tarball downloads from `registry.npmjs.org`.
 - Package integrity verification:
   - Strict Subresource Integrity (SRI) validation before archive extraction supporting SHA-512, SHA-384, SHA-256, and SHA-1.
   - Independent verification of lockfile checksums and published npm registry digests.
   - Separate statuses for `verified`, `missing`, `invalid`, `unsupported`, and `mismatch` (extraction refused on mismatch).
-- Vulnerability intelligence (OSV):
-  - Exact-version batch matching against the OSV API.
-  - Bounded advisory enrichment: published CVSS scores/vectors, affected version ranges, fixed-version boundaries, and aliases.
+- Hardened vulnerability intelligence (OSV):
+  - Exact-version batch matching against the OSV API with strict batch size (4 MB) and detail size (2 MB) caps.
+  - Query-to-result count validation, withdrawn advisory filtering, and npm ecosystem & package name verification.
+  - Bounded advisory enrichment: validated CVSS types (`CVSS_V2`, `CVSS_V3`, `CVSS_V4`) and vector strings, affected version ranges, sanitized fixed-version boundaries, and HTTPS-only reference links.
+  - Preserved batch matches when detail enrichment is unavailable, marked with distinct evidence quality (`advisory.detail_status = 'unavailable'`).
   - Guardian review priority kept distinct from published CVSS severity.
-- Safe scan cancellation:
-  - Backend job cancellation endpoint (`POST /api/jobs/{id}/cancel`) releasing concurrency semaphore slots.
-  - Responsive scan cancellation UI with active progress feedback.
+- Cooperative and thread-safe scan cancellation (Intelligence Engine 2.1):
+  - Explicit job states: `queued`, `running`, `cancelling`, `cancelled`, `complete`, `failed`.
+  - Cancellation requests transition active jobs to `cancelling` without prematurely claiming worker termination.
+  - Atomic check-before-save under concurrency lock guarantees workers never persist a report after cancellation is accepted.
+  - Exactly-once semaphore slot release and idempotent cancellation requests.
+- Hardened in-memory archive ingestion:
+  - Memory-only extraction with streaming decompression tracking against per-file (1 MB) and aggregate (25 MB) limits.
+  - Path traversal and path encoding guards: control character rejection, null byte rejection, absolute path rejection, and duplicate normalized path collision prevention (`seen_paths`).
+  - Strict file-type verification: symlinks, hardlinks, FIFOs, and special device entries are rejected in both ZIP and TAR archives.
+  - Manifest JSON object parsing validation with 1 MB size boundaries.
 - ZIP uploads, individual or paired npm manifests, and direct npm registry name/version inspection.
 - SQLite report history, shareable local report URLs (`?scan=<id>`), and complete JSON export.
 - Simple/Advanced modes over identical findings, source evidence, recommendations, coverage gaps, and contextual deterministic explanations.
@@ -111,7 +121,7 @@ Verified production screenshot: [Advanced report](docs/screenshots/advanced-repo
 - Production `npm run build`: passed (Next.js 16.4.3 / webpack).
 - `npm run typecheck`: passed (strict TypeScript 5.9).
 - `npm run format`: passed (Prettier).
-- `pytest backend/tests -q`: 104 tests passed in ~3.8s.
+- `pytest backend/tests -q`: 120 tests passed in ~3.8s.
 - Integration tests verified:
   1. Benign synthetic package (observations only).
   2. Sensitive-data source-to-sink flow (step-by-step trace).
@@ -121,11 +131,14 @@ Verified production screenshot: [Advanced report](docs/screenshots/advanced-repo
   6. Missing integrity metadata (distinguished from verified).
   7. Invalid and mismatched integrity (extraction refused, separate integrity finding).
   8. OSV advisory response (batch match, CVSS vectors, fixed boundaries).
-  9. Fast and deep inspection profiles (bounded depth/package budgets).
-  10. Simple and Advanced report rendering (everyday vs technical evidence).
-  11. JSON export (complete report data structure).
-  12. Historical report loading (backward compatibility with legacy v1 reports).
-  13. Safe scan cancellation (job cancellation, abort before save, semaphore slot release).
+  9. Adversarial OSV responses (oversized payloads, count mismatches, withdrawn advisories, malformed CVSS/references).
+  10. Fast and deep inspection profiles (bounded depth/package budgets).
+  11. Reconciled dependency accounting (disjoint status sums and direct/transitive consistency).
+  12. Simple and Advanced report rendering (everyday vs technical evidence).
+  13. JSON export (complete report data structure).
+  14. Historical report loading (backward compatibility with legacy v1 reports).
+  15. Cooperative scan cancellation (explicit job states, cancelling transition, abort before save, semaphore slot release, idempotent calls).
+  16. Archive hardening (path traversal rejection, duplicate normalized path rejection, symlink/hardlink/special entry rejection, decompression bomb boundaries, oversized manifest handling).
 
 `backend/requirements.lock.txt` records the tested Python dependency versions; install it instead of `requirements.txt` to reproduce this environment.
 

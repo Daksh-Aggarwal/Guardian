@@ -17,45 +17,68 @@ MAX_FILES = 500
 EXTENSIONS = {'.js', '.cjs', '.mjs', '.jsx', '.ts', '.tsx', '.json'}
 
 def safe_name(name):
-    p = PurePosixPath(name)
-    if p.is_absolute() or '..' in p.parts or '\\' in name or ':' in name or '\x00' in name:
+    if not name or not isinstance(name, str):
+        raise ValueError('Archive contains an empty or invalid path.')
+    if any(ord(c) < 32 for c in name) or '\x00' in name or '\\' in name or ':' in name:
         raise ValueError('Archive contains an unsafe path.')
-    return str(p)
+    if name.startswith('/') or name.startswith('~'):
+        raise ValueError('Archive contains an unsafe path.')
+    p = PurePosixPath(name)
+    if p.is_absolute() or '..' in p.parts:
+        raise ValueError('Archive contains an unsafe path.')
+    norm = str(p)
+    if norm in ('.', ''):
+        raise ValueError('Archive contains an empty or invalid path.')
+    return norm
 
 def archive(data, kind='zip'):
     files, warnings = {}, []
-    total = 0
+    actual_total = 0
+    seen_paths = set()
     stream = io.BytesIO(data)
-    handle = zipfile.ZipFile(stream) if kind == 'zip' else tarfile.open(fileobj=stream, mode='r:gz')
+    try:
+        handle = zipfile.ZipFile(stream) if kind == 'zip' else tarfile.open(fileobj=stream, mode='r:gz')
+    except Exception as error:
+        raise ValueError('Invalid or unsupported archive format.') from error
     with handle:
         members = handle.infolist() if kind == 'zip' else handle
         for index, item in enumerate(members):
             if index >= MAX_FILES:
                 raise ValueError('Archive exceeds the 500-entry limit.')
-            name = safe_name(item.filename if kind == 'zip' else item.name)
+            raw_name = item.filename if kind == 'zip' else item.name
+            name = safe_name(raw_name)
+            if name in seen_paths:
+                raise ValueError('Archive contains duplicate file names.')
+            seen_paths.add(name)
             if kind == 'zip':
-                if stat.S_ISLNK(item.external_attr >> 16):
-                    raise ValueError('Archive links are not supported.')
-                directory, size = item.is_dir(), item.file_size
+                mode = item.external_attr >> 16
+                if stat.S_ISLNK(mode) or stat.S_ISFIFO(mode) or stat.S_ISSOCK(mode) or stat.S_ISBLK(mode) or stat.S_ISCHR(mode):
+                    raise ValueError('Archive links and special files are not supported.')
+                directory, declared_size = item.is_dir(), item.file_size
             else:
                 if not (item.isfile() or item.isdir()):
                     raise ValueError('Archive links and special files are not supported.')
-                directory, size = item.isdir(), item.size
+                directory, declared_size = item.isdir(), item.size
             if directory:
                 continue
-            total += size
-            if size > MAX_FILE or total > MAX_EXPANDED:
+            if declared_size > MAX_FILE:
                 raise ValueError('Archive exceeds the 1 MB per-file or 25 MB expanded limit.')
-            if name in files:
-                raise ValueError('Archive contains duplicate file names.')
             if PurePosixPath(name).suffix not in EXTENSIONS or any(p in {'.git', 'node_modules'} for p in PurePosixPath(name).parts):
                 warnings.append('Skipped unsupported or excluded file: ' + name)
                 continue
-            reader = handle.open(item) if kind == 'zip' else handle.extractfile(item)
-            with reader:
-                content = reader.read(MAX_FILE + 1)
+            try:
+                reader = handle.open(item) if kind == 'zip' else handle.extractfile(item)
+                if reader is None:
+                    continue
+                with reader:
+                    content = reader.read(MAX_FILE + 1)
+            except Exception as error:
+                raise ValueError('Archive extraction failed or member is damaged.') from error
             if len(content) > MAX_FILE:
                 raise ValueError('Expanded file is too large.')
+            actual_total += len(content)
+            if actual_total > MAX_EXPANDED:
+                raise ValueError('Archive exceeds the 1 MB per-file or 25 MB expanded limit.')
             try:
                 files[name] = content.decode('utf-8')
             except UnicodeDecodeError:
@@ -73,8 +96,12 @@ def uploaded(name, data):
         raise ValueError('Upload a project ZIP, package.json, or package-lock.json.')
     if len(data) > MAX_FILE:
         raise ValueError('Manifest exceeds the 1 MB limit.')
-    text = data.decode('utf-8')
-    if not isinstance(json.loads(text), dict):
+    try:
+        text = data.decode('utf-8')
+        parsed = json.loads(text)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise ValueError('Manifest must be valid UTF-8 JSON.')
+    if not isinstance(parsed, dict):
         raise ValueError('Manifest must be a JSON object.')
     return {name: text}, []
 

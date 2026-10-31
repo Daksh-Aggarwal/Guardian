@@ -161,40 +161,100 @@ def lock_graph(files):
 
 
 def inspect_dependencies(files, analyzer, profile='fast', session=None, cancel=None):
-    session=session or RegistrySession(Budget.from_env(profile))
-    started=time.monotonic();nodes,expected,warnings=lock_graph(files);findings=[];file_count=0;analyzed={};attempts=set()
+    session = session or RegistrySession(Budget.from_env(profile))
+    started = time.monotonic()
+    nodes, expected, warnings = lock_graph(files)
+    findings = []
+    file_count = 0
+    analyzed = {}
+    attempts = set()
     from .engine import finding
-    for node in sorted(nodes,key=lambda n:n.depth if n.depth is not None else 9999):
-        if node.status!='uninspected':continue
-        if cancel and cancel.is_set():node.status='skipped';node.reason='Scan cancelled.';continue
-        key=(node.name,node.version)
-        if node.depth>session.budget.depth or (key not in attempts and len(attempts)>=session.budget.packages) or session.remaining()<=0:
-            node.status='skipped';node.reason='Dependency depth, package count, or time budget reached.';continue
+    for node in sorted(nodes, key=lambda n: n.depth if n.depth is not None else 9999):
+        if node.status != 'uninspected':
+            continue
+        if cancel and cancel.is_set():
+            node.status = 'not_attempted'
+            node.reason = 'Scan cancelled.'
+            continue
+        key = (node.name, node.version)
+        if node.depth > session.budget.depth or (key not in attempts and len(attempts) >= session.budget.packages) or session.remaining() <= 0:
+            node.status = 'skipped'
+            node.reason = 'Dependency depth, package count, or time budget reached.'
+            continue
         attempts.add(key)
         try:
-            result=session.retrieve(*key,expected.get(node.location))
-            node.integrity=result.integrity;node.registry_integrity=result.registry_integrity
-            failures=[x for x in [result.integrity,result.registry_integrity] if x.status not in {'verified','missing'}]
+            result = session.retrieve(*key, expected.get(node.location))
+            node.integrity = result.integrity
+            node.registry_integrity = result.registry_integrity
+            failures = [x for x in [result.integrity, result.registry_integrity] if x.status not in {'verified', 'missing'}]
             if failures:
-                node.status='integrity_failed';node.reason='Tarball was not extracted because integrity verification failed.'
-                f=finding('PACKAGE_INTEGRITY',f'{node.name}: integrity could not be verified','Package integrity','high','high',node.reason,'The downloaded file did not pass its supplied integrity check. Guardian did not inspect its contents.','The bytes may be different, damaged, or described by unsupported metadata. This does not establish malicious behavior.','Do not use these bytes; verify the lockfile, registry metadata, and package publisher.',[Evidence(file=node.location,snippet=x.expected or '',detail=x.detail) for x in failures]);f.domain='integrity';f.package=f'{node.name}@{node.version}';findings.append(f);node.finding_ids=[f.id];continue
+                node.status = 'integrity_failed'
+                node.reason = 'Tarball was not extracted because integrity verification failed.'
+                f = finding('PACKAGE_INTEGRITY', f'{node.name}: integrity could not be verified', 'Package integrity', 'high', 'high', node.reason, 'The downloaded file did not pass its supplied integrity check. Guardian did not inspect its contents.', 'The bytes may be different, damaged, or described by unsupported metadata. This does not establish malicious behavior.', 'Do not use these bytes; verify the lockfile, registry metadata, and package publisher.', [Evidence(file=node.location, snippet=x.expected or '', detail=x.detail) for x in failures])
+                f.domain = 'integrity'
+                f.package = f'{node.name}@{node.version}'
+                findings.append(f)
+                node.finding_ids = [f.id]
+                continue
             if key not in analyzed:
-                if session.remaining()<=0:raise BudgetExceeded('Time budget reached before source analysis.')
-                prefix=f'dependencies/{node.name}@{node.version}/'
-                namespaced={prefix+p:c for p,c in result.files.items()}
-                analyzed[key]=analyzer(namespaced,timeout=max(.1,min(20,session.remaining())))
-                _,_,package_findings,_,package_coverage,count=analyzed[key]
-                for f in package_findings:f.package=f'{node.name}@{node.version}'
-                findings.extend(package_findings);file_count+=count
+                if session.remaining() <= 0:
+                    raise BudgetExceeded('Time budget reached before source analysis.')
+                prefix = f'dependencies/{node.name}@{node.version}/'
+                namespaced = {prefix + p: c for p, c in result.files.items()}
+                analyzed[key] = analyzer(namespaced, timeout=max(0.1, min(20, session.remaining())))
+                _, _, package_findings, _, package_coverage, count = analyzed[key]
+                for f in package_findings:
+                    f.package = f'{node.name}@{node.version}'
+                findings.extend(package_findings)
+                file_count += count
                 warnings.extend(f'{node.name}@{node.version}: {w}' for w in package_coverage if not w.startswith('Static analysis only'))
-            package_findings=analyzed[key][2]
-            node.finding_ids=[f.id for f in package_findings]
-            node.status='inspected';node.reason='Bounded static inspection completed; check source coverage limitations.'
+            package_findings = analyzed[key][2]
+            node.finding_ids = [f.id for f in package_findings]
+            node.status = 'inspected'
+            node.reason = 'Bounded static inspection completed; check source coverage limitations.'
             warnings.extend(f'{node.name}@{node.version}: {w}' for w in result.warnings)
         except BudgetExceeded as error:
-            node.status='skipped';node.reason=str(error)
+            node.status = 'skipped'
+            node.reason = str(error)
         except Exception:
-            node.status='unavailable';node.reason='Registry metadata, tarball, or source inspection unavailable; package is uninspected.'
-    summary=InspectionSummary(total=len(nodes),direct=sum(n.direct for n in nodes),transitive=sum(not n.direct for n in nodes),inspected=sum(n.status=='inspected' for n in nodes),skipped=sum(n.status=='skipped' for n in nodes),unavailable=sum(n.status in {'unavailable','unresolved','uninspected','integrity_failed'} for n in nodes),packages_with_findings=sum(bool(n.finding_ids) for n in nodes),profile=profile,registry_requests=session.requests,downloaded_bytes=session.bytes,elapsed_ms=int((time.monotonic()-started)*1000))
-    if summary.inspected<summary.total:warnings.append(f'Dependency inspection incomplete: {summary.inspected}/{summary.total} locations inspected; skipped/unavailable packages are not evidence of safety.')
-    return nodes,summary,findings,warnings,file_count
+            node.status = 'unavailable'
+            node.reason = 'Registry metadata, tarball, or source inspection unavailable; package is uninspected.'
+    for node in nodes:
+        if node.status == 'uninspected':
+            node.status = 'not_attempted'
+            node.reason = 'Inspection not attempted.'
+    inspected_count = sum(n.status == 'inspected' for n in nodes)
+    skipped_count = sum(n.status == 'skipped' for n in nodes)
+    unavailable_count = sum(n.status == 'unavailable' for n in nodes)
+    unresolved_count = sum(n.status == 'unresolved' for n in nodes)
+    integrity_failed_count = sum(n.status == 'integrity_failed' for n in nodes)
+    not_attempted_count = sum(n.status == 'not_attempted' for n in nodes)
+    total_count = len(nodes)
+    direct_count = sum(bool(n.direct) for n in nodes)
+    transitive_count = sum(not n.direct for n in nodes)
+    summary = InspectionSummary(
+        total=total_count,
+        direct=direct_count,
+        transitive=transitive_count,
+        inspected=inspected_count,
+        skipped=skipped_count,
+        unavailable=unavailable_count,
+        unresolved=unresolved_count,
+        integrity_failed=integrity_failed_count,
+        not_attempted=not_attempted_count,
+        packages_with_findings=sum(bool(n.finding_ids) for n in nodes),
+        profile=profile,
+        registry_requests=session.requests,
+        downloaded_bytes=session.bytes,
+        elapsed_ms=int((time.monotonic() - started) * 1000)
+    )
+    if summary.inspected < summary.total:
+        parts = []
+        if summary.skipped: parts.append(f'{summary.skipped} skipped by budget')
+        if summary.unavailable: parts.append(f'{summary.unavailable} unavailable')
+        if summary.unresolved: parts.append(f'{summary.unresolved} unresolved')
+        if summary.integrity_failed: parts.append(f'{summary.integrity_failed} integrity failed')
+        if summary.not_attempted: parts.append(f'{summary.not_attempted} not attempted')
+        reasons = f" ({', '.join(parts)})" if parts else ""
+        warnings.append(f'Dependency inspection incomplete: {summary.inspected}/{summary.total} locations inspected{reasons}. Uninspected packages are not evidence of safety.')
+    return nodes, summary, findings, warnings, file_count

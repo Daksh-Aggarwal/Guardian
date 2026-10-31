@@ -18,7 +18,11 @@
 - [x] Safe scan cancellation endpoint (`POST /api/jobs/{id}/cancel`) and interactive UI control.
 - [x] Simple and Advanced report modes over identical finding models.
 - [x] Deterministic contextual explanation provider citing stored findings.
-- [x] Synthetic demonstration fixtures and comprehensive test suite (104 automated tests).
+- [x] Synthetic demonstration fixtures and comprehensive test suite (120 automated tests).
+- [x] Cooperative thread-safe scan cancellation with explicit job lifecycle states (`queued`, `running`, `cancelling`, `cancelled`, `complete`, `failed`) and atomic pre-persistence checks.
+- [x] Reconciled disjoint dependency inspection accounting across direct/transitive packages and six mutually exclusive statuses.
+- [x] Adversarially hardened OSV intelligence with batch/detail response caps, npm ecosystem validation, CVSS verification, withdrawn advisory filtering, and graceful batch match preservation.
+- [x] Archive ingestion hardening with normalized path collision rejection, control character detection, symlink/hardlink/special entry rejection, and aggregate decompression bomb protection.
 
 ## Next priorities
 

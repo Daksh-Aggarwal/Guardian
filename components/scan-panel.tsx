@@ -198,7 +198,7 @@ export default function ScanPanel({
           </div>
           <button
             className="text-link"
-            disabled={cancelling}
+            disabled={cancelling || job.status === "cancelling"}
             onClick={async () => {
               setCancelling(true);
               try {
@@ -209,7 +209,9 @@ export default function ScanPanel({
               }
             }}
           >
-            {cancelling ? "Cancelling…" : "Cancel scan"}
+            {cancelling || job.status === "cancelling"
+              ? "Cancelling…"
+              : "Cancel scan"}
           </button>
           <div className="progress-track">
             <span />

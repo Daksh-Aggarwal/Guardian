@@ -28,9 +28,9 @@ Every finding separates observed behavior, severity, detection confidence, infer
 
 **Simple mode** uses everyday explanations and readable evidence locations. **Advanced mode** reveals the same finding's observed behavior, rule ID, line/column, AST code snippet, and intermediate variable bindings. Switching modes preserves report state, finding IDs, assessment, and active selection.
 
-## Delivered capabilities (Intelligence Engine 2.0)
+## Delivered capabilities (Intelligence Engine 2.1: Trustworthiness and Security Hardening)
 
-Local npm-focused Next.js/FastAPI application; safe bounded ingestion; scope-aware lexical AST data-flow analysis with parameter, object-field, and cross-file propagation; modern lockfile traversal; SRI tarball verification; OSV vulnerability enrichment with CVSS and fix guidance; fast/deep inspection profiles; safe scan cancellation; SQLite persistence; deterministic explanation provider; responsive light/dark interface; comprehensive unit and regression test suite.
+Local npm-focused Next.js/FastAPI application; safe bounded ingestion with normalized path collision rejection, streaming decompression bomb limits, and special entry guards; scope-aware lexical AST data-flow analysis with parameter, object-field, and cross-file propagation; modern lockfile traversal with reconciled disjoint dependency accounting (`inspected`, `skipped`, `unavailable`, `unresolved`, `integrity_failed`, `not_attempted`); SRI tarball verification; adversarially validated OSV vulnerability enrichment with bounded responses, CVSS verification, and distinguished evidence quality; fast/deep inspection profiles; cooperative thread-safe scan cancellation with explicit lifecycle states (`queued`, `running`, `cancelling`, `cancelled`, `complete`, `failed`) and atomic pre-persistence checks; SQLite persistence; deterministic explanation provider; responsive light/dark interface; comprehensive 120-test automated verification suite.
 
 ## Product boundaries
 

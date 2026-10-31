@@ -117,6 +117,9 @@ export type InspectionSummary = {
   inspected: number;
   skipped: number;
   unavailable: number;
+  unresolved: number;
+  integrity_failed: number;
+  not_attempted: number;
   packages_with_findings: number;
   profile: string;
   registry_requests: number;

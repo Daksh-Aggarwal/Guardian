@@ -4,6 +4,8 @@
 
 Severity is potential review priority. Confidence measures strength of observed evidence, never probability that the author is malicious. Ordinary capabilities remain informational. The overall behavioral verdict follows the maximum severity of behavioral findings and names its supporting rules. Independent domains (behavior, vulnerabilities, integrity) are never collapsed into a single score. Critical is reserved in the contract; current rules emit up to high.
 
+When dependency or source inspection is incomplete (e.g. packages skipped due to budget, uninspected transitive nodes, or retrieval failures), the behavioral assessment rationale explicitly notes that inspection was partial and that an absence of signals in uninspected files does not certify package safety.
+
 | Rule | Evidence and rationale | Priority / confidence | Domain |
 |---|---|---|---|
 | CREDENTIAL_ACCESS | AST environment access (`process.env`), common AWS/GitHub/npm credential literals, or sensitive-file string (`.ssh/`, `id_rsa`, `.npmrc`, `.aws/credentials`) | info / high | behavior |
@@ -19,7 +21,7 @@ Severity is potential review priority. Confidence measures strength of observed 
 | FILESYSTEM | Common fs read/write/readdir calls, including promises | info / high | behavior |
 | TYPO | Edit distance one or selected character substitution compared with 25 curated popular npm names | medium / low | behavior |
 | PACKAGE_INTEGRITY | Published tarball failed Subresource Integrity (SRI) validation against lockfile or npm registry digest | high / high | integrity |
-| OSV | Exact npm version matched by OSV vulnerability database with published advisory details (CVSS, affected ranges, fixed boundaries) | advisory priority (medium default) / high match confidence | vulnerability |
+| OSV | Exact npm version matched by OSV vulnerability database with published advisory details (CVSS, affected ranges, fixed boundaries). When enrichment is unavailable, the batch match is preserved with `detail_status = 'unavailable'` and explicit limitation notes. | advisory priority (medium default) / high match confidence | vulnerability |
 
 ## Structured evidence
 
@@ -35,6 +37,7 @@ Each finding stores ID, rule, title, category, severity, confidence, observed be
 - **Interprocedural propagation**: Function arguments are mapped to formal parameter bindings and return values are tracked back to call sites.
 - **Cross-file tracing**: Static ES module (`import`/`export`) and CommonJS (`require`/`module.exports`) imports and exports are linked across project source files.
 - **Intentional authentication separation**: Sensitive values reaching HTTP `Authorization` headers or auth options are classified under `authentication` context with medium review priority and distinct explanations.
+- **Coverage-incomplete disclosures**: If packages or files are skipped due to budget limits, retrieval outages, or extraction failures, behavioral verdicts refuse to assert safety and explicitly disclose partial coverage.
 - **Explicit static inference**: All data-flow paths are labeled as static inference, not runtime proof. When an unknown transformation occurs on a path, confidence is downgraded to `low` and limitation notes are attached.
 - **Remaining gaps**:
   - Loops (`for`, `while`) and iteration constructs are not unrolled; variable mutations inside loops are approximated.

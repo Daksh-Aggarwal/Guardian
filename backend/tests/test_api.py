@@ -81,11 +81,11 @@ def test_job_cancellation():
     job_id = res.json()['id']
     cancel_res = client.post(f'/api/jobs/{job_id}/cancel')
     assert cancel_res.status_code == 200
-    assert cancel_res.json()['status'] in {'cancelled', 'complete'}
+    assert cancel_res.json()['status'] in {'cancelling', 'complete'}
     # Wait for worker thread to exit
     for _ in range(50):
         state = client.get(f'/api/jobs/{job_id}').json()
-        if state['status'] != 'running':
+        if state['status'] not in ('queued', 'running', 'cancelling'):
             break
         time.sleep(0.02)
     assert state['status'] in {'cancelled', 'complete'}
@@ -104,21 +104,70 @@ def test_cancellation_aborts_before_save():
     job_id = job_info['id']
     cancel_res = client.post(f'/api/jobs/{job_id}/cancel')
     assert cancel_res.status_code == 200
+    assert cancel_res.json()['status'] in {'cancelling', 'cancelled'}
     pause.set()
     for _ in range(50):
         state = client.get(f'/api/jobs/{job_id}').json()
-        if state['status'] != 'running':
+        if state['status'] not in ('queued', 'running', 'cancelling'):
             break
         time.sleep(0.02)
     assert state['status'] == 'cancelled'
     # Report must not have been saved
     assert client.get(f'/api/scans/{job_id}').status_code == 404
 
+def test_cancellation_immediately_before_persistence(monkeypatch):
+    import threading
+    from backend.guardian import main as main_mod
+    at_assess = threading.Event()
+    proceed = threading.Event()
+    original_assess = main_mod.assess
+    def hooked_assess(*args, **kwargs):
+        at_assess.set()
+        proceed.wait(timeout=2.0)
+        return original_assess(*args, **kwargs)
+    monkeypatch.setattr(main_mod, 'assess', hooked_assess)
+    res = client.post('/api/scans/example/benign')
+    assert res.status_code == 202
+    job_id = res.json()['id']
+    assert at_assess.wait(timeout=2.0)
+    cancel_res = client.post(f'/api/jobs/{job_id}/cancel')
+    assert cancel_res.status_code == 200
+    assert cancel_res.json()['status'] == 'cancelling'
+    proceed.set()
+    for _ in range(50):
+        state = client.get(f'/api/jobs/{job_id}').json()
+        if state['status'] not in ('queued', 'running', 'cancelling'):
+            break
+        time.sleep(0.02)
+    assert state['status'] == 'cancelled'
+    assert client.get(f'/api/scans/{job_id}').status_code == 404
+
+def test_completed_job_cancel_is_idempotent_and_does_not_revert():
+    report = completed(client.post('/api/scans/example/benign'))
+    job_id = report['id']
+    cancel_res = client.post(f'/api/jobs/{job_id}/cancel')
+    assert cancel_res.status_code == 200
+    assert cancel_res.json()['status'] == 'complete'
+    # Repeated calls are idempotent
+    cancel_res2 = client.post(f'/api/jobs/{job_id}/cancel')
+    assert cancel_res2.status_code == 200
+    assert cancel_res2.json()['status'] == 'complete'
+    # Report remains intact
+    assert client.get(f'/api/scans/{job_id}').status_code == 200
+
 def test_profile_selection(monkeypatch):
     res = client.post('/api/scans/upload', data={'profile': 'deep'}, files={'files': ('package.json', b'{"name":"demo"}', 'application/json')})
     assert res.status_code == 202
     report = completed(res)
     assert report['inspection_summary']['profile'] == 'deep'
+
+def test_dependency_accounting_reconciliation():
+    report = completed(client.post('/api/scans/example/benign'))
+    summary = report['inspection_summary']
+    assert summary is not None
+    total = summary['total']
+    assert summary['direct'] + summary['transitive'] == total
+    assert summary['inspected'] + summary['skipped'] + summary['unavailable'] + summary['unresolved'] + summary['integrity_failed'] + summary['not_attempted'] == total
 
 def test_legacy_report_compatibility():
     import json

@@ -97,6 +97,9 @@ class InspectionSummary(BaseModel):
     inspected: int = 0
     skipped: int = 0
     unavailable: int = 0
+    unresolved: int = 0
+    integrity_failed: int = 0
+    not_attempted: int = 0
     packages_with_findings: int = 0
     profile: str = 'fast'
     registry_requests: int = 0

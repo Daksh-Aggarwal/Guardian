@@ -28,12 +28,17 @@ FIXTURES = Path(__file__).resolve().parents[2] / 'fixtures'
 
 def stage(job_id, label):
     with LOCK:
-        if job_id in JOBS and not (CANCELLATIONS.get(job_id) and CANCELLATIONS[job_id].is_set()):
+        if job_id in JOBS and JOBS[job_id]['status'] in ('queued', 'running'):
             JOBS[job_id]['stage'] = label
 
 def run(job_id, loader, source, profile):
     started = time.monotonic()
     try:
+        with LOCK:
+            cancel = CANCELLATIONS[job_id]
+            if cancel.is_set() or JOBS[job_id]['status'] in ('cancelling', 'cancelled'):
+                return
+            JOBS[job_id]['status'] = 'running'
         stage(job_id, 'Inspecting input')
         loaded = loader()
         root_integrity = None
@@ -43,7 +48,6 @@ def run(job_id, loader, source, profile):
             root_integrity = root_result.registry_integrity
         else:
             files, warnings = loaded
-        cancel = CANCELLATIONS[job_id]
         if cancel.is_set(): return
         stage(job_id, 'Analyzing source & dependencies')
         name, version, findings, deps, coverage, count = analyze(files)
@@ -73,20 +77,34 @@ def run(job_id, loader, source, profile):
         findings += known
         findings.sort(key=lambda f: RANK[f.severity], reverse=True)
         stage(job_id, 'Building evidence-backed report')
-        risk, rationale = assess(findings)
+        coverage_incomplete = bool(inspection_summary and inspection_summary.inspected < inspection_summary.total) or bool(warnings or dep_warnings or intel_warnings)
+        risk, rationale = assess(findings, coverage_incomplete=coverage_incomplete)
         report = Report(id=job_id, name=name, version=version, created_at=datetime.now(timezone.utc).isoformat(), source=source, risk=risk, rationale=rationale, findings=findings, dependencies=deps, files_analyzed=count, coverage=warnings[:30]+coverage+intel_warnings, intelligence=intelligence, duration_ms=int((time.monotonic()-started)*1000), engine_version='2', inspections=inspections, inspection_summary=inspection_summary, root_integrity=root_integrity,
             assessments={'behavior': {'risk':risk,'rationale':rationale},
                          'vulnerabilities':{'count':len(known),'status':intelligence},
                          'integrity':{'concerns':sum(f.domain=='integrity' for f in findings),'root_status':root_integrity.status if root_integrity else 'not applicable'},
-                         'inspection':{'inspected':inspection_summary.inspected,'total':inspection_summary.total,'status':'complete within stated source limits' if inspection_summary.inspected==inspection_summary.total else 'incomplete'}})
-        storage.save(report)
+                         'inspection':{
+                             'total': inspection_summary.total,
+                             'direct': inspection_summary.direct,
+                             'transitive': inspection_summary.transitive,
+                             'inspected': inspection_summary.inspected,
+                             'skipped': inspection_summary.skipped,
+                             'unavailable': inspection_summary.unavailable,
+                             'unresolved': inspection_summary.unresolved,
+                             'integrity_failed': inspection_summary.integrity_failed,
+                             'not_attempted': inspection_summary.not_attempted,
+                             'status': 'complete' if inspection_summary.total > 0 and inspection_summary.inspected == inspection_summary.total else ('no dependencies' if inspection_summary.total == 0 else 'incomplete')
+                         }})
         with LOCK:
+            if cancel.is_set() or JOBS[job_id]['status'] in ('cancelling', 'cancelled'):
+                return
+            storage.save(report)
             JOBS[job_id].update(status='complete', stage='Complete')
     except Exception as error:
         # Do not include server paths, credentials, or raw upstream responses.
         message = str(error) if isinstance(error, ValueError) else 'Could not inspect this input. Check the archive, package name, version, and network access.'
         with LOCK:
-            if not CANCELLATIONS[job_id].is_set():
+            if not (CANCELLATIONS[job_id].is_set() or JOBS[job_id]['status'] in ('cancelling', 'cancelled')):
                 JOBS[job_id].update(status='failed', stage='Stopped', error=message[:400])
     finally:
         with LOCK:
@@ -102,11 +120,11 @@ def submit(loader, source, profile="fast"):
         # Only retain the most recent completed job states; reports stay in SQLite.
         if len(JOBS) >= 100:
             for old in list(JOBS):
-                if JOBS[old]['status'] != 'running':
+                if JOBS[old]['status'] not in ('queued', 'running', 'cancelling'):
                     del JOBS[old]
                     CANCELLATIONS.pop(old, None)
                     break
-        JOBS[job_id] = {'id':job_id, 'status':'running', 'stage':'Queued'}
+        JOBS[job_id] = {'id':job_id, 'status':'queued', 'stage':'Queued'}
         CANCELLATIONS[job_id] = threading.Event()
     threading.Thread(target=run, args=(job_id, loader, source, profile), daemon=True).start()
     return {'id':job_id}
@@ -187,7 +205,12 @@ def cancel_job(job_id: str):
         state = JOBS.get(job_id)
         if not state:
             raise HTTPException(404, 'Scan job not found')
-        if state['status'] == 'running':
+        if state['status'] in ('complete', 'failed', 'cancelled'):
+            return dict(state)
+        if state['status'] in ('queued', 'running'):
             CANCELLATIONS[job_id].set()
-            state.update(status='cancelled', stage='Cancelled; active bounded operation will finish before releasing its slot')
+            state.update(status='cancelling', stage='Cancelling scan...')
+            return dict(state)
+        if state['status'] == 'cancelling':
+            return dict(state)
         return dict(state)

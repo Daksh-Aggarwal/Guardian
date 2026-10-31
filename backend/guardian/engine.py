@@ -144,10 +144,14 @@ def analyze(files, limits=None, timeout=20):
     findings.sort(key=lambda f: RANK[f.severity], reverse=True)
     return name, version, findings, dependencies, coverage, count
 
-def assess(findings):
+def assess(findings, coverage_incomplete=False):
     findings = [f for f in findings if f.domain == 'behavior' and f.rule != 'OSV']
     strongest = max((RANK[f.severity] for f in findings), default=0)
     risk = {0:'No elevated signals', 1:'Review suggested', 2:'Review recommended', 3:'High concern', 4:'Critical concern'}[strongest]
     elevated = [f for f in findings if RANK[f.severity] == strongest and strongest > 0]
-    rationale = ('Highest-priority evidence: ' + '; '.join(dict.fromkeys(f.title for f in elevated)) + '. This is a review priority, not a malware verdict.') if elevated else 'No elevated signals were detected in the inspected content. This does not establish that the package is safe.'
+    if elevated:
+        suffix = ' Note that dependency or source coverage was incomplete; check coverage details.' if coverage_incomplete else ''
+        rationale = 'Highest-priority evidence: ' + '; '.join(dict.fromkeys(f.title for f in elevated)) + '. This is a review priority, not a malware verdict.' + suffix
+    else:
+        rationale = 'No elevated signals were detected in the inspected source code. However, dependency inspection or source coverage was incomplete; review coverage limitations before making a trust decision.' if coverage_incomplete else 'No elevated signals were detected in the inspected content. This does not establish that the package is safe.'
     return risk, rationale

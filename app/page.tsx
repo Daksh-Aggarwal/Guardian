@@ -34,7 +34,10 @@ export default function Home() {
     [connected, setConnected] = useState(false),
     [loading, setLoading] = useState(true),
     [search, setSearch] = useState("");
-  const busy = job?.status === "running";
+  const busy =
+    job?.status === "running" ||
+    job?.status === "queued" ||
+    job?.status === "cancelling";
   const refresh = useCallback(async () => {
     try {
       setReports(await api<Report[]>("/scans"));
@@ -107,7 +110,7 @@ export default function Home() {
   function start(id: string) {
     setError("");
     navigate("Overview");
-    setJob({ id, status: "running", stage: "Queued" });
+    setJob({ id, status: "queued", stage: "Queued" });
     document
       .getElementById("new-scan")
       ?.scrollIntoView({ behavior: "smooth", block: "center" });

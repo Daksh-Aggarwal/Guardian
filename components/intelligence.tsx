@@ -57,11 +57,17 @@ export function IntelligenceOverview({ report }: { report: Report }) {
         <Package size={17} />
         <Eyebrow>SOURCE INSPECTION</Eyebrow>
         <strong>
-          {summary?.inspected ?? 0} / {totalDeps} dependencies
+          {summary?.inspected ?? 0} / {totalDeps} dependencies inspected
         </strong>
         <p>
-          {summary?.skipped ?? 0} budget-limited · {summary?.unavailable ?? 0}{" "}
-          unresolved or unavailable
+          {summary?.skipped ?? 0} skipped (budget) · {summary?.unavailable ?? 0}{" "}
+          unavailable · {summary?.unresolved ?? 0} unresolved
+          {(summary?.integrity_failed ?? 0) > 0
+            ? ` · ${summary?.integrity_failed} integrity failed`
+            : ""}
+          {(summary?.not_attempted ?? 0) > 0
+            ? ` · ${summary?.not_attempted} not attempted`
+            : ""}
         </p>
       </div>
     </div>
@@ -137,16 +143,42 @@ export function DependencyInspection({
             ["Direct", summary.direct],
             ["Transitive", summary.transitive],
             ["Inspected", summary.inspected],
-            ["Skipped", summary.skipped],
-            ["Unavailable / unresolved", summary.unavailable],
+            ["Skipped (budget)", summary.skipped],
+            ["Unavailable", summary.unavailable],
+            ["Unresolved", summary.unresolved ?? 0],
+            ["Integrity failed", summary.integrity_failed ?? 0],
+            ["Not attempted", summary.not_attempted ?? 0],
             ["With findings", summary.packages_with_findings],
           ].map(([label, value]) => (
-            <div key={label}>
+            <div key={label as string}>
               <strong>{value}</strong>
               <span>{label}</span>
             </div>
           ))}
         </div>
+      )}
+      {!advanced && summary && summary.inspected < summary.total && (
+        <Note>
+          Guardian inspected {summary.inspected} of {summary.total} dependency
+          locations ({summary.direct} direct, {summary.transitive} transitive).{" "}
+          {summary.skipped > 0
+            ? `${summary.skipped} skipped by budget profile. `
+            : ""}
+          {summary.unavailable > 0
+            ? `${summary.unavailable} unavailable from registry. `
+            : ""}
+          {summary.unresolved > 0
+            ? `${summary.unresolved} unresolved from manifests. `
+            : ""}
+          {summary.integrity_failed > 0
+            ? `${summary.integrity_failed} failed checksum verification. `
+            : ""}
+          {summary.not_attempted > 0
+            ? `${summary.not_attempted} not attempted. `
+            : ""}
+          Uninspected dependencies are not certified safe and may contain hidden
+          behaviors.
+        </Note>
       )}
       {!!nodes.length && (
         <div className="history-search">
