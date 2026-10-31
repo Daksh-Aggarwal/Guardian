@@ -78,7 +78,7 @@ export default function ProjectWorkspace({
   allReports = [],
   onOpenReportView,
 }: {
-  onBack: () => void;
+  onBack?: () => void;
   onReportGenerated?: (report: Report) => void;
   onDirectoryHandleChange?: (handle: FileSystemDirectoryHandle | null) => void;
   initialReport?: Report | null;
@@ -654,10 +654,6 @@ export default function ProjectWorkspace({
               Standard Report View
             </button>
           )}
-
-          <button onClick={onBack} className="button secondary compact">
-            Dashboard
-          </button>
         </div>
       </div>
 
