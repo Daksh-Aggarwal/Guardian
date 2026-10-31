@@ -9,6 +9,9 @@
 - `components/intelligence.tsx`: independent assessment cards, dependency inspection tree, SRI integrity details, source-to-sink data-flow visualization, and advisory details.
 - `components/explainer.tsx`: contextual question UI and finding citations.
 - `components/ui.tsx`: design system primitives (`MetricCard`, `SecurityDimensionCard`, `RecommendedActionCard`, `StatusChip`, `Badge`, `Brand`, `Empty`, `Note`, `SectionHeader`).
+- `backend/guardian/handoff_models.py`: canonical Pydantic contracts for `CanonicalHandoff` (schema v1.0.0), `FindingSummary`, `DependencyContext`, `ProposedRemediation`, `ValidationRequirement`, `FollowUpInvestigation`, `ProjectProvenance`, `ScanProvenance`, and `HandoffExportResponse`.
+- `backend/guardian/handoff.py`: authoritative canonical handoff builder, deterministic remediation generator, secret-sanitizing markdown formatter, machine-readable JSON appendix serializer, and target-specific format adapters (`universal`, `claude_code`, `cursor`, `codex`, `github_copilot`).
+- `components/handoff-modal.tsx`: Guardian Handoff 1.0 export modal featuring target agent selection, remediation mode toggling (`focused_fix` vs `deep_remediation`), dynamic scope adjustment, formatted markdown preview, raw editor, JSON appendix viewer, and safe filename downloader.
 - `lib/types.ts`: typed frontend report and job contracts, HTTP error handling, and API client.
 - `lib/accounting.ts`: authoritative frontend data accounting selectors (`getDependencyAccounting`, `getFindingBreakdown`) enforcing strict arithmetic reconciliation across reports, cards, and workspace views.
 - `components/project-workspace.tsx`: project investigation workspace integrating all 6 interactive security views (Overview, Dependency Graph, Vulnerabilities, Behavioral Flows, Remediation History, Security Timeline), historical scan selector, and local project folder binding.
@@ -179,6 +182,23 @@ Assessment areas and coverage dimensions remain strictly independent (Intelligen
 - Registry downloads are strictly HTTPS `registry.npmjs.org` only, standard port, no redirects, bounded downloads (20 MB fast / 50 MB deep). No arbitrary URL fetching.
 - OSV responses are bounded: 4 MB batch cap, 8 MB aggregate batch pagination cap, 2 MB detail cap, 5-page per-dependency limit, 15-second total timeout, query count validation, npm package/ecosystem check, CVSS type verification, and HTTPS-only reference URLs.
 - Trusted parser uses fixed argv, stdin source data, no shell, 20-second timeout, and 256 MB heap. Bounded call depth (default 8) and module limits (default 100) prevent resource exhaustion.
+
+## Guardian Handoff 1.0 Architecture
+
+Guardian Handoff 1.0 provides an AI-agnostic bridge between Guardian's authoritative security scanner and external coding agents (Universal Markdown, Claude Code, Cursor, OpenAI Codex, and GitHub Copilot).
+
+### Core Architectural Principles
+1. **Single Canonical Handoff Model**: All target formats derive from `CanonicalHandoff` (`backend/guardian/handoff_models.py`). Target adapters do not make independent assumptions or invent evidence.
+2. **Authoritative Evidence Grounding**: Findings, advisories, fixed versions, and file locations originate directly from Guardian scan reports stored in SQLite. Missing data is represented explicitly as unavailable.
+3. **Decoupled Remediation Modes**:
+   - `focused_fix`: Minimal safe edits, direct finding verification, backward compatibility preservation, and regression test requirements.
+   - `deep_remediation`: Architectural and systemic investigation including direct/transitive relationships, shared dependency trees, lockfile consistency, repository-wide pattern searches, and package integrity.
+4. **Machine-Readable Appendix**: Every export contains a `## Guardian Evidence Appendix` fenced JSON block with versioned schema `1.0.0` allowing programmatic consumption by downstream tooling.
+5. **Security & Redaction Guarantees**:
+   - Automated secret redaction via `redact.py` removes credentials, tokens, and private keys.
+   - HTML and markdown injection sanitization neutralizes malicious scripts or formatting tags in third-party metadata.
+   - Adversarial prompt-injection defense instructs receiving agents to treat all repository excerpts and package metadata as inert untrusted data.
+   - Zero automatic filesystem writes or Git commits: instructions are portable and require explicit developer review.
 - At most two concurrent analysis jobs via `BoundedSemaphore(2)`. Cooperative scan cancellation releases the semaphore slot exactly once. Atomic persistence lock ensures cancellations accepted before persistence discard the report, while scans already persisting under lock complete safely.
 - OSV sends names and versions only; source snippets stay local.
 - Local-only server binding (127.0.0.1) and no authentication. Do not expose this prototype to untrusted network clients.

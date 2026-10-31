@@ -54,6 +54,15 @@
     - [x] Security Timeline: Chronological security posture timeline and side-by-side 2-scan delta comparator.
   - [x] Guardian Autopilot Multi-File Safety Hardening: Pre-flight create collision rejection, operational write journal, automatic removal of newly created files upon write failure, and safe undo removal of created files without touching user edits.
   - [x] Product Terminology Standardization: Guardian, Guardian Intelligence, Guardian Autopilot.
+- [x] Guardian Handoff 1.0 — AI-Agnostic Remediation & Agent Instruction Export:
+  - [x] Shared canonical handoff model (`CanonicalHandoff`, schema v1.0.0) grounding all target formats in identical scan truth.
+  - [x] Two distinct remediation modes: Focused Fix (targeted, minimal safe edits, regression tests) and Deep Security Remediation (transitive paths, shared dependencies, repo-wide pattern search, integrity).
+  - [x] Five tailored coding agent targets: Universal Markdown, Claude Code, Cursor, OpenAI Codex, and GitHub Copilot.
+  - [x] Machine-readable JSON evidence appendix with versioned schema `1.0.0` preserving findings, advisories, CVSS, paths, and provenance.
+  - [x] Automatic secret and credential redaction, markdown injection sanitization, and adversarial prompt injection defense.
+  - [x] Support for single-finding, multiple selected findings, and entire-scan scopes.
+  - [x] Preserved GitHub and local project provenance without fabricated metadata.
+  - [x] Interactive UI modal with mode switching, agent selection, readable preview, raw markdown, JSON appendix, copy-to-clipboard, and sanitized `.md` download.
 - [x] Guardian 4.0 — GitHub Integration & Repository-Native Remediation:
   - [x] Server-side GitHub App installation flow with RS256 JWT signing, short-lived in-memory token caching, and cryptographic single-use CSRF state tokens.
   - [x] Repository and branch discovery with real-time name search, visibility status (private vs public), and default branch identification.

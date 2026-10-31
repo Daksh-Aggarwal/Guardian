@@ -4,6 +4,22 @@
 
 ## What works
 
+- **Guardian Handoff 1.0 — AI-Agnostic Remediation & Agent Instruction Export**:
+  - **Shared Canonical Handoff Architecture**: Single canonical, validated, evidence-backed representation (`CanonicalHandoff`, schema v1.0.0) from which all target export formats are deterministically derived. Avoids prompt drift and guarantees identical ground truth across all coding agents.
+  - **Two Distinct Remediation Modes**:
+    - *Focused Fix*: Generates targeted instructions for one or more selected findings, directing the receiving agent to confirm issue presence in the current checkout, identify root causes, implement minimal safe edits, preserve compatibility, add regression tests, and report unresolved areas.
+    - *Deep Security Remediation*: Comprehensive security investigation instructions expanding beyond direct findings to analyze direct and transitive dependency trees, inspect shared package paths, evaluate lockfile consistency, search repository-wide for similar insecure call patterns, check package integrity and provenance, and formulate prioritized follow-up security concerns.
+  - **Five Tailored Agent Target Adapters**:
+    1. *Universal Markdown*: Self-contained instruction package suitable for ChatGPT, Gemini, Claude, or any desktop/web coding assistant.
+    2. *Claude Code*: Autonomous CLI agent workflow emphasizing file pre-inspection, minimal targeted edits, test execution commands, and concise terminal output.
+    3. *Cursor*: Interactive IDE pair-programming workflow emphasizing workspace file references, scoped interactive edits, and immediate linter/typechecker verification.
+    4. *OpenAI Codex*: Agentic repository repair workflow emphasizing architecture conventions, deterministic change planning, and command output reporting.
+    5. *GitHub Copilot*: GitHub-aligned chat and agent workflow emphasizing repo coding standards, regression tests, and pull request safety.
+  - **Machine-Readable JSON Evidence Appendix**: Every export includes an independently parseable `## Guardian Evidence Appendix` fenced JSON block adhering to versioned schema `1.0.0`, preserving finding IDs, advisory references, CVSS ratings, dependency paths, and provenance.
+  - **Security & Privacy Defense**: Automated redaction of API keys, AWS credentials, GitHub tokens, and private keys via `redact.py`; prompt-injection defensive framing instructing receiving agents to treat all package names, descriptions, and code excerpts strictly as inert untrusted data; explicit human developer approval requirements; and zero arbitrary local filesystem writes (portable instructions only).
+  - **GitHub & Local Project Provenance**: Preserves exact repository IDs, branches, URLs, and immutable commit SHAs for GitHub scans, while accurately identifying local project scans without fabricating GitHub metadata. Discloses scan commit vs current repository snapshot differences.
+  - **Interactive Handoff Interface**: Modal dialog with dynamic mode switching, agent target selection, scope toggle (Single finding / Selected findings / Entire scan), real-time summary statistics, readable instruction preview, raw markdown view, JSON appendix view, one-click clipboard copying, and sanitized `.md` file download.
+
 - **Guardian 4.0 — GitHub Integration & Repository-Native Remediation**:
   - **GitHub App Connection & Secure Session Handling**: Server-side GitHub App installation flow with RS256 JWT generation, short-lived in-memory token caching with expiration buffers, single-use cryptographic CSRF state parameters, and active connection management. Zero client-side token exposure and zero plaintext installation tokens in SQLite.
   - **Repository & Branch Discovery**: Live discovery of accessible user and organization repositories with name search, private vs public indicators, default branch detection, and branch resolution to immutable commit SHAs.

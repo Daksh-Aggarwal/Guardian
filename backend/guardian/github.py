@@ -271,8 +271,16 @@ def _call_app_api(endpoint: str, method: str = "GET", json_data: Any = None) -> 
 
     return resp.json() if resp.content else {}
 
-def get_installation_access_token(installation_id: int, force_refresh: bool = False) -> str:
+def get_installation_access_token(
+    installation_id: int,
+    force_refresh: bool = False,
+    session_id: Optional[str] = None
+) -> str:
     """Retrieves short-lived installation access token with in-memory caching."""
+    if session_id is not None:
+        if not session_manager.is_installation_authorized(session_id, installation_id):
+            raise PermissionError(f"Installation {installation_id} is not authorized for this session.")
+
     now = time.time()
     if not force_refresh:
         with _token_lock:
@@ -719,11 +727,24 @@ def handle_installation_callback(
     return inst_record
 
 def _resolve_active_installation_id(session_id: Optional[str] = None) -> int:
-    """Helper to resolve active installation ID with session and storage fallback."""
-    inst_id = session_manager.get_selected_installation_id(session_id)
-    if not inst_id:
-        raise ValueError("No GitHub App installation is connected.")
-    return inst_id
+    """Helper to resolve active installation ID for GitHub operations.
+    
+    STRICT: If session_id is provided, strictly enforces that the session is authorized
+    and has selected an installation. No global fallback permitted.
+    If session_id is None (internal/direct Python unit tests), resolves from storage.
+    """
+    if session_id is not None:
+        if not session_manager.is_session_valid(session_id):
+            raise ValueError("Session is invalid or expired. Please reinitialize session.")
+        inst_id = session_manager.get_selected_installation_id(session_id)
+        if not inst_id:
+            raise ValueError("No GitHub App installation is selected or authorized for this session.")
+        return inst_id
+
+    active = storage.get_active_github_installation()
+    if active and active.get("id"):
+        return active["id"]
+    raise ValueError("No GitHub App installation is configured or active.")
 
 # Repository Discovery
 def list_repositories(query: Optional[str] = None, session_id: Optional[str] = None) -> List[Dict[str, Any]]:

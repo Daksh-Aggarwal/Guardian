@@ -140,7 +140,11 @@ export type AIStatus = {
   max_turns: number;
 };
 export async function api<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch("/api" + path, options);
+  const mergedOptions: RequestInit = {
+    credentials: "include",
+    ...options,
+  };
+  const res = await fetch("/api" + path, mergedOptions);
   if (!res.ok) {
     let message =
       "The service is unavailable. Check that the backend is running.";
@@ -367,6 +371,181 @@ export type ProjectMetadata = {
   manifest_paths: string[];
   created_at: string;
   expires_at: string;
+};
+
+export type HandoffTarget =
+  | "universal"
+  | "claude_code"
+  | "cursor"
+  | "codex"
+  | "github_copilot";
+
+export type RemediationMode = "focused_fix" | "deep_remediation";
+export type HandoffScope = "finding" | "findings" | "scan";
+
+export type EvidenceLocation = {
+  file: string;
+  line: number;
+  column: number;
+  snippet: string;
+  detail: string;
+};
+
+export type AdvisoryDetail = {
+  id: string;
+  summary?: string | null;
+  severity?: string | null;
+  cvss: { type: string; score: string }[];
+  fixed_versions: string[];
+  aliases: string[];
+};
+
+export type FindingSummary = {
+  finding_id: string;
+  rule: string;
+  title: string;
+  category: string;
+  severity: Severity;
+  confidence: string;
+  observed: string;
+  explanation: string;
+  implication: string;
+  recommendation: string;
+  references: string[];
+  domain: string;
+  package?: string | null;
+  advisory?: AdvisoryDetail | null;
+  evidence: EvidenceLocation[];
+  limitations: string[];
+  data_flows_count: number;
+};
+
+export type DependencyContext = {
+  name: string;
+  version: string;
+  direct: boolean;
+  source: string;
+  ecosystem: string;
+  advisory_ids: string[];
+  fixed_versions: string[];
+  integrity_status: string;
+};
+
+export type ProposedRemediation = {
+  id: string;
+  finding_ids: string[];
+  title: string;
+  action_type: "upgrade_dependency" | "remove_script" | "source_patch" | "investigate_manual";
+  description: string;
+  rationale: string;
+  expected_benefits: string[];
+  risks_and_tradeoffs: string[];
+  alternatives: string[];
+  verification_steps: string[];
+};
+
+export type ValidationRequirement = {
+  category: "test_suite" | "integrity_check" | "build_and_typecheck" | "manual_verification";
+  title: string;
+  description: string;
+  suggested_command?: string | null;
+};
+
+export type FollowUpInvestigation = {
+  topic: string;
+  description: string;
+  reason: string;
+  investigation_steps: string[];
+};
+
+export type ProjectProvenance = {
+  project_id?: string | null;
+  name: string;
+  framework?: string | null;
+  runtime?: string | null;
+  language?: string | null;
+  is_github: boolean;
+  github_repository_id?: number | null;
+  github_owner?: string | null;
+  github_repo_name?: string | null;
+  github_branch?: string | null;
+  github_commit_sha?: string | null;
+  github_repo_url?: string | null;
+  is_snapshot_stale_warning: boolean;
+};
+
+export type ScanProvenance = {
+  scan_id: string;
+  scan_timestamp: string;
+  risk_level: string;
+  files_analyzed: number;
+  duration_ms: number;
+  engine_version: string;
+  classification: "real" | "demo";
+  source_description: string;
+};
+
+export type CoverageProvenance = {
+  coverage_status: string;
+  coverage_notes: string[];
+  total_dependencies: number;
+  direct_dependencies: number;
+  transitive_dependencies: number;
+  inspected_count: number;
+  skipped_count: number;
+  unavailable_count: number;
+  integrity_failed_count: number;
+  limitations: string[];
+};
+
+export type CanonicalHandoff = {
+  schema_version: string;
+  handoff_id: string;
+  generated_at: string;
+  target_agent: HandoffTarget;
+  remediation_mode: RemediationMode;
+  scope: HandoffScope;
+  project: ProjectProvenance;
+  scan: ScanProvenance;
+  coverage: CoverageProvenance;
+  findings: FindingSummary[];
+  dependencies: DependencyContext[];
+  impact_assessment: Record<string, unknown>;
+  root_cause_hypotheses: Array<Record<string, string>>;
+  proposed_remediations: ProposedRemediation[];
+  alternative_solutions: Array<{ name: string; description: string }>;
+  implementation_constraints: string[];
+  validation_requirements: ValidationRequirement[];
+  follow_up_investigations: FollowUpInvestigation[];
+  safety_instructions: string[];
+  output_reporting_requirements: string[];
+};
+
+export type HandoffSummaryStats = {
+  title: string;
+  target_agent: HandoffTarget;
+  remediation_mode: RemediationMode;
+  scope: HandoffScope;
+  findings_count: number;
+  severity_breakdown: Record<string, number>;
+  evidence_locations_count: number;
+  affected_dependencies_count: number;
+  validation_checks_count: number;
+  limitations_count: number;
+  suggested_filename: string;
+};
+
+export type HandoffExportResponse = {
+  canonical: CanonicalHandoff;
+  markdown: string;
+  json_appendix: Record<string, unknown>;
+  summary: HandoffSummaryStats;
+};
+
+export type HandoffRequest = {
+  target?: HandoffTarget;
+  mode?: RemediationMode;
+  finding_ids?: string[] | null;
 };
 
 export type { DependencyAccounting, FindingBreakdown } from "./accounting";

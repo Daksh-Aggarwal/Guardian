@@ -14,6 +14,7 @@ import {
   Filter,
   CheckCircle2,
   Package,
+  Share2,
 } from "lucide-react";
 import { Report, Finding, parsePackageSpecifier } from "@/lib/types";
 import { Eyebrow, Badge } from "./ui";
@@ -24,18 +25,39 @@ export default function VulnerabilitiesExplorer({
   onAskIntelligence,
   onRemediateFinding,
   onViewFindingEvidence,
+  onHandoffFinding,
+  onHandoffScan,
+  onHandoffSelected,
 }: {
   report: Report;
   onSelectGraphPackage?: (packageName: string) => void;
   onAskIntelligence?: (findingId: string) => void;
   onRemediateFinding?: (findingId: string) => void;
   onViewFindingEvidence?: (findingId: string) => void;
+  onHandoffFinding?: (findingId: string) => void;
+  onHandoffScan?: () => void;
+  onHandoffSelected?: (findingIds: string[]) => void;
 }) {
   const [search, setSearch] = useState("");
   const [severityFilter, setSeverityFilter] = useState<string>("all");
   const [selectedAdvisoryId, setSelectedAdvisoryId] = useState<string | null>(
     null,
   );
+  const [selectedFindingIds, setSelectedFindingIds] = useState<Set<string>>(
+    new Set()
+  );
+
+  const toggleSelectFinding = (findingId: string) => {
+    setSelectedFindingIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(findingId)) {
+        next.delete(findingId);
+      } else {
+        next.add(findingId);
+      }
+      return next;
+    });
+  };
 
   // Extract OSV advisory findings
   const osvFindings = useMemo(() => {
@@ -193,6 +215,35 @@ export default function VulnerabilitiesExplorer({
             <option value="medium">Medium</option>
             <option value="low">Low</option>
           </select>
+
+          {/* Guardian Handoff Action */}
+          {(onHandoffSelected || onHandoffScan) && (
+            <button
+              onClick={() => {
+                if (selectedFindingIds.size > 0 && onHandoffSelected) {
+                  onHandoffSelected(Array.from(selectedFindingIds));
+                } else if (onHandoffScan) {
+                  onHandoffScan();
+                }
+              }}
+              className="button secondary compact"
+              style={{
+                fontSize: "12px",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "5px",
+                padding: "6px 12px",
+              }}
+              title="Export AI-agnostic remediation instructions"
+            >
+              <Share2 size={13} color="var(--accent)" />
+              <span>
+                {selectedFindingIds.size > 0
+                  ? `Get AI Fix Instructions (${selectedFindingIds.size})`
+                  : "Get AI Fix Instructions"}
+              </span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -363,6 +414,18 @@ export default function VulnerabilitiesExplorer({
                               marginBottom: "4px",
                             }}
                           >
+                            <input
+                              type="checkbox"
+                              checked={selectedFindingIds.has(f.id)}
+                              onChange={() => toggleSelectFinding(f.id)}
+                              style={{
+                                cursor: "pointer",
+                                accentColor: "var(--accent)",
+                                width: "14px",
+                                height: "14px",
+                              }}
+                              title="Select finding for AI Handoff"
+                            />
                             <strong
                               style={{ fontSize: "14px", color: "#f87171" }}
                             >
@@ -432,6 +495,23 @@ export default function VulnerabilitiesExplorer({
                             >
                               <Wrench size={12} />
                               <span>Fix with Autopilot</span>
+                            </button>
+                          )}
+
+                          {onHandoffFinding && (
+                            <button
+                              onClick={() => onHandoffFinding(f.id)}
+                              className="button secondary compact"
+                              style={{
+                                fontSize: "11px",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "4px",
+                              }}
+                              title="Export AI fix instructions for this finding"
+                            >
+                              <Share2 size={12} />
+                              <span>Get AI Fix Instructions</span>
                             </button>
                           )}
 

@@ -33,6 +33,7 @@ import {
   RefreshCw,
   ExternalLink,
   GitPullRequest,
+  Share2,
 } from "lucide-react";
 import { api, Report, ScanJob, ProjectMetadata, Finding } from "@/lib/types";
 import { getDependencyAccounting, getFindingBreakdown } from "@/lib/accounting";
@@ -51,6 +52,7 @@ import BehavioralFlowExplorer from "./behavioral-flow-explorer";
 import RemediationHistory from "./remediation-history";
 import SecurityTimeline from "./security-timeline";
 import IntelligencePanel from "./intelligence-panel";
+import HandoffModal from "./handoff-modal";
 import {
   openProjectDirectory,
   isFileSystemAccessSupported,
@@ -175,6 +177,23 @@ export default function ProjectWorkspace({
   const [intelligenceFindingId, setIntelligenceFindingId] = useState<
     string | null
   >(null);
+
+  // Guardian Handoff 1.0 modal state
+  const [handoffOpen, setHandoffOpen] = useState(false);
+  const [handoffFindingId, setHandoffFindingId] = useState<string | null>(null);
+  const [handoffFindingIds, setHandoffFindingIds] = useState<string[] | null>(null);
+
+  const openHandoff = (findingId?: string) => {
+    setHandoffFindingId(findingId || null);
+    setHandoffFindingIds(null);
+    setHandoffOpen(true);
+  };
+
+  const openHandoffSelected = (findingIds: string[]) => {
+    setHandoffFindingId(null);
+    setHandoffFindingIds(findingIds);
+    setHandoffOpen(true);
+  };
 
   const supported = isFileSystemAccessSupported();
 
@@ -614,6 +633,24 @@ export default function ProjectWorkspace({
             </button>
           )}
 
+          {/* Guardian Handoff 1.0 */}
+          {activeReport && (
+            <button
+              onClick={() => openHandoff()}
+              className="button secondary compact"
+              style={{
+                fontSize: "12px",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+              }}
+              title="Export AI-agnostic remediation instructions for coding agents"
+            >
+              <Share2 size={14} color="var(--accent)" />
+              <span>Get AI Fix Instructions</span>
+            </button>
+          )}
+
           {/* Intelligence trigger */}
           {activeReport && (
             <button
@@ -989,6 +1026,9 @@ export default function ProjectWorkspace({
           onSelectGraphPackage={handleNavigateToGraph}
           onAskIntelligence={openIntelligenceForFinding}
           onRemediateFinding={openRemediationForFinding}
+          onHandoffFinding={(fid) => openHandoff(fid)}
+          onHandoffScan={() => openHandoff()}
+          onHandoffSelected={(fids) => openHandoffSelected(fids)}
           onViewFindingEvidence={(fid) => {
             if (onOpenReportView) onOpenReportView(activeReport);
           }}
@@ -1055,6 +1095,17 @@ export default function ProjectWorkspace({
           onFocusFinding={(fid: string) => {
             if (onOpenReportView) onOpenReportView(activeReport);
           }}
+        />
+      )}
+
+      {/* Guardian Handoff 1.0 Modal */}
+      {handoffOpen && activeReport && (
+        <HandoffModal
+          report={activeReport}
+          isOpen={handoffOpen}
+          initialFindingId={handoffFindingId}
+          initialFindingIds={handoffFindingIds}
+          onClose={() => setHandoffOpen(false)}
         />
       )}
     </div>

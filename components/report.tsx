@@ -27,6 +27,7 @@ import {
   ExternalLink,
   SlidersHorizontal,
   FolderOpen,
+  Share2,
 } from "lucide-react";
 import {
   Report,
@@ -49,6 +50,7 @@ import {
 } from "./ui";
 import { getDependencyAccounting, getFindingBreakdown } from "@/lib/accounting";
 import IntelligencePanel from "./intelligence-panel";
+import HandoffModal from "./handoff-modal";
 import {
   IntelligenceOverview,
   DependencyInspection,
@@ -62,11 +64,15 @@ export default function ReportView({
   onBack,
   onPrepareFix,
   onInvestigateProject,
+  onHandoffFinding,
+  onHandoffScan,
 }: {
   report: Report;
   onBack: () => void;
   onPrepareFix?: (finding: Finding) => void;
   onInvestigateProject?: (report: Report) => void;
+  onHandoffFinding?: (findingId: string) => void;
+  onHandoffScan?: () => void;
 }) {
   const [advanced, setAdvanced] = useState(false);
   const [tab, setTab] = useState<
@@ -83,6 +89,18 @@ export default function ReportView({
   const [groupByPackage, setGroupByPackage] = useState(true);
   const [copilotOpen, setCopilotOpen] = useState(false);
   const [copilotFindingId, setCopilotFindingId] = useState<string | null>(null);
+  const [handoffOpen, setHandoffOpen] = useState(false);
+  const [handoffFindingId, setHandoffFindingId] = useState<string | null>(null);
+
+  const handleOpenHandoff = (fid?: string) => {
+    setHandoffFindingId(fid || null);
+    setHandoffOpen(true);
+    if (fid && onHandoffFinding) {
+      onHandoffFinding(fid);
+    } else if (!fid && onHandoffScan) {
+      onHandoffScan();
+    }
+  };
 
   // Exact dependency & finding accounting reconciliation
   const deps = useMemo(() => getDependencyAccounting(report), [report]);
@@ -250,6 +268,16 @@ export default function ReportView({
         </div>
 
         <div className="report-action-right">
+          <button
+            type="button"
+            className="btn-secondary-subtle"
+            onClick={() => handleOpenHandoff()}
+            title="Export AI-agnostic remediation instructions for coding agents"
+          >
+            <Share2 size={14} color="var(--accent)" />
+            <span>Get AI Fix Instructions</span>
+          </button>
+
           {onInvestigateProject && (
             <button
               type="button"
@@ -772,6 +800,7 @@ export default function ReportView({
                         onSelectFinding={setSelectedFindingId}
                         onAskCopilot={openCopilotForFinding}
                         onPrepareFix={onPrepareFix}
+                        onHandoffFinding={handleOpenHandoff}
                         advanced={advanced}
                       />
                     ),
@@ -792,6 +821,7 @@ export default function ReportView({
                       }
                       onAskCopilot={() => openCopilotForFinding(f)}
                       onPrepareFix={onPrepareFix}
+                      onHandoffFinding={handleOpenHandoff}
                       advanced={advanced}
                     />
                   ))}
@@ -1075,6 +1105,16 @@ export default function ReportView({
         }}
         advanced={advanced}
       />
+
+      {/* Guardian Handoff 1.0 Modal */}
+      {handoffOpen && (
+        <HandoffModal
+          report={report}
+          isOpen={handoffOpen}
+          initialFindingId={handoffFindingId}
+          onClose={() => setHandoffOpen(false)}
+        />
+      )}
     </motion.div>
   );
 }
@@ -1087,6 +1127,7 @@ function PackageFindingsGroup({
   onSelectFinding,
   onAskCopilot,
   onPrepareFix,
+  onHandoffFinding,
   advanced,
 }: {
   packageName: string;
@@ -1095,6 +1136,7 @@ function PackageFindingsGroup({
   onSelectFinding: (id: string) => void;
   onAskCopilot: (f: Finding) => void;
   onPrepareFix?: (f: Finding) => void;
+  onHandoffFinding?: (findingId: string) => void;
   advanced: boolean;
 }) {
   const [collapsed, setCollapsed] = useState(false);
@@ -1151,6 +1193,7 @@ function PackageFindingsGroup({
               onToggle={() => onSelectFinding(selectedId === f.id ? "" : f.id)}
               onAskCopilot={() => onAskCopilot(f)}
               onPrepareFix={onPrepareFix}
+              onHandoffFinding={onHandoffFinding}
               advanced={advanced}
               isGrouped
             />
@@ -1168,6 +1211,7 @@ function FindingItemCard({
   onToggle,
   onAskCopilot,
   onPrepareFix,
+  onHandoffFinding,
   advanced,
   isGrouped = false,
 }: {
@@ -1176,6 +1220,7 @@ function FindingItemCard({
   onToggle: () => void;
   onAskCopilot: () => void;
   onPrepareFix?: (f: Finding) => void;
+  onHandoffFinding?: (findingId: string) => void;
   advanced: boolean;
   isGrouped?: boolean;
 }) {
@@ -1355,6 +1400,21 @@ function FindingItemCard({
                 >
                   <Wrench size={13} />
                   <span>Prepare fix with Guardian Autopilot</span>
+                </button>
+              )}
+
+              {onHandoffFinding && (
+                <button
+                  type="button"
+                  className="btn-prepare-fix"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onHandoffFinding(f.id);
+                  }}
+                  title="Export AI fix instructions for this finding"
+                >
+                  <Share2 size={13} color="var(--accent)" />
+                  <span>Get AI Fix Instructions</span>
                 </button>
               )}
             </div>

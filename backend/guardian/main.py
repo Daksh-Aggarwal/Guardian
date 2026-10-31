@@ -28,6 +28,8 @@ from .remediation_models import (
 )
 from .projects import project_manager
 from .remediation import remediation_planner
+from .handoff import handoff_service
+from .handoff_models import HandoffRequest, HandoffExportResponse, HandoffTarget, RemediationMode
 from .limits import RequestSizeLimit
 from .dependencies import RegistrySession, Retrieved, inspect_dependencies
 from .config import Budget
@@ -433,6 +435,59 @@ def project_metadata(scan_id: str):
 def discard_project(scan_id: str):
     discarded = project_manager.discard_snapshot(scan_id)
     return {'status': 'discarded' if discarded else 'not_found'}
+
+@app.post('/api/scans/{scan_id}/handoff', response_model=HandoffExportResponse)
+def generate_handoff(scan_id: str, request: HandoffRequest):
+    rep = storage.get(scan_id)
+    if not rep:
+        raise HTTPException(404, 'Report not found')
+
+    # If finding_ids provided, validate they belong to this report
+    if request.finding_ids:
+        valid_ids = {f.id for f in rep.findings}
+        invalid = [fid for fid in request.finding_ids if fid not in valid_ids]
+        if invalid:
+            raise HTTPException(404, f"Findings not found in scan: {invalid}")
+
+    # Optional project metadata if available
+    snap = project_manager.get_snapshot(scan_id)
+    proj_meta = snap.metadata if snap else None
+
+    return handoff_service.export_bundle(
+        report=rep,
+        target=request.target,
+        mode=request.mode,
+        finding_ids=request.finding_ids,
+        project_metadata=proj_meta,
+    )
+
+@app.get('/api/scans/{scan_id}/handoff', response_model=HandoffExportResponse)
+def get_handoff(
+    scan_id: str,
+    target: HandoffTarget = 'universal',
+    mode: RemediationMode = 'focused_fix',
+    finding_id: Optional[str] = None
+):
+    rep = storage.get(scan_id)
+    if not rep:
+        raise HTTPException(404, 'Report not found')
+
+    finding_ids = [finding_id] if finding_id else None
+    if finding_ids:
+        valid_ids = {f.id for f in rep.findings}
+        if finding_id not in valid_ids:
+            raise HTTPException(404, f"Finding '{finding_id}' not found in scan")
+
+    snap = project_manager.get_snapshot(scan_id)
+    proj_meta = snap.metadata if snap else None
+
+    return handoff_service.export_bundle(
+        report=rep,
+        target=target,
+        mode=mode,
+        finding_ids=finding_ids,
+        project_metadata=proj_meta,
+    )
 
 @app.post('/api/scans/{scan_id}/remediation/plan')
 def create_remediation_plan(scan_id: str, request: PlanGenerationRequest):
