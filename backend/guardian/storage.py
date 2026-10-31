@@ -250,8 +250,8 @@ def get_plans_for_project(project_identifier: str) -> List[RemediationPlan]:
     return [RemediationPlan.model_validate_json(r[0]) for r in rows]
 
 VALID_STATUS_TRANSITIONS: Dict[str, Set[str]] = {
-    'proposed': {'approved', 'rejected', 'applying', 'applied', 'failed', 'verified'},
-    'approved': {'applying', 'applied', 'failed', 'rejected', 'reverted'},
+    'proposed': {'approved', 'rejected', 'applying', 'applied', 'failed', 'verified', 'stale'},
+    'approved': {'applying', 'applied', 'failed', 'rejected', 'reverted', 'stale'},
     'applying': {'applied', 'failed'},
     'applied': {'reverted', 'verified', 'failed'},
     'reverted': {'approved', 'applying', 'applied', 'failed', 'rejected'},

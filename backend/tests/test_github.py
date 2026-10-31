@@ -1,0 +1,564 @@
+"""Comprehensive unit and integration tests for Guardian 4.0 GitHub integration."""
+import base64
+import json
+import time
+from unittest.mock import MagicMock, patch
+
+import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from fastapi.testclient import TestClient
+
+from backend.guardian.github import (
+    GitHubConfig,
+    create_install_state,
+    verify_and_consume_state,
+    get_installation_access_token,
+    list_repositories,
+    list_branches,
+    get_branch_commit,
+    retrieve_repository_snapshot,
+    apply_remediation_pull_request,
+    close_remediation_pull_request,
+    _token_cache,
+    _state_store,
+)
+from backend.guardian.main import app
+from backend.guardian.models import Report, GitHubMetadata
+from backend.guardian.projects import project_manager, compute_sha256
+from backend.guardian.remediation_models import (
+    RemediationPlan,
+    ProposedFileChange,
+    TextEdit
+)
+from backend.guardian import storage
+
+# Generate RSA key for testing
+_TEST_KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+_TEST_KEY_PEM = _TEST_KEY.private_bytes(
+    encoding=serialization.Encoding.PEM,
+    format=serialization.PrivateFormat.PKCS8,
+    encryption_algorithm=serialization.NoEncryption()
+).decode('utf-8')
+
+@pytest.fixture
+def test_client():
+    return TestClient(app)
+
+@pytest.fixture
+def github_env(monkeypatch):
+    """Sets up simulated GitHub App configuration."""
+    monkeypatch.setenv("GITHUB_APP_ID", "123456")
+    monkeypatch.setenv("GITHUB_APP_CLIENT_ID", "Iv1.clientid123")
+    monkeypatch.setenv("GITHUB_APP_CLIENT_SECRET", "client_secret_xyz")
+    monkeypatch.setenv("GITHUB_APP_PRIVATE_KEY", _TEST_KEY_PEM)
+    monkeypatch.setenv("GITHUB_APP_INSTALL_URL", "https://github.com/apps/guardian-test/installations/new")
+    monkeypatch.setenv("GITHUB_API_BASE", "https://api.github.com")
+    _token_cache.clear()
+    _state_store.clear()
+    yield
+
+# ==========================================
+# 1. AUTHENTICATION & CONNECTION TESTS
+# ==========================================
+
+def test_github_status_unconfigured(monkeypatch):
+    monkeypatch.delenv("GITHUB_APP_ID", raising=False)
+    monkeypatch.delenv("GITHUB_APP_PRIVATE_KEY", raising=False)
+    client = TestClient(app)
+    resp = client.get("/api/github/status")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["configured"] is False
+    assert data["connected"] is False
+
+def test_state_lifecycle():
+    state = create_install_state()
+    assert len(state) >= 32
+    # State is valid once
+    assert verify_and_consume_state(state) is True
+    # Cannot be replayed
+    assert verify_and_consume_state(state) is False
+
+def test_expired_state():
+    state = create_install_state()
+    # Artificially expire the state
+    _state_store[state] = time.time() - 700
+    assert verify_and_consume_state(state) is False
+
+def test_connect_flow(github_env, test_client):
+    resp = test_client.post("/api/github/connect")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "install_url" in data
+    assert "state=" in data["install_url"]
+    assert "state" in data
+    assert data["state"] in _state_store
+
+def test_installation_callback_valid(github_env, test_client):
+    state = create_install_state()
+    mock_inst = {
+        "id": 999111,
+        "account": {
+            "id": 444,
+            "login": "octocat-org",
+            "type": "Organization",
+            "avatar_url": "https://avatars.githubusercontent.com/u/444"
+        },
+        "repository_selection": "all",
+        "created_at": "2026-01-01T00:00:00Z"
+    }
+
+    with patch("backend.guardian.github._call_app_api", return_value=mock_inst):
+        resp = test_client.get(
+            f"/api/github/callback?installation_id=999111&state={state}",
+            follow_redirects=False
+        )
+        assert resp.status_code == 302
+        assert resp.headers["location"] == "/?github=connected"
+
+        # Verify active installation persisted
+        active = storage.get_active_github_installation()
+        assert active is not None
+        assert active["id"] == 999111
+        assert active["account_login"] == "octocat-org"
+
+def test_installation_callback_invalid_state(github_env, test_client):
+    resp = test_client.get("/api/github/callback?installation_id=999111&state=bogus_state")
+    assert resp.status_code == 400
+    assert "Invalid or expired OAuth state" in resp.json()["detail"]
+
+def test_disconnect(github_env, test_client):
+    storage.save_github_installation({
+        "id": 999111,
+        "account_login": "octocat-org",
+        "account_type": "Organization"
+    })
+    assert storage.get_active_github_installation() is not None
+
+    resp = test_client.post("/api/github/disconnect")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "disconnected"
+    assert storage.get_active_github_installation() is None
+
+def test_token_caching_and_refresh(github_env):
+    storage.save_github_installation({
+        "id": 888,
+        "account_login": "test-user",
+        "account_type": "User"
+    })
+
+    call_count = 0
+    def mock_app_api(endpoint, method="GET", json_data=None):
+        nonlocal call_count
+        call_count += 1
+        return {
+            "token": f"ghs_token_{call_count}",
+            "expires_at": "2026-10-31T20:00:00Z",
+            "permissions": {"contents": "write", "pull_requests": "write", "metadata": "read"}
+        }
+
+    with patch("backend.guardian.github._call_app_api", side_effect=mock_app_api):
+        t1 = get_installation_access_token(888)
+        assert t1 == "ghs_token_1"
+        assert call_count == 1
+
+        # Second call within validity window should hit memory cache
+        t2 = get_installation_access_token(888)
+        assert t2 == "ghs_token_1"
+        assert call_count == 1
+
+        # Expire cached token manually
+        _token_cache[888] = ("ghs_token_1", time.time() - 10)
+        t3 = get_installation_access_token(888)
+        assert t3 == "ghs_token_2"
+        assert call_count == 2
+
+# ==========================================
+# 2. REPOSITORY & BRANCH DISCOVERY TESTS
+# ==========================================
+
+def test_list_repositories_and_search(github_env, test_client):
+    storage.save_github_installation({
+        "id": 100,
+        "account_login": "acme-corp",
+        "account_type": "Organization"
+    })
+
+    repos_payload = {
+        "repositories": [
+            {
+                "id": 1,
+                "name": "backend-service",
+                "full_name": "acme-corp/backend-service",
+                "owner": {"login": "acme-corp", "avatar_url": "https://avatar.png"},
+                "private": True,
+                "html_url": "https://github.com/acme-corp/backend-service",
+                "description": "Core backend API",
+                "default_branch": "main",
+                "permissions": {"push": True}
+            },
+            {
+                "id": 2,
+                "name": "frontend-web",
+                "full_name": "acme-corp/frontend-web",
+                "owner": {"login": "acme-corp", "avatar_url": "https://avatar.png"},
+                "private": False,
+                "html_url": "https://github.com/acme-corp/frontend-web",
+                "description": "Public web app",
+                "default_branch": "master",
+                "permissions": {"push": True}
+            }
+        ]
+    }
+
+    with patch("backend.guardian.github._call_installation_api", return_value=repos_payload):
+        # List all
+        resp = test_client.get("/api/github/repositories")
+        assert resp.status_code == 200
+        repos = resp.json()
+        assert len(repos) == 2
+        assert repos[0]["name"] == "backend-service"
+        assert repos[0]["private"] is True
+        assert repos[1]["name"] == "frontend-web"
+        assert repos[1]["private"] is False
+
+        # Search query
+        resp_q = test_client.get("/api/github/repositories?q=frontend")
+        assert resp_q.status_code == 200
+        filtered = resp_q.json()
+        assert len(filtered) == 1
+        assert filtered[0]["name"] == "frontend-web"
+
+def test_list_branches(github_env, test_client):
+    storage.save_github_installation({"id": 100, "account_login": "acme", "account_type": "User"})
+
+    repo_meta = {
+        "id": 1,
+        "name": "repo1",
+        "full_name": "acme/repo1",
+        "owner": {"login": "acme"},
+        "default_branch": "main"
+    }
+    branches_payload = [
+        {"name": "feature-x", "commit": {"sha": "sha_feat_x"}},
+        {"name": "main", "commit": {"sha": "sha_main"}},
+        {"name": "hotfix", "commit": {"sha": "sha_hotfix"}},
+    ]
+
+    def mock_install_api(inst_id, endpoint, method="GET", json_data=None):
+        if "branches" in endpoint:
+            return branches_payload
+        return repo_meta
+
+    with patch("backend.guardian.github._call_installation_api", side_effect=mock_install_api):
+        resp = test_client.get("/api/github/repositories/1/branches")
+        assert resp.status_code == 200
+        branches = resp.json()
+        assert len(branches) == 3
+        # Default branch must be sorted to the top
+        assert branches[0]["name"] == "main"
+        assert branches[0]["is_default"] is True
+        assert branches[1]["name"] == "feature-x"
+        assert branches[1]["is_default"] is False
+
+# ==========================================
+# 3. BOUNDED REPOSITORY INGESTION TESTS
+# ==========================================
+
+def test_retrieve_repository_snapshot_success(github_env):
+    storage.save_github_installation({"id": 100, "account_login": "acme", "account_type": "User"})
+
+    pkg_json_content = json.dumps({"name": "secure-app", "version": "1.0.0", "dependencies": {"express": "^4.19.0"}})
+    index_js_content = "const express = require('express');\nconst app = express();\napp.listen(3000);"
+
+    def mock_install_api(inst_id, endpoint, method="GET", json_data=None):
+        if endpoint == "/repositories/1":
+            return {"id": 1, "name": "secure-app", "full_name": "acme/secure-app", "owner": {"login": "acme"}, "default_branch": "main", "html_url": "https://github.com/acme/secure-app"}
+        if endpoint == "/repositories/1/commits/main":
+            return {"sha": "c0ffee1234567890", "commit": {"message": "Initial commit", "author": {"name": "Dev", "date": "2026-10-31"}}}
+        if "git/trees" in endpoint:
+            return {
+                "sha": "tree_root",
+                "truncated": False,
+                "tree": [
+                    {"path": "package.json", "type": "blob", "sha": "blob_pkg", "size": len(pkg_json_content)},
+                    {"path": "src/index.js", "type": "blob", "sha": "blob_index", "size": len(index_js_content)},
+                    {"path": ".env", "type": "blob", "sha": "blob_env", "size": 50},  # Must be excluded!
+                    {"path": ".git/config", "type": "blob", "sha": "blob_git", "size": 100},  # Excluded!
+                    {"path": "node_modules/foo/index.js", "type": "blob", "sha": "blob_dep", "size": 200},  # Excluded!
+                    {"path": "image.png", "type": "blob", "sha": "blob_img", "size": 500},  # Excluded!
+                ]
+            }
+        if "git/blobs/blob_pkg" in endpoint:
+            return {"content": base64.b64encode(pkg_json_content.encode('utf-8')).decode('utf-8'), "encoding": "base64"}
+        if "git/blobs/blob_index" in endpoint:
+            return {"content": base64.b64encode(index_js_content.encode('utf-8')).decode('utf-8'), "encoding": "base64"}
+        raise ValueError(f"Unexpected endpoint: {endpoint}")
+
+    with patch("backend.guardian.github._call_installation_api", side_effect=mock_install_api):
+        full_name, files, meta, warnings = retrieve_repository_snapshot(1, "main")
+        assert full_name == "acme/secure-app"
+        assert len(files) == 2
+        assert "package.json" in files
+        assert "src/index.js" in files
+        assert ".env" not in files
+        assert meta.commit_sha == "c0ffee1234567890"
+        assert meta.branch == "main"
+        assert meta.source_type == "github"
+
+def test_ingestion_limits_truncated_tree(github_env):
+    storage.save_github_installation({"id": 100, "account_login": "acme", "account_type": "User"})
+
+    def mock_install_api(inst_id, endpoint, method="GET", json_data=None):
+        if endpoint == "/repositories/1":
+            return {"id": 1, "name": "app", "full_name": "acme/app", "owner": {"login": "acme"}, "default_branch": "main", "html_url": "https://github.com/acme/app"}
+        if endpoint == "/repositories/1/commits/main":
+            return {"sha": "sha123", "commit": {"message": "Test"}}
+        if "git/trees" in endpoint:
+            return {
+                "sha": "tree_root",
+                "truncated": True,  # Truncated!
+                "tree": [
+                    {"path": "package.json", "type": "blob", "sha": "blob_pkg", "size": 20}
+                ]
+            }
+        if "git/blobs" in endpoint:
+            return {"content": base64.b64encode(b"{}").decode('utf-8'), "encoding": "base64"}
+        raise ValueError(endpoint)
+
+    with patch("backend.guardian.github._call_installation_api", side_effect=mock_install_api):
+        _, _, _, warnings = retrieve_repository_snapshot(1, "main")
+        assert any("truncated" in w for w in warnings)
+
+def test_ingestion_oversized_file_limit(github_env):
+    storage.save_github_installation({"id": 100, "account_login": "acme", "account_type": "User"})
+
+    def mock_install_api(inst_id, endpoint, method="GET", json_data=None):
+        if endpoint == "/repositories/1":
+            return {"id": 1, "name": "app", "full_name": "acme/app", "owner": {"login": "acme"}, "default_branch": "main", "html_url": "https://github.com/acme/app"}
+        if endpoint == "/repositories/1/commits/main":
+            return {"sha": "sha123", "commit": {"message": "Test"}}
+        if "git/trees" in endpoint:
+            return {
+                "sha": "tree_root",
+                "truncated": False,
+                "tree": [
+                    {"path": "package.json", "type": "blob", "sha": "blob_pkg", "size": 20},
+                    {"path": "giant_bundle.js", "type": "blob", "sha": "blob_giant", "size": 2_000_000}  # > 1 MB
+                ]
+            }
+        if "git/blobs/blob_pkg" in endpoint:
+            return {"content": base64.b64encode(b"{}").decode('utf-8'), "encoding": "base64"}
+        raise ValueError(endpoint)
+
+    with patch("backend.guardian.github._call_installation_api", side_effect=mock_install_api):
+        _, files, _, warnings = retrieve_repository_snapshot(1, "main")
+        assert "package.json" in files
+        assert "giant_bundle.js" not in files
+        assert any("exceeds 1 MB" in w for w in warnings)
+
+# ==========================================
+# 4. SCAN INTEGRATION & PERSISTENCE TESTS
+# ==========================================
+
+def test_scan_github_repository_endpoint(github_env, test_client):
+    storage.save_github_installation({"id": 100, "account_login": "acme", "account_type": "User"})
+
+    pkg_json = json.dumps({"name": "demo-scan", "version": "1.0.0"})
+    
+    def mock_install_api(inst_id, endpoint, method="GET", json_data=None):
+        if endpoint == "/repositories/42":
+            return {"id": 42, "name": "demo-scan", "full_name": "acme/demo-scan", "owner": {"login": "acme"}, "default_branch": "main", "html_url": "https://github.com/acme/demo-scan"}
+        if endpoint == "/repositories/42/commits/main":
+            return {"sha": "abcdef1234567890", "commit": {"message": "Init"}}
+        if "git/trees" in endpoint:
+            return {
+                "sha": "tree_root",
+                "truncated": False,
+                "tree": [
+                    {"path": "package.json", "type": "blob", "sha": "blob_pkg", "size": len(pkg_json)}
+                ]
+            }
+        if "git/blobs" in endpoint:
+            return {"content": base64.b64encode(pkg_json.encode('utf-8')).decode('utf-8'), "encoding": "base64"}
+        raise ValueError(endpoint)
+
+    with patch("backend.guardian.github._call_installation_api", side_effect=mock_install_api):
+        resp = test_client.post("/api/scans/github", json={"repository_id": 42, "branch": "main"})
+        assert resp.status_code == 202
+        job_id = resp.json()["id"]
+
+        # Wait for scan job to finish
+        for _ in range(30):
+            job_resp = test_client.get(f"/api/jobs/{job_id}")
+            if job_resp.json()["status"] in ("complete", "failed"):
+                break
+            time.sleep(0.1)
+
+        assert job_resp.json()["status"] == "complete"
+
+        # Check saved report
+        report = storage.get(job_id)
+        assert report is not None
+        assert report.classification == "real"
+        assert report.project_id == "github:42"
+        assert report.source_metadata is not None
+        assert report.source_metadata.repository_id == 42
+        assert report.source_metadata.branch == "main"
+        assert report.source_metadata.commit_sha == "abcdef1234567890"
+
+# ==========================================
+# 5. AUTOPILOT REMEDIATION TESTS
+# ==========================================
+
+def test_apply_remediation_pull_request_success(github_env):
+    storage.save_github_installation({"id": 100, "account_login": "acme", "account_type": "User"})
+
+    orig_pkg = json.dumps({"name": "app", "version": "1.0.0", "dependencies": {"vulnerable-pkg": "1.0.0"}}, indent=2)
+    proposed_pkg = json.dumps({"name": "app", "version": "1.0.0", "dependencies": {"vulnerable-pkg": "2.0.0"}}, indent=2)
+
+    plan = RemediationPlan(
+        plan_id="plan_abc12345",
+        scan_id="scan_1",
+        title="Upgrade vulnerable-pkg to 2.0.0",
+        summary="Fixes remote code execution vulnerability",
+        priority="high",
+        expected_outcome="Remediates known vulnerability",
+        findings_addressed=["finding_1"],
+        proposed_changes=[
+            ProposedFileChange(
+                file_path="package.json",
+                operation="update",
+                original_sha256=compute_sha256(orig_pkg),
+                proposed_sha256=compute_sha256(proposed_pkg),
+                edits=[TextEdit(old_text='"vulnerable-pkg": "1.0.0"', new_text='"vulnerable-pkg": "2.0.0"')],
+                rationale="Upgrade dependency",
+                finding_ids=["finding_1"],
+                expected_result="Upgraded"
+            )
+        ],
+        repository_id=99,
+        branch="main",
+        commit_sha="commit_sha_base_111",
+        status="approved",
+        created_at="2026-10-31T12:00:00Z"
+    )
+    storage.save_plan(plan)
+
+    created_tree_payload = None
+    created_pr_payload = None
+
+    def mock_install_api(inst_id, endpoint, method="GET", json_data=None):
+        nonlocal created_tree_payload, created_pr_payload
+        if endpoint == "/repositories/99":
+            return {"id": 99, "name": "app", "full_name": "acme/app", "owner": {"login": "acme"}, "default_branch": "main"}
+        if endpoint == "/repositories/99/git/ref/heads/main":
+            # Target branch still at the expected commit SHA
+            return {"object": {"sha": "commit_sha_base_111"}}
+        if "git/trees/commit_sha_base_111" in endpoint:
+            return {"tree": [{"path": "package.json", "type": "blob", "sha": "blob_pkg_orig"}]}
+        if "git/blobs/blob_pkg_orig" in endpoint:
+            return {"content": base64.b64encode(orig_pkg.encode('utf-8')).decode('utf-8'), "encoding": "base64"}
+        if endpoint == "/repositories/99/git/blobs" and method == "POST":
+            return {"sha": "blob_new_pkg_sha"}
+        if endpoint == "/repositories/99/git/trees" and method == "POST":
+            created_tree_payload = json_data
+            return {"sha": "tree_new_sha"}
+        if endpoint == "/repositories/99/git/commits" and method == "POST":
+            return {"sha": "commit_new_remediation_sha"}
+        if endpoint == "/repositories/99/git/refs" and method == "POST":
+            return {"ref": json_data["ref"]}
+        if endpoint == "/repositories/99/pulls" and method == "POST":
+            created_pr_payload = json_data
+            return {"number": 42, "html_url": "https://github.com/acme/app/pull/42", "state": "open"}
+        raise ValueError(f"Unexpected endpoint: {endpoint} {method}")
+
+    with patch("backend.guardian.github._call_installation_api", side_effect=mock_install_api):
+        res = apply_remediation_pull_request(plan)
+        assert res["pr_number"] == 42
+        assert res["pr_url"] == "https://github.com/acme/app/pull/42"
+        assert res["status"] == "applied"
+        assert res["remediation_branch"] == "guardian/remediation/plan_abc"
+
+        # Verify atomic Git tree payload was constructed properly
+        assert created_tree_payload["base_tree"] == "commit_sha_base_111"
+        assert created_tree_payload["tree"][0]["path"] == "package.json"
+        assert created_tree_payload["tree"][0]["sha"] == "blob_new_pkg_sha"
+
+        # Verify PR metadata
+        assert created_pr_payload["head"] == "guardian/remediation/plan_abc"
+        assert created_pr_payload["base"] == "main"
+        assert "Guardian Autopilot" in created_pr_payload["title"]
+
+        # Verify plan updated in storage
+        updated_plan = storage.get_plan("plan_abc12345")
+        assert updated_plan.status == "applied"
+        assert updated_plan.pr_number == 42
+        assert updated_plan.pr_url == "https://github.com/acme/app/pull/42"
+
+def test_remediation_branch_moved_preflight_fails(github_env):
+    storage.save_github_installation({"id": 100, "account_login": "acme", "account_type": "User"})
+
+    plan = RemediationPlan(
+        plan_id="plan_stale",
+        scan_id="scan_1",
+        title="Fix issue",
+        summary="Summary",
+        expected_outcome="Outcome",
+        repository_id=99,
+        branch="main",
+        commit_sha="commit_old_111",
+        status="approved",
+        created_at="2026-10-31T12:00:00Z"
+    )
+    storage.save_plan(plan)
+
+    def mock_install_api(inst_id, endpoint, method="GET", json_data=None):
+        if endpoint == "/repositories/99":
+            return {"id": 99, "name": "app", "full_name": "acme/app", "owner": {"login": "acme"}, "default_branch": "main"}
+        if endpoint == "/repositories/99/git/ref/heads/main":
+            # Branch has moved to a new commit!
+            return {"object": {"sha": "commit_NEW_222"}}
+        raise ValueError(endpoint)
+
+    with patch("backend.guardian.github._call_installation_api", side_effect=mock_install_api):
+        with pytest.raises(ValueError) as exc:
+            apply_remediation_pull_request(plan)
+        assert "Pre-flight check failed" in str(exc.value)
+        assert "target branch 'main' has moved" in str(exc.value)
+
+        # Plan must be marked stale in storage
+        updated_plan = storage.get_plan("plan_stale")
+        assert updated_plan.status == "stale"
+
+def test_close_remediation_pull_request(github_env, test_client):
+    storage.save_github_installation({"id": 100, "account_login": "acme", "account_type": "User"})
+
+    plan = RemediationPlan(
+        plan_id="plan_to_close",
+        scan_id="scan_1",
+        title="Fix issue",
+        summary="Summary",
+        expected_outcome="Outcome",
+        repository_id=99,
+        branch="main",
+        commit_sha="commit_111",
+        pr_number=55,
+        pr_url="https://github.com/acme/app/pull/55",
+        status="applied",
+        created_at="2026-10-31T12:00:00Z"
+    )
+    storage.save_plan(plan)
+
+    with patch("backend.guardian.github._call_installation_api", return_value={"state": "closed"}):
+        resp = test_client.post("/api/remediation/plans/plan_to_close/close-github-pr")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["pr_state"] == "closed"
+        assert data["status"] == "reverted"
+
+        # Plan in storage updated
+        saved = storage.get_plan("plan_to_close")
+        assert saved.status == "reverted"
+        assert saved.pr_state == "closed"

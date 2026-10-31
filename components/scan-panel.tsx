@@ -14,10 +14,12 @@ import {
   FileCode2,
   Sliders,
   Sparkles,
+  GitBranch,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { api, ScanJob } from "@/lib/types";
 import { Note, Eyebrow } from "./ui";
+import GitHubConnectPanel from "./github-connect-panel";
 
 export type { ScanJob };
 
@@ -32,7 +34,7 @@ export default function ScanPanel({
   job: ScanJob | null;
   onConnectFolder?: () => void;
 }) {
-  const [tab, setTab] = useState<"upload" | "package">("upload");
+  const [tab, setTab] = useState<"upload" | "package" | "github">("upload");
   const [name, setName] = useState("");
   const [version, setVersion] = useState("latest");
   const [profile, setProfile] = useState<"fast" | "deep">("fast");
@@ -130,6 +132,17 @@ export default function ScanPanel({
         >
           <Package size={16} />
           <span>Look Up Package</span>
+        </button>
+
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "github"}
+          className={`launchpad-tab-btn ${tab === "github" ? "active" : ""}`}
+          onClick={() => setTab("github")}
+        >
+          <GitBranch size={16} />
+          <span>GitHub Repository</span>
         </button>
       </div>
 
@@ -236,7 +249,7 @@ export default function ScanPanel({
             </div>
           )}
         </div>
-      ) : (
+      ) : tab === "package" ? (
         <div className="launchpad-package-area">
           <div className="package-input-grid">
             <div className="package-name-field">
@@ -292,31 +305,40 @@ export default function ScanPanel({
             scripts are run.
           </Note>
         </div>
+      ) : (
+        <GitHubConnectPanel
+          onStartScan={onStart}
+          disabled={disabled}
+          profile={profile}
+          onProfileChange={setProfile}
+        />
       )}
 
-      {/* Budget Selector */}
-      <div className="budget-selection-bar">
-        <div className="budget-label-row">
-          <label htmlFor="budget-select" className="budget-label">
-            <Sliders size={14} />
-            <span>Dependency Inspection Depth</span>
-          </label>
-          <select
-            id="budget-select"
-            value={profile}
-            onChange={(e) => setProfile(e.target.value as "fast" | "deep")}
-            disabled={disabled}
-            className="budget-select"
-          >
-            <option value="fast">Fast · Up to 6 packages / 2 levels</option>
-            <option value="deep">Deep · Up to 20 packages / 4 levels</option>
-          </select>
+      {/* Budget Selector (for Upload and Package tabs) */}
+      {tab !== "github" && (
+        <div className="budget-selection-bar">
+          <div className="budget-label-row">
+            <label htmlFor="budget-select" className="budget-label">
+              <Sliders size={14} />
+              <span>Dependency Inspection Depth</span>
+            </label>
+            <select
+              id="budget-select"
+              value={profile}
+              onChange={(e) => setProfile(e.target.value as "fast" | "deep")}
+              disabled={disabled}
+              className="budget-select"
+            >
+              <option value="fast">Fast · Up to 6 packages / 2 levels</option>
+              <option value="deep">Deep · Up to 20 packages / 4 levels</option>
+            </select>
+          </div>
+          <small className="budget-hint">
+            Inspects resolved exact dependencies under recursive bounded depth.
+            Limits are transparently reported in coverage.
+          </small>
         </div>
-        <small className="budget-hint">
-          Inspects resolved exact dependencies under recursive bounded depth.
-          Limits are transparently reported in coverage.
-        </small>
-      </div>
+      )}
 
       {error && (
         <div role="alert" className="launchpad-error">
@@ -414,21 +436,23 @@ export default function ScanPanel({
             </span>
           </div>
 
-          <button
-            type="button"
-            disabled={disabled}
-            className="btn-primary-large"
-            onClick={submit}
-          >
-            {sending ? (
-              <Loader2 size={17} className="spin" />
-            ) : (
-              <>
-                <span>Analyze {tab === "upload" ? "project" : "package"}</span>
-                <ArrowRight size={16} />
-              </>
-            )}
-          </button>
+          {tab !== "github" && (
+            <button
+              type="button"
+              disabled={disabled}
+              className="btn-primary-large"
+              onClick={submit}
+            >
+              {sending ? (
+                <Loader2 size={17} className="spin" />
+              ) : (
+                <>
+                  <span>Analyze {tab === "upload" ? "project" : "package"}</span>
+                  <ArrowRight size={16} />
+                </>
+              )}
+            </button>
+          )}
         </div>
       )}
     </section>
