@@ -6179,3 +6179,10 @@ h1,h2,h3,h4,h5,h6 {line-height:1.2 !important;}
 .heatmap-body {
   padding-top: 4px;
 }
+
+.scan-launchpad-section {
+  margin-bottom: 24px;
+}
+.scan-launchpad-section .scan-launchpad-card {
+  width: 100%;
+}

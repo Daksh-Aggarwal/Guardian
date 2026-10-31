@@ -24,9 +24,7 @@ import {
   Wrench,
   AlertTriangle,
   FileCode2,
-  Network,
   Clock,
-  Layers,
   Sparkles,
   Menu,
   CheckCircle2,
@@ -41,7 +39,6 @@ import {
   Empty,
   Note,
   MetricCard,
-  SecurityDimensionCard,
   RecommendedActionCard,
   Badge,
   StatusChip,
@@ -813,6 +810,16 @@ export default function Home() {
                     </div>
                   </section>
 
+                  {/* Primary Package Scan & File Upload Launchpad */}
+                  <div className="scan-launchpad-section">
+                    <ScanPanel
+                      onStart={startScan}
+                      busy={!!busy}
+                      job={job}
+                      onConnectFolder={() => navigate("Project workspace")}
+                    />
+                  </div>
+
                   {/* Meaningful Security Overview Metrics */}
                   <div className="metrics-grid">
                     <MetricCard
@@ -852,70 +859,6 @@ export default function Home() {
                       }
                     />
                   </div>
-
-                  {/* Security Assessment Overview: 4 Independent Assessment Domains */}
-                  <section className="command-domains-section">
-                    <div className="section-title-row">
-                      <div>
-                        <Eyebrow>INDEPENDENT ASSESSMENT DOMAINS</Eyebrow>
-                        <h2>Four-Dimensional Security Posture</h2>
-                        <p>
-                          Guardian keeps detection domains decoupled. No
-                          arbitrary combined score.
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="dimension-grid">
-                      <SecurityDimensionCard
-                        title="Behavioral Assessment"
-                        domain="RUNTIME SIGNALS"
-                        status="Static AST Heuristics"
-                        statusTone="info"
-                        headline="Exfiltration & Execution"
-                        description="Inspects AST call chains for child_process spawning, sensitive environment token access, and outbound network sinks without executing code."
-                        metric={`${reports.filter((r) => r.findings.some((f) => (!f.domain || f.domain === "behavior") && f.rule !== "OSV" && f.severity !== "info")).length} scans with signals`}
-                        metricLabel="across history"
-                        icon={<FileCode2 size={18} />}
-                      />
-
-                      <SecurityDimensionCard
-                        title="Known Vulnerabilities"
-                        domain="INTELLIGENCE"
-                        status="OSV Upstream Database"
-                        statusTone="warning"
-                        headline="Exact Version Queries"
-                        description="Cross-references lockfile and manifest versions directly with the Open Source Vulnerabilities database for published CVEs and GHSAs."
-                        metric={`${metrics.criticalAdvisoriesCount} critical matches`}
-                        metricLabel="recorded in history"
-                        icon={<Network size={18} />}
-                      />
-
-                      <SecurityDimensionCard
-                        title="Package Integrity"
-                        domain="PROVENANCE"
-                        status="Digest Verification"
-                        statusTone="success"
-                        headline="Checksum Validation"
-                        description="Calculates SHA-512 and SHA-256 digests on retrieved tarballs against official registry metadata to detect tampered distribution archives."
-                        metric="Active"
-                        metricLabel="verification engine"
-                        icon={<ShieldCheck size={18} />}
-                      />
-
-                      <SecurityDimensionCard
-                        title="Inspection Coverage"
-                        domain="TRANSPARENCY"
-                        status="Decoupled Semantics"
-                        statusTone="purple"
-                        headline="Coverage Boundaries"
-                        description="Explicitly reports skipped packages, recursion limits, and unparsed files. 'No elevated signals' is never presented as an absolute guarantee of safety."
-                        metric="Bounded Depth"
-                        metricLabel="maximum recursion 8"
-                        icon={<Layers size={18} />}
-                      />
-                    </div>
-                  </section>
 
                   {/* Evidence-Grounded Recommended Actions */}
                   {recommendedActions.length > 0 && (
@@ -957,60 +900,6 @@ export default function Home() {
                       </div>
                     </section>
                   )}
-
-                  {/* Scan Launchpad & Informational Guide */}
-                  <div className="home-grid">
-                    <ScanPanel
-                      onStart={startScan}
-                      busy={!!busy}
-                      job={job}
-                      onConnectFolder={() => navigate("Project workspace")}
-                    />
-
-                    {/* Security Philosophy Card */}
-                    <section className="guide-card">
-                      <div className="guide-visual" aria-hidden="true">
-                        <div className="orbit orbit-one" />
-                        <div className="orbit orbit-two" />
-                        <span className="orbit-node node-one">
-                          <Package size={17} />
-                        </span>
-                        <span className="orbit-node node-two">
-                          <FileCode2 size={16} />
-                        </span>
-                        <span className="orbit-node node-three">
-                          <ShieldCheck size={17} />
-                        </span>
-                        <span className="central-shield">
-                          <ShieldCheck size={42} strokeWidth={1.5} />
-                        </span>
-                      </div>
-                      <Eyebrow>EXPLAINABLE SECURITY ARCHITECTURE</Eyebrow>
-                      <h2>
-                        More than a verdict.
-                        <br />
-                        The evidence behind it.
-                      </h2>
-                      <p>
-                        Guardian connects suspicious code patterns directly to
-                        syntax evidence, explains them without jargon, and
-                        surfaces contextual AI guidance.
-                      </p>
-                      <button
-                        type="button"
-                        className="text-link inline-learn-link"
-                        onClick={() => navigate("How it works")}
-                      >
-                        <span>Explore methodology</span>
-                        <ArrowRight size={14} />
-                      </button>
-                      <div className="guide-tags">
-                        <span>Local Static AST</span>
-                        <span>OSV Intelligence</span>
-                        <span>Zero Execution</span>
-                      </div>
-                    </section>
-                  </div>
 
                   {/* Synthetic Demonstrations Strip */}
                   <section className="examples-strip">
