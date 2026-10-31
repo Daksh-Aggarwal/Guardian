@@ -709,6 +709,25 @@ def get_connection_status(session_id: Optional[str] = None) -> Dict[str, Any]:
         }
     except Exception as err:
         logger.warning(f"Connected installation {active['id']} verification notice: {err}")
+        err_msg = str(err)
+        if "404" in err_msg or "Not Found" in err_msg:
+            # Installation was uninstalled on GitHub or is an invalid fixture in SQLite
+            storage.disconnect_github_installation(active["id"])
+            if session_id:
+                session_manager.disconnect_installation(session_id, active["id"])
+            try:
+                res = sync_installations(session_id=session_id)
+                if res.get("connected"):
+                    return res
+            except Exception:
+                pass
+            return {
+                "configured": True,
+                "connected": False,
+                "installation": None,
+                "installations": list_installations(session_id),
+                "reason": "Connected GitHub installation was not found on GitHub."
+            }
         active_info = dict(active)
         active_info["is_selected"] = True
         return {
@@ -809,7 +828,13 @@ def _resolve_active_installation_id(session_id: Optional[str] = None) -> int:
 def list_repositories(query: Optional[str] = None, session_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """Lists repositories accessible to the active installation with bounded pagination."""
     inst_id = _resolve_active_installation_id(session_id)
-    repos = _paginate_installation_api(inst_id, "/installation/repositories?per_page=100", key="repositories", max_pages=5)
+    try:
+        repos = _paginate_installation_api(inst_id, "/installation/repositories?per_page=100", key="repositories", max_pages=5)
+    except Exception as err:
+        logger.warning(f"Failed to list repositories for installation {inst_id}: {err}")
+        if "404" in str(err) or "Not Found" in str(err):
+            return []
+        raise
     
     results = []
     for r in repos:
