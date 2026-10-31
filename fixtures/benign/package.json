@@ -1,0 +1,9 @@
+{
+  "name": "guardian-benign-example",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Inert synthetic Guardian test fixture. Never execute.",
+  "scripts": {
+    "build": "tsc"
+  }
+}

