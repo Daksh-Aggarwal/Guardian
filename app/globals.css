@@ -6117,31 +6117,9 @@ h1,h2,h3,h4,h5,h6 {line-height:1.2 !important;}
 .heatmap-header {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 16px;
-}
-.heatmap-header-left {
-  max-width: 600px;
-}
-.heatmap-title {
-  font-size: 18px;
-  font-weight: 600;
-  letter-spacing: -0.3px;
-  margin: 4px 0 6px;
-  color: var(--text);
-}
-.heatmap-desc {
-  font-size: 13px;
-  color: var(--muted);
-  margin: 0;
-  line-height: 1.5;
-}
-.heatmap-header-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
 }
 .heatmap-toggle-pill {
   display: inline-flex;
@@ -6199,6 +6177,5 @@ h1,h2,h3,h4,h5,h6 {line-height:1.2 !important;}
   transform: translateY(-1px);
 }
 .heatmap-body {
-  padding-top: 12px;
-  border-top: 1px solid var(--line-subtle);
+  padding-top: 4px;
 }

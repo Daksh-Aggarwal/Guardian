@@ -528,10 +528,7 @@ export default function Home() {
         {/* Sidebar footer */}
         <div className="sidebar-bottom">
           <span className="avatar">Y</span>
-          <div>
-            <strong className="sidebar-user-name">Local User</strong>
-            <small>Isolated memory · No cloud leakage</small>
-          </div>
+          <strong className="sidebar-user-name">Local User</strong>
           <span
             className="local-dot"
             title="Running in local loopback environment"
@@ -773,54 +770,38 @@ export default function Home() {
                   {/* GitHub-style Security Activity & Threat Heatmap Hero */}
                   <section className="heatmap-hero-card">
                     <div className="heatmap-header">
-                      <div className="heatmap-header-left">
-                        <Eyebrow>CONTINUOUS SECURITY HYGIENE & DEFENSE</Eyebrow>
-                        <h2 className="heatmap-title">
-                          {heatmapMode === "activity"
-                            ? "Security Posture & Inspection Cadence"
-                            : "Threat Interceptions & Malware Neutralized"}
-                        </h2>
-                        <p className="heatmap-desc">
-                          {heatmapMode === "activity"
-                            ? "Daily package audit volume, continuous verification streaks, and pipeline activity over the last year."
-                            : "Supply-chain attacks, reverse shells, and malicious payloads intercepted and quarantined across your workspaces."}
-                        </p>
-                      </div>
-
-                      <div className="heatmap-header-actions">
-                        <div className="heatmap-toggle-pill" role="group" aria-label="Heatmap Mode Toggle">
-                          <button
-                            type="button"
-                            className={`heatmap-toggle-btn ${heatmapMode === "activity" ? "active activity" : ""}`}
-                            onClick={() => setHeatmapMode("activity")}
-                            title="Show days active in emerald gradient"
-                          >
-                            <Activity size={14} />
-                            <span>Active Days</span>
-                          </button>
-                          <button
-                            type="button"
-                            className={`heatmap-toggle-btn ${heatmapMode === "threats" ? "active threats" : ""}`}
-                            onClick={() => setHeatmapMode("threats")}
-                            title="Show malware encountered & handled in rose gradient"
-                          >
-                            <ShieldAlert size={14} />
-                            <span>Malware Handled</span>
-                          </button>
-                        </div>
-
+                      <div className="heatmap-toggle-pill" role="group" aria-label="Heatmap Mode Toggle">
                         <button
                           type="button"
-                          className="btn-scan-hero"
-                          onClick={() => {
-                            document.getElementById("new-scan")?.scrollIntoView({ behavior: "smooth", block: "center" });
-                          }}
-                          title="Jump directly to package scan"
+                          className={`heatmap-toggle-btn ${heatmapMode === "activity" ? "active activity" : ""}`}
+                          onClick={() => setHeatmapMode("activity")}
+                          title="Show days active in emerald gradient"
                         >
-                          <Plus size={15} />
-                          <span>Scan Package</span>
+                          <Activity size={14} />
+                          <span>Active Days</span>
+                        </button>
+                        <button
+                          type="button"
+                          className={`heatmap-toggle-btn ${heatmapMode === "threats" ? "active threats" : ""}`}
+                          onClick={() => setHeatmapMode("threats")}
+                          title="Show malware encountered & handled in rose gradient"
+                        >
+                          <ShieldAlert size={14} />
+                          <span>Malware Handled</span>
                         </button>
                       </div>
+
+                      <button
+                        type="button"
+                        className="btn-scan-hero"
+                        onClick={() => {
+                          document.getElementById("new-scan")?.scrollIntoView({ behavior: "smooth", block: "center" });
+                        }}
+                        title="Jump directly to package scan"
+                      >
+                        <Plus size={15} />
+                        <span>Scan Package</span>
+                      </button>
                     </div>
 
                     <div className="heatmap-body">
