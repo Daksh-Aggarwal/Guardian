@@ -432,10 +432,19 @@ export default function Home() {
               onClick={() => navigate(name as any)}
             >
               <Icon size={18} />
-              <span>{name}</span>
-              {name === "Scan history" && (
-                <span className="nav-count-badge">{reports.length}</span>
-              )}
+              <span>
+                {name}
+                {name === "Scan history" && (
+                  <span
+                    className={`nav-attention-dot ${reports.length > 0 ? "has-reports" : ""}`}
+                    title={
+                      reports.length > 0
+                        ? `${reports.length} scan${reports.length === 1 ? "" : "s"} in history`
+                        : "Scan history attention prompt"
+                    }
+                  />
+                )}
+              </span>
             </button>
           ))}
         </nav>
