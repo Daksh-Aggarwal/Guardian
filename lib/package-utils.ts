@@ -300,14 +300,15 @@ export function isValidPep440(version?: string | null): boolean {
   if (!version || typeof version !== "string") return false;
   const clean = version.trim();
   if (["unresolved", "latest", "*", ""].includes(clean)) return false;
-  if (FORBIDDEN_PEP440_CHARS.test(clean)) return false;
+  if (clean.includes("*") || clean.includes("==") || FORBIDDEN_PEP440_CHARS.test(clean)) return false;
   return PEP440_REGEX.test(clean);
 }
 
 export function parsePep440(version: string): ParsedPep440 | null {
   if (!version || typeof version !== "string") return null;
   const clean = version.trim();
-  if (FORBIDDEN_PEP440_CHARS.test(clean)) return null;
+  if (["unresolved", "latest", "*", ""].includes(clean)) return null;
+  if (clean.includes("*") || clean.includes("==") || FORBIDDEN_PEP440_CHARS.test(clean)) return null;
   const m = clean.match(PEP440_REGEX);
   if (!m) return null;
 
@@ -345,6 +346,59 @@ export function parsePep440(version: string): ParsedPep440 | null {
 }
 
 /**
+ * Builds the authoritative PEP 440 comparison key tuple matching Python packaging.version._cmpkey.
+ * Returns: (epoch, trimmed_release, suffix_tuple, optional_cmp_local)
+ */
+function getPep440CmpKey(p: ParsedPep440) {
+  // Strip trailing zeros from release: 1.0.0 compares equal to 1.0
+  const trimmed = [...p.release];
+  while (trimmed.length > 0 && trimmed[trimmed.length - 1] === 0) {
+    trimmed.pop();
+  }
+
+  // pre_rank: dev-only=-1, a=0, b=1, rc=2, no-pre=3
+  // Dev-only releases (no pre or post) get -1 so they sort before any alpha/beta/rc.
+  let preRank: number;
+  let preN: number;
+  if (p.pre === null && p.post === null && p.dev !== null) {
+    preRank = -1;
+    preN = 0;
+  } else if (p.pre === null) {
+    preRank = 3;
+    preN = 0;
+  } else {
+    const preOrder: Record<string, number> = { a: 0, b: 1, rc: 2 };
+    preRank = preOrder[p.pre[0]] ?? 2;
+    preN = p.pre[1];
+  }
+
+  // post_rank: no-post=0, post=1
+  const postRank = p.post === null ? 0 : 1;
+  const postN = p.post === null ? 0 : p.post;
+
+  // dev_rank: dev=0, no-dev=1 (Releases without dev segment sort after those with one)
+  const devRank = p.dev === null ? 1 : 0;
+  const devN = p.dev === null ? 0 : p.dev;
+
+  const suffix = [preRank, preN, postRank, postN, devRank, devN];
+
+  // Local segments: strings sort before ints (-1 vs int), strings compare lexicographically,
+  // ints compare numerically. Shorter segment tuple sorts before longer when prefix matches.
+  let cmpLocal: Array<[number, string]> | null = null;
+  if (p.local !== null) {
+    const segments = p.local.split(/[.\-_]/);
+    cmpLocal = segments.map((seg) => {
+      if (/^\d+$/.test(seg)) {
+        return [parseInt(seg, 10), ""];
+      }
+      return [-1, seg.toLowerCase()];
+    });
+  }
+
+  return { epoch: p.epoch, release: trimmed, suffix, cmpLocal };
+}
+
+/**
  * Compares two PyPI versions according to PEP 440.
  */
 export function comparePep440(v1?: string | null, v2?: string | null): number {
@@ -358,59 +412,47 @@ export function comparePep440(v1?: string | null, v2?: string | null): number {
   if (!p1) throw new TypeError(`Invalid PEP 440 version: '${v1}'`);
   if (!p2) throw new TypeError(`Invalid PEP 440 version: '${v2}'`);
 
+  const k1 = getPep440CmpKey(p1);
+  const k2 = getPep440CmpKey(p2);
+
   // 1. Epoch
-  if (p1.epoch !== p2.epoch) {
-    return p1.epoch > p2.epoch ? 1 : -1;
+  if (k1.epoch !== k2.epoch) {
+    return k1.epoch > k2.epoch ? 1 : -1;
   }
 
-  // 2. Release segment (normalize trailing zeros: 1.0.0 == 1.0)
-  const r1 = [...p1.release];
-  while (r1.length > 0 && r1[r1.length - 1] === 0) r1.pop();
-  const r2 = [...p2.release];
-  while (r2.length > 0 && r2[r2.length - 1] === 0) r2.pop();
-
-  const maxLen = Math.max(r1.length, r2.length);
-  for (let i = 0; i < maxLen; i++) {
-    const n1 = r1[i] ?? 0;
-    const n2 = r2[i] ?? 0;
+  // 2. Release segment
+  const maxRelLen = Math.max(k1.release.length, k2.release.length);
+  for (let i = 0; i < maxRelLen; i++) {
+    const n1 = k1.release[i] ?? 0;
+    const n2 = k2.release[i] ?? 0;
     if (n1 !== n2) {
       return n1 > n2 ? 1 : -1;
     }
   }
 
-  // 3. Pre-release
-  // Release without pre-release > release with pre-release
-  const preTagOrder: Record<string, number> = { a: 1, b: 2, rc: 3 };
-  const preVal1 = p1.pre ? preTagOrder[p1.pre[0]] : 999;
-  const preVal2 = p2.pre ? preTagOrder[p2.pre[0]] : 999;
-
-  if (preVal1 !== preVal2) {
-    return preVal1 > preVal2 ? 1 : -1;
-  }
-  if (p1.pre && p2.pre && p1.pre[1] !== p2.pre[1]) {
-    return p1.pre[1] > p2.pre[1] ? 1 : -1;
+  // 3. Suffix (pre, post, dev)
+  for (let i = 0; i < 6; i++) {
+    if (k1.suffix[i] !== k2.suffix[i]) {
+      return k1.suffix[i] > k2.suffix[i] ? 1 : -1;
+    }
   }
 
-  // 4. Post-release (post > normal)
-  const postVal1 = p1.post !== null ? p1.post : -1;
-  const postVal2 = p2.post !== null ? p2.post : -1;
-  if (postVal1 !== postVal2) {
-    return postVal1 > postVal2 ? 1 : -1;
-  }
-
-  // 5. Development release (dev < normal)
-  const devVal1 = p1.dev !== null ? p1.dev : Infinity;
-  const devVal2 = p2.dev !== null ? p2.dev : Infinity;
-  if (devVal1 !== devVal2) {
-    return devVal1 > devVal2 ? 1 : -1;
-  }
-
-  // 6. Local version
-  if (p1.local || p2.local) {
-    if (!p1.local && p2.local) return -1;
-    if (p1.local && !p2.local) return 1;
-    if (p1.local && p2.local) {
-      return compareAscii(p1.local, p2.local);
+  // 4. Local version (versions without local sort before those with local: 3-tuple < 4-tuple)
+  if (k1.cmpLocal === null && k2.cmpLocal !== null) return -1;
+  if (k1.cmpLocal !== null && k2.cmpLocal === null) return 1;
+  if (k1.cmpLocal !== null && k2.cmpLocal !== null) {
+    const maxLocLen = Math.max(k1.cmpLocal.length, k2.cmpLocal.length);
+    for (let i = 0; i < maxLocLen; i++) {
+      if (i >= k1.cmpLocal.length) return -1;
+      if (i >= k2.cmpLocal.length) return 1;
+      const [t1, s1] = k1.cmpLocal[i];
+      const [t2, s2] = k2.cmpLocal[i];
+      if (t1 !== t2) {
+        return t1 > t2 ? 1 : -1;
+      }
+      if (t1 === -1 && s1 !== s2) {
+        return compareAscii(s1, s2);
+      }
     }
   }
 

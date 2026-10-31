@@ -3,15 +3,17 @@
 import {
   ShieldAlert,
   AlertTriangle,
+  FileCode2,
+  Info,
+} from "lucide-react";
+import {
   CheckCircle2,
   Terminal,
   HelpCircle,
-  FileCode2,
   ArrowRight,
-  Info,
   Layers,
   Sparkles,
-} from "lucide-react";
+} from "@/components/icons";
 import { RemediationPlan } from "@/lib/types";
 import { Eyebrow, Badge } from "./ui";
 import DiffViewer from "./diff-viewer";

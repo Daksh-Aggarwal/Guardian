@@ -2,23 +2,26 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import {
-  Sparkles,
-  ArrowUp,
   Loader2,
-  ChevronRight,
   Shield,
-  ShieldCheck,
-  RotateCcw,
   PlusCircle,
   AlertTriangle,
   Info,
+  FileCode2,
+} from "lucide-react";
+import {
+  Sparkles,
+  ArrowUp,
+  ChevronRight,
+  ShieldCheck,
+  RotateCcw,
   CheckCircle2,
   X,
-  FileCode2,
   HelpCircle,
   Minimize2,
   ExternalLink,
-} from "lucide-react";
+  SparklesIcon,
+} from "@/components/icons";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   api,
@@ -485,7 +488,7 @@ export default function IntelligencePanel({
             <div className="copilot-header">
               <div className="copilot-brand">
                 <div className="copilot-icon-wrap">
-                  <Sparkles size={16} className="copilot-spark-icon" />
+                  <SparklesIcon size={16} className="copilot-spark-icon inline-flex items-center justify-center" />
                   <span className="copilot-pulse" />
                 </div>
                 <div>
@@ -629,7 +632,7 @@ export default function IntelligencePanel({
               {messages.length === 0 ? (
                 <div className="copilot-empty">
                   <div className="copilot-empty-icon">
-                    <Sparkles size={26} strokeWidth={1.5} />
+                    <SparklesIcon size={26} className="inline-flex items-center justify-center text-amber-400" />
                   </div>
                   <h4>Evidence-Grounded Security Advisor</h4>
                   <p>

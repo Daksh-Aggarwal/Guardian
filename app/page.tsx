@@ -3,6 +3,13 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import {
+  Loader2,
+  AlertCircle,
+  AlertTriangle,
+  FileCode2,
+  ShieldAlert,
+} from "lucide-react";
+import {
   LayoutDashboard,
   History,
   BookOpen,
@@ -17,22 +24,20 @@ import {
   ChevronRight,
   Activity,
   FlaskConical,
-  Loader2,
   Search,
   X,
-  AlertCircle,
   FolderOpen,
   Wrench,
-  AlertTriangle,
-  FileCode2,
   Clock,
   Sparkles,
   Menu,
   CheckCircle2,
-} from "lucide-react";
+  SunIcon,
+  MoonIcon,
+  SearchIcon,
+} from "@/components/icons";
 import { api, Report, ScanJob, Finding } from "@/lib/types";
 import CalendarHeatmap, { CalendarDay } from "@/components/ui/calendar-heatmap";
-import { ShieldAlert } from "lucide-react";
 import { getDependencyAccounting, getFindingBreakdown } from "@/lib/accounting";
 import {
   Brand,
@@ -581,7 +586,11 @@ export default function Home() {
               onClick={() => setDark(!dark)}
               title={dark ? "Use light theme" : "Use dark theme"}
             >
-              {dark ? <Sun size={17} /> : <Moon size={17} />}
+              {dark ? (
+                <SunIcon size={17} className="inline-flex items-center justify-center" />
+              ) : (
+                <MoonIcon size={17} className="inline-flex items-center justify-center" />
+              )}
             </button>
 
             <span className="header-avatar" title="Local session">
@@ -827,7 +836,7 @@ export default function Home() {
                     </div>
 
                     <div className="history-search">
-                      <Search size={15} />
+                      <SearchIcon size={15} className="inline-flex items-center justify-center opacity-70" />
                       <input
                         aria-label="Search scans"
                         placeholder="Search by package name or version…"

@@ -1,13 +1,15 @@
 "use client";
 import { useState } from "react";
 import {
+  Info,
+  FileCode2,
+} from "lucide-react";
+import {
   GitBranch,
   ShieldCheck,
   Package,
-  Info,
   Search,
-  FileCode2,
-} from "lucide-react";
+} from "@/components/icons";
 import { Report, Finding, Integrity } from "@/lib/types";
 import { Eyebrow, Note } from "./ui";
 

@@ -3,23 +3,26 @@
 import { useRef, useState } from "react";
 import {
   UploadCloud,
-  ArrowRight,
-  Package,
   FileArchive,
   Loader2,
+  FileCode2,
+} from "lucide-react";
+import {
+  ArrowRight,
+  Package,
   Check,
   ShieldCheck,
   FolderOpen,
   X,
-  FileCode2,
   Sliders,
   Sparkles,
   GitBranch,
-} from "lucide-react";
+} from "@/components/icons";
 import { motion, AnimatePresence } from "framer-motion";
 import { api, ScanJob } from "@/lib/types";
 import { Note } from "./ui";
 import GitHubConnectPanel from "./github-connect-panel";
+import { MagneticDropZone } from "./ui/magnetic-drop-zone";
 
 export type { ScanJob };
 
@@ -52,9 +55,6 @@ export default function ScanPanel({
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
   const [cancelling, setCancelling] = useState(false);
-  const [drag, setDrag] = useState(false);
-
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const disabled = busy || sending;
 
   async function submit() {
@@ -103,10 +103,6 @@ export default function ScanPanel({
     setError("");
   }
 
-  function removeFile(index: number) {
-    setFiles((prev) => prev.filter((_, i) => i !== index));
-  }
-
   return (
     <section className="card scan-launchpad-card" id="new-scan">
       <div className="launchpad-header">
@@ -151,87 +147,18 @@ export default function ScanPanel({
 
       {tab === "upload" ? (
         <div className="launchpad-upload-area">
-          <input
-            ref={fileInputRef}
-            type="file"
+          <MagneticDropZone
+            accept=".zip,.json,.yaml,.yml,.lock,requirements.txt,pyproject.toml,poetry.lock"
             multiple
-            accept=".zip,.json,.yaml,.yml,.lock"
-            aria-label="Upload project files"
-            className="visually-hidden"
-            onChange={(e) => chooseFiles(Array.from(e.target.files || []))}
+            maxSize={10 * 1024 * 1024}
+            files={files}
+            onFilesChange={chooseFiles}
+            disabled={disabled}
+            title="Drop project archive or browse files"
+            subtitle="Supports project .ZIP, package.json, package-lock.json, pnpm-lock.yaml, or yarn.lock"
+            hint="Bounded local memory inspection · Up to 10 MB · Code is never executed"
+            className="mb-4"
           />
-
-          <div
-            className={`dropzone-box ${drag ? "dragging" : ""} ${files.length > 0 ? "has-files" : ""}`}
-            onDragOver={(e) => {
-              e.preventDefault();
-              setDrag(true);
-            }}
-            onDragLeave={() => setDrag(false)}
-            onDrop={(e) => {
-              e.preventDefault();
-              setDrag(false);
-              if (!disabled) chooseFiles(Array.from(e.dataTransfer.files));
-            }}
-            onClick={() => {
-              if (!files.length) fileInputRef.current?.click();
-            }}
-          >
-            {files.length === 0 ? (
-              <div className="dropzone-empty">
-                <motion.div
-                  className="dropzone-icon-wrap"
-                  whileHover={{ scale: 1.08 }}
-                  transition={{ type: "spring", stiffness: 300, damping: 15 }}
-                >
-                  <UploadCloud size={28} />
-                </motion.div>
-                <strong>Drop project archive or browse files</strong>
-                <span>
-                  Supports project .ZIP, package.json, package-lock.json, pnpm-lock.yaml, or yarn.lock
-                </span>
-              </div>
-            ) : (
-              <div className="dropzone-selected-files">
-                <div className="selected-files-header">
-                  <span>Selected files ({files.length}):</span>
-                  <button
-                    type="button"
-                    className="add-more-btn"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      fileInputRef.current?.click();
-                    }}
-                  >
-                    Change files
-                  </button>
-                </div>
-                <div className="selected-files-list">
-                  {files.map((file, i) => (
-                    <div key={i} className="selected-file-chip">
-                      <FileArchive size={15} />
-                      <span className="file-chip-name">{file.name}</span>
-                      <span className="file-chip-size">
-                        {(file.size / 1024).toFixed(1)} KB
-                      </span>
-                      <button
-                        type="button"
-                        className="file-remove-btn"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          removeFile(i);
-                        }}
-                        aria-label={`Remove ${file.name}`}
-                      >
-                        <X size={13} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
           {onConnectFolder && (
             <div className="connect-folder-hint">
               <button
@@ -301,7 +228,7 @@ export default function ScanPanel({
                 <span className="label-sub">(from {ecosystem === "pypi" ? "PyPI" : "npm"} registry)</span>
               </label>
               <div className="input-with-icon">
-                <Package size={17} />
+                <Package size={17} className="input-prefix-icon" />
                 <input
                   id="pkg-name-input"
                   value={name}

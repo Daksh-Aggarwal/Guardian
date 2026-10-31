@@ -2,23 +2,25 @@
 
 import React, { useState, useEffect } from "react";
 import {
+  AlertTriangle,
+  XCircle,
+  FileCode2,
+  Loader2,
+  HardDrive,
+} from "lucide-react";
+import {
   Wrench,
   CheckCircle2,
   Clock,
   RotateCcw,
-  AlertTriangle,
-  XCircle,
-  FileCode2,
   Sparkles,
   ChevronDown,
   ChevronRight,
   ShieldCheck,
-  Loader2,
   GitPullRequest,
   ExternalLink,
   GitBranch,
-  HardDrive,
-} from "lucide-react";
+} from "@/components/icons";
 import { api, Report, RemediationPlan, VerificationResult } from "@/lib/types";
 import { Eyebrow, Badge } from "./ui";
 

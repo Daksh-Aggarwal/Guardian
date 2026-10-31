@@ -3,11 +3,14 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Wrench,
-  CheckCircle2,
   AlertTriangle,
   XCircle,
   Loader2,
+  FileCode,
+} from "lucide-react";
+import {
+  Wrench,
+  CheckCircle2,
   RotateCcw,
   Sparkles,
   ShieldCheck,
@@ -15,12 +18,11 @@ import {
   ArrowRight,
   RefreshCw,
   X,
-  FileCode,
   Terminal,
   FolderOpen,
   GitPullRequest,
   ExternalLink,
-} from "lucide-react";
+} from "@/components/icons";
 import {
   api,
   Report,
@@ -1303,7 +1305,7 @@ export default function RemediationPanel({
                   disabled={loading}
                   className="button secondary compact"
                 >
-                  <RefreshCw size={14} />
+                  <RefreshCw size={14} className="inline-flex items-center justify-center" />
                   Regenerate
                 </button>
               </>
@@ -1314,7 +1316,7 @@ export default function RemediationPanel({
                 disabled={loading}
                 className="button secondary compact"
               >
-                <RefreshCw size={14} />
+                <RefreshCw size={14} className="inline-flex items-center justify-center" />
                 Regenerate fresh plan
               </button>
             )}

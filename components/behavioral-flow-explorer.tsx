@@ -2,17 +2,19 @@
 
 import React, { useState, useMemo } from "react";
 import {
-  GitBranch,
   FileCode2,
   AlertTriangle,
-  ArrowRight,
   Info,
-  Sparkles,
-  ExternalLink,
-  CheckCircle2,
   Code,
   ShieldAlert,
 } from "lucide-react";
+import {
+  GitBranch,
+  ArrowRight,
+  Sparkles,
+  ExternalLink,
+  CheckCircle2,
+} from "@/components/icons";
 import { Report, Finding, FlowStep, DataFlow } from "@/lib/types";
 import { Eyebrow, Badge } from "./ui";
 

@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Copy, Check, Download, FileCode, ArrowRight } from "lucide-react";
+import { FileCode } from "lucide-react";
+import { Download, ArrowRight, CopyIcon, CheckIcon } from "@/components/icons";
 import { ProposedFileChange } from "@/lib/types";
 
 export default function DiffViewer({
@@ -110,7 +111,11 @@ export default function DiffViewer({
             style={{ fontSize: "11px", padding: "4px 8px" }}
             title="Copy diff to clipboard"
           >
-            {copied ? <Check size={13} /> : <Copy size={13} />}
+            {copied ? (
+              <CheckIcon size={13} className="inline-flex items-center justify-center text-emerald-400" />
+            ) : (
+              <CopyIcon size={13} className="inline-flex items-center justify-center" />
+            )}
             {copied ? "Copied" : "Copy diff"}
           </button>
           {onDownloadPatch && (

@@ -17,13 +17,16 @@ import {
 import "@xyflow/react/dist/style.css";
 import dagre from "@dagrejs/dagre";
 import {
-  Package,
   ShieldAlert,
   FileCode2,
   AlertTriangle,
+  Filter,
+  Info,
+} from "lucide-react";
+import {
+  Package,
   CheckCircle2,
   Search,
-  Filter,
   Maximize2,
   RotateCcw,
   Layers,
@@ -33,8 +36,7 @@ import {
   Wrench,
   X,
   Eye,
-  Info,
-} from "lucide-react";
+} from "@/components/icons";
 import {
   Report,
   Finding,

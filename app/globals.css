@@ -1,5 +1,55 @@
 @import "tailwindcss";
+
+@theme {
+  --color-blue-2: var(--blue-2);
+  --color-blue-3: var(--blue-3);
+  --color-blue-4: var(--blue-4);
+  --color-blue-5: var(--blue-5);
+  --color-blue-6: var(--blue-6);
+  --color-blue-7: var(--blue-7);
+  --color-blue-8: var(--blue-8);
+  --color-blue-11: var(--blue-11);
+
+  --color-grayscale-1: var(--grayscale-1);
+  --color-grayscale-2: var(--grayscale-2);
+  --color-grayscale-3: var(--grayscale-3);
+  --color-grayscale-4: var(--grayscale-4);
+  --color-grayscale-5: var(--grayscale-5);
+  --color-grayscale-6: var(--grayscale-6);
+  --color-grayscale-9: var(--grayscale-9);
+  --color-grayscale-10: var(--grayscale-10);
+  --color-grayscale-11: var(--grayscale-11);
+  --color-grayscale-12: var(--grayscale-12);
+
+  --color-green-9: var(--green-9);
+  --color-red-10: var(--red-10);
+
+  --shadow-small-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.06), 0 1px 2px -1px rgb(0 0 0 / 0.04);
+}
+
 :root {
+  --blue-2: #eef2ff;
+  --blue-3: #e0e7ff;
+  --blue-4: #c7d2fe;
+  --blue-5: #a5b4fc;
+  --blue-6: #818cf8;
+  --blue-7: #6366f1;
+  --blue-8: #4f46e5;
+  --blue-11: #3730a3;
+
+  --grayscale-1: #ffffff;
+  --grayscale-2: #f8fafc;
+  --grayscale-3: #f1f5f9;
+  --grayscale-4: #e2e8f0;
+  --grayscale-5: #cbd5e1;
+  --grayscale-6: #94a3b8;
+  --grayscale-9: #64748b;
+  --grayscale-10: #475569;
+  --grayscale-11: #334155;
+  --grayscale-12: #0f172a;
+
+  --green-9: #059669;
+  --red-10: #dc2626;
   --bg: #f8fafc;
   --surface: #ffffff;
   --surface-card: #ffffff;
@@ -38,6 +88,29 @@
   color-scheme: light;
 }
 [data-theme="dark"] {
+  --blue-2: #1e1b4b;
+  --blue-3: #1e2548;
+  --blue-4: #283466;
+  --blue-5: #374785;
+  --blue-6: #4f64aa;
+  --blue-7: #637ccd;
+  --blue-8: #818cf8;
+  --blue-11: #c7d2fe;
+
+  --grayscale-1: #111827;
+  --grayscale-2: #151d30;
+  --grayscale-3: #1a233a;
+  --grayscale-4: #1e293b;
+  --grayscale-5: #28354d;
+  --grayscale-6: #3b4e72;
+  --grayscale-9: #94a3b8;
+  --grayscale-10: #cbd5e1;
+  --grayscale-11: #e2e8f0;
+  --grayscale-12: #f8fafc;
+
+  --green-9: #34d399;
+  --red-10: #f87171;
+
   --bg: #0b0f19;
   --surface: #111827;
   --surface-card: #151d30;
@@ -946,10 +1019,20 @@ main {
 .input-icon {
   position: relative;
 }
-.input-icon > svg {
+.input-icon > svg,
+.input-icon > div {
   position: absolute;
-  top: 11px;
+  top: 50%;
+  transform: translateY(-50%);
   left: 9px;
+  color: var(--muted);
+  pointer-events: none;
+}
+.input-icon > div svg {
+  position: static;
+  width: 100%;
+  height: 100%;
+  color: inherit;
 }
 .input-icon input {
   padding-left: 34px;
@@ -3517,11 +3600,21 @@ select {
   display: flex;
   align-items: center;
 }
-.input-with-icon svg {
+.input-with-icon > svg,
+.input-with-icon > div {
   position: absolute;
   left: 11px;
+  top: 50%;
+  transform: translateY(-50%);
   color: var(--muted);
   pointer-events: none;
+  z-index: 2;
+}
+.input-with-icon > div svg {
+  position: static;
+  width: 100%;
+  height: 100%;
+  color: inherit;
 }
 .input-with-icon input {
   width: 100%;

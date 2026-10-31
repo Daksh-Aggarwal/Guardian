@@ -3,6 +3,11 @@
 import React, { useState, useMemo } from "react";
 import {
   ShieldAlert,
+  Info,
+  Filter,
+  Share2,
+} from "lucide-react";
+import {
   Search,
   ExternalLink,
   ChevronDown,
@@ -10,12 +15,9 @@ import {
   Sparkles,
   Wrench,
   GitBranch,
-  Info,
-  Filter,
   CheckCircle2,
   Package,
-  Share2,
-} from "lucide-react";
+} from "@/components/icons";
 import { Report, Finding, parsePackageSpecifier } from "@/lib/types";
 import { Eyebrow, Badge } from "./ui";
 

@@ -22,38 +22,56 @@ const backupStore = new Map();
 globalThis.window = {
   indexedDB: {
     open: () => {
-      const req = {
-        result: {
-          objectStoreNames: { contains: () => true },
-          transaction: () => ({
+      const db = {
+        objectStoreNames: { contains: () => true },
+        close: () => {},
+        transaction: (storeNames, mode) => {
+          const tx = {
+            oncomplete: null,
+            onerror: null,
+            onabort: null,
             objectStore: () => ({
               getAll: () => {
                 const r = { result: Array.from(backupStore.values()) };
-                queueMicrotask(() => r.onsuccess?.());
+                queueMicrotask(() => {
+                  r.onsuccess?.();
+                  tx.oncomplete?.();
+                });
                 return r;
               },
               put: (item) => {
                 const key = item.id || item.plan_id;
                 backupStore.set(key, item);
                 const r = {};
-                queueMicrotask(() => r.onsuccess?.());
+                queueMicrotask(() => {
+                  r.onsuccess?.();
+                  tx.oncomplete?.();
+                });
                 return r;
               },
               get: (id) => {
                 const r = { result: backupStore.get(id) || null };
-                queueMicrotask(() => r.onsuccess?.());
+                queueMicrotask(() => {
+                  r.onsuccess?.();
+                  tx.oncomplete?.();
+                });
                 return r;
               },
               delete: (id) => {
                 backupStore.delete(id);
                 const r = {};
-                queueMicrotask(() => r.onsuccess?.());
+                queueMicrotask(() => {
+                  r.onsuccess?.();
+                  tx.oncomplete?.();
+                });
                 return r;
               },
             }),
-          }),
+          };
+          return tx;
         },
       };
+      const req = { result: db };
       queueMicrotask(() => req.onsuccess?.());
       return req;
     },
@@ -1353,24 +1371,39 @@ test("22. PEP 440 PyPI parsing, normalization, and ordering", () => {
   // Epoch comparison
   assert.equal(comparePep440("1!1.0", "2.0"), 1);
 
-  // Pre-release tag ordering: a < b < rc < final
+  // Pre-release and development ordering: 1.0.dev1 < 1.0a1 < 1.0b1 < 1.0rc1 < 1.0 < 1.0.post1
+  assert.equal(comparePep440("1.0.dev1", "1.0a1"), -1);
   assert.equal(comparePep440("1.0a1", "1.0b1"), -1);
   assert.equal(comparePep440("1.0b1", "1.0rc1"), -1);
   assert.equal(comparePep440("1.0rc1", "1.0"), -1);
-
-  // Post release > final
+  assert.equal(comparePep440("1.0", "1.0.post1"), -1);
   assert.equal(comparePep440("1.0.post1", "1.0"), 1);
-
-  // Dev release < final
-  assert.equal(comparePep440("1.0.dev1", "1.0"), -1);
 
   // Local version
   assert.equal(comparePep440("1.0+local1", "1.0"), 1);
+  assert.equal(comparePep440("1.0", "1.0+local1"), -1);
+  assert.equal(comparePep440("1.0+local1", "1.0+local2"), -1);
+  assert.equal(comparePep440("1.0+a", "1.0+1"), -1);
+
+  // Validation
+  assert.equal(isValidPep440("1.0.dev1"), true);
+  assert.equal(isValidPep440("1.0a1"), true);
+  assert.equal(isValidPep440("1.0.post1"), true);
+  assert.equal(isValidPep440("1!1.0"), true);
+  assert.equal(isValidPep440("1.*"), false);
+  assert.equal(isValidPep440(">=1.0"), false);
+  assert.equal(isValidPep440("~=1.0"), false);
+  assert.equal(isValidPep440("==1.0"), false);
+  assert.equal(isValidPep440("invalid"), false);
+  assert.equal(isValidPep440(""), false);
 
   // Rejection of invalid / range specifiers
   assert.throws(() => comparePep440("==1.0", "1.0"), TypeError);
   assert.throws(() => comparePep440(">=1.0", "1.0"), TypeError);
+  assert.throws(() => comparePep440("~=1.0", "1.0"), TypeError);
+  assert.throws(() => comparePep440("1.*", "1.0"), TypeError);
   assert.throws(() => comparePep440("^1.0", "1.0"), TypeError);
+  assert.throws(() => comparePep440("invalid", "1.0"), TypeError);
 });
 
 test("23. Ecosystem-aware version comparison & safety", () => {
@@ -1401,4 +1434,106 @@ test("24. Local project identity isolation using FileSystemDirectoryHandle.isSam
   // Reopening the same directory handle reuses the existing persistent project ID
   const idA_reopened = await resolveProjectDirectoryId(dirHandleA, "backend");
   assert.equal(idA_reopened, idA);
+});
+
+test("25. Two separate directories with the same name never collide", async () => {
+  const dirHandle1 = new MockDirectoryHandle("shared-name");
+  const dirHandle2 = new MockDirectoryHandle("shared-name");
+
+  const id1 = await resolveProjectDirectoryId(dirHandle1, "shared-name");
+  const id2 = await resolveProjectDirectoryId(dirHandle2, "shared-name");
+
+  assert.notEqual(id1, id2);
+  assert.match(id1, /^proj_loc_shared_name_/);
+  assert.match(id2, /^proj_loc_shared_name_/);
+});
+
+test("26. Reopening the same directory preserves identity across re-resolutions", async () => {
+  const dirHandle = new MockDirectoryHandle("persistent-app");
+  const id_first = await resolveProjectDirectoryId(dirHandle, "persistent-app");
+  const id_second = await resolveProjectDirectoryId(dirHandle, "persistent-app");
+  const id_third = await resolveProjectDirectoryId(dirHandle, "persistent-app");
+
+  assert.equal(id_first, id_second);
+  assert.equal(id_second, id_third);
+});
+
+test("27. IndexedDB transaction abort safely falls back without name collision", async () => {
+  const origOpen = globalThis.window.indexedDB.open;
+  try {
+    globalThis.window.indexedDB.open = () => {
+      const db = {
+        objectStoreNames: { contains: () => true },
+        close: () => {},
+        transaction: () => {
+          const tx = {
+            oncomplete: null,
+            onerror: null,
+            onabort: null,
+            objectStore: () => ({
+              getAll: () => {
+                const r = { result: [] };
+                queueMicrotask(() => {
+                  r.onsuccess?.();
+                  tx.oncomplete?.();
+                });
+                return r;
+              },
+              put: () => {
+                const r = {};
+                queueMicrotask(() => {
+                  tx.onabort?.(new Error("Transaction aborted"));
+                });
+                return r;
+              },
+            }),
+          };
+          return tx;
+        },
+      };
+      const req = { result: db };
+      queueMicrotask(() => req.onsuccess?.());
+      return req;
+    };
+
+    const dirHandleA = new MockDirectoryHandle("aborted-dir");
+    const dirHandleB = new MockDirectoryHandle("aborted-dir");
+
+    const idA = await resolveProjectDirectoryId(dirHandleA, "aborted-dir");
+    const idB = await resolveProjectDirectoryId(dirHandleB, "aborted-dir");
+
+    assert.notEqual(idA, idB);
+    assert.match(idA, /^proj_loc_aborted_dir_/);
+    assert.match(idB, /^proj_loc_aborted_dir_/);
+  } finally {
+    globalThis.window.indexedDB.open = origOpen;
+  }
+});
+
+test("28. isSameEntry unavailable safely assigns independent IDs without merging", async () => {
+  const dirHandleA = { name: "no-same-entry" };
+  const dirHandleB = { name: "no-same-entry" };
+
+  const idA = await resolveProjectDirectoryId(dirHandleA, "no-same-entry");
+  const idB = await resolveProjectDirectoryId(dirHandleB, "no-same-entry");
+
+  assert.notEqual(idA, idB);
+  assert.match(idA, /^proj_loc_no_same_entry_/);
+  assert.match(idB, /^proj_loc_no_same_entry_/);
+});
+
+test("29. Permission failures during isSameEntry check safely continue without merging", async () => {
+  const dirHandleDenied = new MockDirectoryHandle("denied-dir");
+  dirHandleDenied.isSameEntry = async () => {
+    const err = new Error("Permission denied");
+    err.name = "NotAllowedError";
+    throw err;
+  };
+
+  const dirHandleNormal = new MockDirectoryHandle("denied-dir");
+
+  const idDenied = await resolveProjectDirectoryId(dirHandleDenied, "denied-dir");
+  const idNormal = await resolveProjectDirectoryId(dirHandleNormal, "denied-dir");
+
+  assert.notEqual(idDenied, idNormal);
 });
