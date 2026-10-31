@@ -277,6 +277,19 @@ nav button:hover {
 nav button span {
   margin-left: auto;
   font-size: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.nav-attention-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+  display: inline-block;
+  flex-shrink: 0;
+  animation: pulse-animation 2s infinite ease-in-out;
 }
 .sidebar-note {
   margin-top: auto;
