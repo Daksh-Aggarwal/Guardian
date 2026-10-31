@@ -28,13 +28,22 @@ export default function ScanPanel({
   busy,
   job,
   onConnectFolder,
+  activeTab,
+  onTabChange,
 }: {
   onStart: (id: string) => void;
   busy: boolean;
   job: ScanJob | null;
   onConnectFolder?: () => void;
+  activeTab?: "upload" | "package" | "github";
+  onTabChange?: (tab: "upload" | "package" | "github") => void;
 }) {
-  const [tab, setTab] = useState<"upload" | "package" | "github">("upload");
+  const [internalTab, setInternalTab] = useState<"upload" | "package" | "github">("upload");
+  const tab = activeTab ?? internalTab;
+  const setTab = (nextTab: "upload" | "package" | "github") => {
+    setInternalTab(nextTab);
+    onTabChange?.(nextTab);
+  };
   const [ecosystem, setEcosystem] = useState<"npm" | "pypi">("npm");
   const [name, setName] = useState("");
   const [version, setVersion] = useState("latest");

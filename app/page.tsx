@@ -13,6 +13,7 @@ import {
   ArrowUpRight,
   ArrowRight,
   Package,
+  GitBranch,
   ChevronRight,
   Activity,
   FlaskConical,
@@ -76,6 +77,17 @@ export default function Home() {
   const [workspaceInitialReport, setWorkspaceInitialReport] =
     useState<Report | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [scanTab, setScanTab] = useState<"upload" | "package" | "github">("upload");
+
+  const handleGetStarted = () => {
+    if (page !== "Overview") navigate("Overview");
+    setScanTab("github");
+    setTimeout(() => {
+      document
+        .getElementById("new-scan")
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 60);
+  };
   const [remediationOpen, setRemediationOpen] = useState(false);
   const [remediationFinding, setRemediationFinding] = useState<string | null>(
     null,
@@ -550,15 +562,19 @@ export default function Home() {
             >
               <Menu size={20} />
             </button>
-
-            <div className="breadcrumb">
-              <span>Workspace</span>
-              <ChevronRight size={13} />
-              <strong>{report ? `Report: ${report.name}` : page}</strong>
-            </div>
           </div>
 
           <div className="top-actions">
+            <button
+              type="button"
+              className="btn-get-started"
+              onClick={handleGetStarted}
+              title="Connect and scan a GitHub repository"
+            >
+              <GitBranch size={14} />
+              <span>Get started</span>
+            </button>
+
             <button
               aria-label={dark ? "Switch to light mode" : "Switch to dark mode"}
               className="icon-button theme-toggle"
@@ -790,6 +806,8 @@ export default function Home() {
                       busy={!!busy}
                       job={job}
                       onConnectFolder={() => navigate("Project workspace")}
+                      activeTab={scanTab}
+                      onTabChange={setScanTab}
                     />
                   </div>
 

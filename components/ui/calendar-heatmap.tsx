@@ -140,7 +140,7 @@ export function CalendarHeatmap({
   // Available width with a safety margin of 48px to prevent horizontal scrollbars on desktop
   const available = Math.max(120, width - LABEL_W - 48);
   const numWeeks = Math.max(weeks.length, 1);
-  const targetMax = cell ?? 21;
+  const targetMax = cell ?? 15;
   const autoCell = Math.floor(available / numWeeks) - 3;
   const size = Math.max(8, Math.min(targetMax, Math.max(10, autoCell)));
   const gap = Math.max(2, Math.round(size * 0.18));
@@ -259,6 +259,7 @@ export function CalendarHeatmap({
               role="img"
               aria-label={`${formatCount(total)} ${label} over the last year. Longest streak ${streaks.longest} days.`}
               onPointerLeave={() => setHovered(null)}
+              onMouseLeave={() => setHovered(null)}
             >
               <g className="font-mono">
                 {monthMarks.map((mark) => (
@@ -302,10 +303,11 @@ export function CalendarHeatmap({
                       height={size}
                       rx={Math.max(2, size * 0.22)}
                       fill={cellColor}
-                      stroke={active ? "#ffffff" : "transparent"}
-                      strokeWidth={active ? 1.5 : 0}
+                      stroke="transparent"
+                      strokeWidth={0}
                       className="heatmap-cell text-neutral-900 dark:text-white"
                       onPointerEnter={() => setHovered({ day, col, row })}
+                      onMouseEnter={() => setHovered({ day, col, row })}
                       style={{
                         animation: reduce
                           ? undefined
@@ -341,8 +343,7 @@ export function CalendarHeatmap({
                     height={hoveredSize}
                     rx={Math.max(2.5, hoveredSize * 0.22)}
                     fill={hoveredFill}
-                    stroke="#ffffff"
-                    strokeWidth={2}
+                    stroke="none"
                     style={{
                       filter: `drop-shadow(0 0 6px ${hoveredGlow})`,
                     }}
