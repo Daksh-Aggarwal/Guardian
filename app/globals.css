@@ -5965,6 +5965,7 @@ select {
  --purple:#d4bfe8; --purple-soft:#372c40; --purple-border:#7b658d;
  --shadow:none; --shadow-md:none; --shadow-lg:none;
  --ink:var(--text); --field:var(--surface); --canvas:var(--bg);
+ --foreground:var(--text); --border:var(--line); --font-mono:"IBM Plex Mono",monospace;
  --on-accent:var(--bg); color-scheme:dark;
 }
 [data-theme="light"] {
@@ -5978,6 +5979,7 @@ select {
  --success:#285f38; --success-soft:#d9eadc; --success-border:#7aa385;
  --info:#295779; --info-soft:#dae7ef; --info-border:#829fb3;
  --purple:#674080; --purple-soft:#e9dff0; --purple-border:#a28bb3;
+ --foreground:var(--text); --border:var(--line); --font-mono:"IBM Plex Mono",monospace;
  color-scheme:light;
 }
 @theme inline {
