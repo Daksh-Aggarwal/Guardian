@@ -774,7 +774,7 @@ export default function Home() {
                           onClick={() => setHeatmapMode("activity")}
                           title="Show days active in emerald gradient"
                         >
-                          <Activity size={14} />
+                          <Activity size={15} />
                           <span>Active Days</span>
                         </button>
                         <button
@@ -783,7 +783,7 @@ export default function Home() {
                           onClick={() => setHeatmapMode("threats")}
                           title="Show malware encountered & handled in rose gradient"
                         >
-                          <ShieldAlert size={14} />
+                          <ShieldAlert size={15} />
                           <span>Malware Handled</span>
                         </button>
                       </div>

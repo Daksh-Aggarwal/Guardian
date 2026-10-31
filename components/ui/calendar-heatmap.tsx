@@ -135,15 +135,17 @@ export function CalendarHeatmap({
     return { longest, current };
   }, [data]);
 
-  const LABEL_W = 34;
-  const MONTH_H = 18;
-  // Available width with a safety margin of 48px to prevent horizontal scrollbars on desktop
-  const available = Math.max(120, width - LABEL_W - 48);
+  const LABEL_W = 38;
+  const MONTH_H = 22;
+  // Available width accounting for left labels with minimal buffer
+  const available = Math.max(120, width - LABEL_W - 8);
   const numWeeks = Math.max(weeks.length, 1);
-  const targetMax = cell ?? 15;
-  const autoCell = Math.floor(available / numWeeks) - 3;
-  const size = Math.max(8, Math.min(targetMax, Math.max(10, autoCell)));
-  const gap = Math.max(2, Math.round(size * 0.18));
+  const targetMax = cell ?? 18.75;
+  // Allow cells to scale naturally with available width, targeting ~25% enlarged default
+  const colPitch = available / numWeeks;
+  const autoCell = Math.floor((colPitch / 1.18) * 2) / 2;
+  const size = Math.max(10, Math.min(targetMax, Math.max(11, autoCell)));
+  const gap = Math.max(2.5, Math.round(size * 0.18 * 2) / 2);
   const gapped = size + gap;
 
   const gridW = weeks.length * gapped;
@@ -210,26 +212,26 @@ export function CalendarHeatmap({
       <Keyframes />
 
       <div
-        className="mb-3 flex flex-wrap items-end justify-between gap-x-4 gap-y-2"
+        className="mb-3.5 flex flex-wrap items-end justify-between gap-x-5 gap-y-2.5"
         style={{ width: ready ? Math.min(w, width) : "100%", maxWidth: "100%" }}
       >
         <div>
-          <p className="font-mono text-[13px] font-medium tracking-wide text-neutral-950 dark:text-white">
+          <p className="font-mono text-[15px] font-semibold tracking-tight text-neutral-950 dark:text-neutral-100">
             {formatCount(total, 1)} {label}
           </p>
-          <p className="mt-0.5 font-mono text-[11px] tabular-nums text-neutral-500 dark:text-neutral-400">
+          <p className="mt-0.5 font-mono text-[12px] tabular-nums text-neutral-500 dark:text-neutral-400">
             <Stat ready={status === "ready"}>
               {streaks.current} day current streak · {streaks.longest} day
               longest
             </Stat>
           </p>
         </div>
-        <div className="flex items-center gap-1.5 font-mono text-[10px] text-neutral-400 dark:text-neutral-500">
+        <div className="flex items-center gap-2 font-mono text-[11px] text-neutral-400 dark:text-neutral-500">
           Less
           {[0, 1, 2, 3, 4].map((step) => (
             <span
               key={step}
-              className="size-[11px] rounded-[2.5px]"
+              className="size-[13px] rounded-[3px]"
               style={{
                 background: step === 0 ? TRACK : intensityColor(step / 4, hue),
               }}
@@ -266,8 +268,8 @@ export function CalendarHeatmap({
                   <text
                     key={`${mark.x}-${mark.label}`}
                     x={mark.x}
-                    y={12}
-                    fontSize={Math.max(9.5, Math.min(11, size * 0.55))}
+                    y={14}
+                    fontSize={Math.max(10.5, Math.min(12, size * 0.58))}
                     fill="currentColor"
                   >
                     {mark.label}
@@ -279,7 +281,7 @@ export function CalendarHeatmap({
                     x={0}
                     y={MONTH_H + row * gapped + size / 2}
                     dominantBaseline="middle"
-                    fontSize={Math.max(9.5, Math.min(11, size * 0.55))}
+                    fontSize={Math.max(10.5, Math.min(12, size * 0.58))}
                     fill="currentColor"
                   >
                     {WEEKDAYS[row]}
@@ -301,7 +303,7 @@ export function CalendarHeatmap({
                       y={MONTH_H + row * gapped}
                       width={size}
                       height={size}
-                      rx={Math.max(2, size * 0.22)}
+                      rx={Math.max(2.5, Math.round(size * 0.2))}
                       fill={cellColor}
                       stroke="transparent"
                       strokeWidth={0}
@@ -356,7 +358,7 @@ export function CalendarHeatmap({
       </ChartState>
 
       <p
-        className="mt-3 h-4 text-center font-mono text-[12px] tabular-nums text-neutral-600 transition-opacity duration-150 dark:text-neutral-300"
+        className="mt-3.5 h-5 text-center font-mono text-[13px] tabular-nums text-neutral-600 transition-opacity duration-150 dark:text-neutral-300"
         style={{ opacity: hovered ? 1 : 0 }}
         aria-live="polite"
       >

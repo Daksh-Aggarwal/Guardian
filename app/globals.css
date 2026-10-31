@@ -6107,7 +6107,7 @@ h1,h2,h3,h4,h5,h6 {line-height:1.2 !important;}
   background: transparent !important;
   border: none !important;
   border-radius: 0 !important;
-  padding: 8px 16px 28px 16px;
+  padding: 8px 0 28px 0;
   margin: 0 auto 28px auto;
   box-shadow: none !important;
   display: flex;
@@ -6120,7 +6120,7 @@ h1,h2,h3,h4,h5,h6 {line-height:1.2 !important;}
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 20px;
+  margin-bottom: 22px;
   width: 100%;
 }
 .heatmap-toggle-pill {
@@ -6135,10 +6135,10 @@ h1,h2,h3,h4,h5,h6 {line-height:1.2 !important;}
 .heatmap-toggle-btn {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  padding: 7px 18px;
+  gap: 8px;
+  padding: 8px 20px;
   border-radius: 9999px;
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 500;
   border: 1px solid transparent;
   background: transparent;
