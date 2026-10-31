@@ -72,7 +72,7 @@ export interface CalendarHeatmapProps {
 export function CalendarHeatmap({
   className,
   data = CONTRIBUTIONS,
-  cell = 13,
+  cell,
   label = "contributions",
   hue = "var(--spectrum-series-3)",
   status = "ready",
@@ -80,7 +80,11 @@ export function CalendarHeatmap({
 }: CalendarHeatmapProps) {
   const reduce = usePrefersReducedMotion();
   const [wrapRef, width] = useElementWidth<HTMLDivElement>();
-  const [hovered, setHovered] = React.useState<CalendarDay | null>(null);
+  const [hovered, setHovered] = React.useState<{
+    day: CalendarDay;
+    col: number;
+    row: number;
+  } | null>(null);
 
   const byDay = React.useMemo(() => {
     const map = new Map<number, CalendarDay>();
@@ -131,14 +135,16 @@ export function CalendarHeatmap({
     return { longest, current };
   }, [data]);
 
-  const LABEL_W = 30;
-  const MONTH_H = 16;
-  const available = Math.max(120, width - LABEL_W - 8);
-  const size = Math.max(
-    6,
-    Math.min(cell, Math.floor(available / Math.max(weeks.length, 1)) - 2),
-  );
-  const gapped = size + 2;
+  const LABEL_W = 34;
+  const MONTH_H = 18;
+  // Available width with a safety margin of 48px to prevent horizontal scrollbars on desktop
+  const available = Math.max(120, width - LABEL_W - 48);
+  const numWeeks = Math.max(weeks.length, 1);
+  const targetMax = cell ?? 21;
+  const autoCell = Math.floor(available / numWeeks) - 3;
+  const size = Math.max(8, Math.min(targetMax, Math.max(10, autoCell)));
+  const gap = Math.max(2, Math.round(size * 0.18));
+  const gapped = size + gap;
 
   const gridW = weeks.length * gapped;
   const gridH = 7 * gapped;
@@ -150,6 +156,29 @@ export function CalendarHeatmap({
       value <= 0 ? 0 : Math.min(4, Math.ceil((value / max) * 4)),
     [max],
   );
+
+  const isEmerald =
+    !hue ||
+    hue.includes("series-3") ||
+    hue.includes("emerald") ||
+    hue.includes("10b981");
+  const glowRgb = isEmerald ? "52, 211, 153" : "251, 113, 133";
+
+  const hoveredStep = hovered ? bucket(hovered.day.value) : 0;
+  const hoveredFill = hovered
+    ? hoveredStep === 0
+      ? isEmerald
+        ? "color-mix(in srgb, var(--spectrum-series-3) 20%, var(--spectrum-track))"
+        : "color-mix(in srgb, var(--spectrum-series-4) 20%, var(--spectrum-track))"
+      : intensityColor(hoveredStep / 4, hue)
+    : undefined;
+  const hoveredGlow = hovered
+    ? hoveredStep === 0
+      ? `rgba(${glowRgb}, 0.45)`
+      : `rgba(${glowRgb}, ${0.65 + (hoveredStep / 4) * 0.35})`
+    : undefined;
+  const hoveredExpand = Math.max(3, Math.round(size * 0.22));
+  const hoveredSize = size + hoveredExpand * 2;
 
   const monthMarks = React.useMemo(() => {
     const marks: { x: number; label: string }[] = [];
@@ -173,14 +202,17 @@ export function CalendarHeatmap({
     <div
       ref={wrapRef}
       className={cn(
-        "flex w-full flex-col text-neutral-400 dark:text-neutral-500",
+        "flex w-full flex-col items-center text-neutral-400 dark:text-neutral-500",
         seriesVarsClassName,
         className,
       )}
     >
       <Keyframes />
 
-      <div className="mb-3 flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
+      <div
+        className="mb-3 flex flex-wrap items-end justify-between gap-x-4 gap-y-2"
+        style={{ width: ready ? Math.min(w, width) : "100%", maxWidth: "100%" }}
+      >
         <div>
           <p className="font-mono text-[13px] font-medium tracking-wide text-neutral-950 dark:text-white">
             {formatCount(total, 1)} {label}
@@ -217,13 +249,13 @@ export function CalendarHeatmap({
         }}
         onRetry={onRetry}
       >
-        <div className="relative w-full overflow-x-auto">
+        <div className="heatmap-grid-scroll relative flex w-full justify-center overflow-x-auto py-2">
           {!ready ? null : (
             <svg
               width={w}
               height={h}
               viewBox={`0 0 ${w} ${h}`}
-              className="block select-none"
+              className="block select-none overflow-visible"
               role="img"
               aria-label={`${formatCount(total)} ${label} over the last year. Longest streak ${streaks.longest} days.`}
               onPointerLeave={() => setHovered(null)}
@@ -233,8 +265,8 @@ export function CalendarHeatmap({
                   <text
                     key={`${mark.x}-${mark.label}`}
                     x={mark.x}
-                    y={11}
-                    fontSize={9.5}
+                    y={12}
+                    fontSize={Math.max(9.5, Math.min(11, size * 0.55))}
                     fill="currentColor"
                   >
                     {mark.label}
@@ -246,7 +278,7 @@ export function CalendarHeatmap({
                     x={0}
                     y={MONTH_H + row * gapped + size / 2}
                     dominantBaseline="middle"
-                    fontSize={9.5}
+                    fontSize={Math.max(9.5, Math.min(11, size * 0.55))}
                     fill="currentColor"
                   >
                     {WEEKDAYS[row]}
@@ -258,7 +290,9 @@ export function CalendarHeatmap({
                 column.map((day, row) => {
                   if (!day) return null;
                   const step = bucket(day.value);
-                  const active = hovered?.t === day.t;
+                  const active = hovered?.day.t === day.t;
+                  const cellColor =
+                    step === 0 ? TRACK : intensityColor(step / 4, hue);
                   return (
                     <rect
                       key={day.t}
@@ -266,21 +300,54 @@ export function CalendarHeatmap({
                       y={MONTH_H + row * gapped}
                       width={size}
                       height={size}
-                      rx={Math.max(1.5, size * 0.22)}
-                      fill={step === 0 ? TRACK : intensityColor(step / 4, hue)}
-                      stroke={active ? "currentColor" : "transparent"}
-                      strokeWidth={1.25}
-                      className="text-neutral-900 dark:text-white"
-                      onPointerEnter={() => setHovered(day)}
+                      rx={Math.max(2, size * 0.22)}
+                      fill={cellColor}
+                      stroke={active ? "#ffffff" : "transparent"}
+                      strokeWidth={active ? 1.5 : 0}
+                      className="heatmap-cell text-neutral-900 dark:text-white"
+                      onPointerEnter={() => setHovered({ day, col, row })}
                       style={{
                         animation: reduce
                           ? undefined
                           : `spectrum-mc-fade 320ms ease-out ${Math.min((col * 7 + row) * 1.4, 520)}ms both`,
-                        transition: reduce ? undefined : `stroke 120ms ${EASE}`,
+                        transition: reduce ? undefined : `all 120ms ${EASE}`,
                       }}
                     />
                   );
                 }),
+              )}
+
+              {/* Hovered cell glow overlay - rendered on top so bloom is never clipped */}
+              {hovered && hoveredFill && hoveredGlow && (
+                <g className="heatmap-glow-overlay" pointerEvents="none">
+                  {/* Ambient radiant neon bloom */}
+                  <rect
+                    x={LABEL_W + hovered.col * gapped - hoveredExpand}
+                    y={MONTH_H + hovered.row * gapped - hoveredExpand}
+                    width={hoveredSize}
+                    height={hoveredSize}
+                    rx={Math.max(3, hoveredSize * 0.24)}
+                    fill={hoveredFill}
+                    style={{
+                      filter: `drop-shadow(0 0 10px ${hoveredGlow}) drop-shadow(0 0 20px ${hoveredGlow}) drop-shadow(0 0 35px ${hoveredGlow})`,
+                      opacity: 0.95,
+                    }}
+                  />
+                  {/* Crisp elevated foreground cell */}
+                  <rect
+                    x={LABEL_W + hovered.col * gapped - hoveredExpand}
+                    y={MONTH_H + hovered.row * gapped - hoveredExpand}
+                    width={hoveredSize}
+                    height={hoveredSize}
+                    rx={Math.max(2.5, hoveredSize * 0.22)}
+                    fill={hoveredFill}
+                    stroke="#ffffff"
+                    strokeWidth={2}
+                    style={{
+                      filter: `drop-shadow(0 0 6px ${hoveredGlow})`,
+                    }}
+                  />
+                </g>
               )}
             </svg>
           )}
@@ -288,13 +355,13 @@ export function CalendarHeatmap({
       </ChartState>
 
       <p
-        className="mt-2 h-4 font-mono text-[11px] tabular-nums text-neutral-600 transition-opacity duration-150 dark:text-neutral-300"
+        className="mt-3 h-4 text-center font-mono text-[12px] tabular-nums text-neutral-600 transition-opacity duration-150 dark:text-neutral-300"
         style={{ opacity: hovered ? 1 : 0 }}
         aria-live="polite"
       >
         {hovered
-          ? `${hovered.value === 0 ? "No" : hovered.value} ${label} on ${DAY_FMT.format(hovered.t)}`
-          : " "}
+          ? `${hovered.day.value === 0 ? "No" : hovered.day.value} ${label} on ${DAY_FMT.format(hovered.day.t)}`
+          : " "}
       </p>
     </div>
   );
@@ -316,4 +383,3 @@ export function DeploysCalendarHeatmap(props: CalendarHeatmapProps) {
 }
 
 export default CalendarHeatmap;
-

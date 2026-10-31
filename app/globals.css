@@ -6102,40 +6102,43 @@ h1,h2,h3,h4,h5,h6 {line-height:1.2 !important;}
 .dataset-filter-control button, .launchpad-actions button, .scan-panel button {box-shadow:none;}
 
 
-/* GitHub-style Security Activity & Threat Heatmap Hero */
+/* GitHub-style Security Activity & Threat Heatmap Centerpiece */
 .heatmap-hero-card {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 24px;
-  margin-bottom: 24px;
-  box-shadow: var(--shadow);
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  padding: 8px 16px 28px 16px;
+  margin: 0 auto 28px auto;
+  box-shadow: none !important;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
 }
 .heatmap-header {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  justify-content: center;
+  margin-bottom: 20px;
+  width: 100%;
 }
 .heatmap-toggle-pill {
   display: inline-flex;
-  padding: 3px;
+  padding: 4px;
   background: var(--surface-subtle);
   border: 1px solid var(--line);
-  border-radius: 8px;
-  gap: 2px;
+  border-radius: 9999px;
+  gap: 4px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
 }
 .heatmap-toggle-btn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  border-radius: 6px;
-  font-size: 12px;
+  gap: 7px;
+  padding: 7px 18px;
+  border-radius: 9999px;
+  font-size: 12.5px;
   font-weight: 500;
   border: 1px solid transparent;
   background: transparent;
@@ -6150,7 +6153,7 @@ h1,h2,h3,h4,h5,h6 {line-height:1.2 !important;}
   background: var(--surface);
   color: var(--text);
   border-color: var(--line);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
 }
 .heatmap-toggle-btn.active.activity {
   color: #10b981;
@@ -6158,26 +6161,56 @@ h1,h2,h3,h4,h5,h6 {line-height:1.2 !important;}
 .heatmap-toggle-btn.active.threats {
   color: #f43f5e;
 }
-.btn-scan-hero {
+.heatmap-body {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+/* Individual Grid Cells Hover Glow */
+.heatmap-cell {
+  cursor: pointer;
+  transform-origin: center;
+  transform-box: fill-box;
+  transition: transform 0.12s cubic-bezier(0.16, 1, 0.3, 1), filter 0.12s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.heatmap-cell:hover {
+  filter: drop-shadow(0 0 8px currentColor) drop-shadow(0 0 16px currentColor);
+}
+
+.heatmap-grid-scroll {
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.heatmap-grid-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+/* Glow Button Component */
+.glow-btn {
+  position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
-  border-radius: 8px;
-  font-size: 13px;
+  justify-content: center;
+  padding: 10px 22px;
+  font-size: 14px;
   font-weight: 600;
-  background: var(--accent);
+  border-radius: 9999px;
   color: #ffffff;
-  border: 1px solid var(--accent-border);
+  background: var(--accent);
+  border: 1px solid rgba(255, 255, 255, 0.2);
   cursor: pointer;
-  transition: all 0.15s ease-out;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 0 16px rgba(16, 185, 129, 0.4), 0 2px 6px rgba(0, 0, 0, 0.15);
 }
-.btn-scan-hero:hover {
-  background: var(--accent-hover);
-  transform: translateY(-1px);
+.glow-btn:hover {
+  transform: translateY(-1px) scale(1.02);
+  box-shadow: 0 0 28px rgba(16, 185, 129, 0.7), 0 0 45px rgba(16, 185, 129, 0.35);
 }
-.heatmap-body {
-  padding-top: 4px;
+.glow-btn[data-state="clicked"] {
+  transform: scale(0.96);
 }
 
 .scan-launchpad-section {
