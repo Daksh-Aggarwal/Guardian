@@ -44,11 +44,12 @@ export default function VulnerabilitiesExplorer({
     );
   }, [report.findings]);
 
-  // Group by affected package
+  // Group by affected package identity and version
   const packageGroups = useMemo(() => {
     const groups: Record<
       string,
       {
+        key: string;
         packageName: string;
         version: string;
         findings: Finding[];
@@ -60,16 +61,18 @@ export default function VulnerabilitiesExplorer({
       const parsed = parsePackageSpecifier(f.package);
       const name = parsed.name || f.package || "Unknown Package";
       const ver = parsed.version || "resolved";
+      const groupKey = `${name}@${ver}`;
 
-      if (!groups[name]) {
-        groups[name] = {
+      if (!groups[groupKey]) {
+        groups[groupKey] = {
+          key: groupKey,
           packageName: name,
           version: ver,
           findings: [],
           highestSeverity: "low",
         };
       }
-      groups[name].findings.push(f);
+      groups[groupKey].findings.push(f);
     });
 
     return Object.values(groups);
@@ -239,7 +242,7 @@ export default function VulnerabilitiesExplorer({
         <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
           {filteredGroups.map((group) => (
             <div
-              key={group.packageName}
+              key={group.key}
               className="card"
               style={{ padding: "18px 20px" }}
             >

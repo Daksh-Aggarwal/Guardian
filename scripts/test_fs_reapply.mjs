@@ -59,6 +59,7 @@ const {
   validatePlanFilesForReapplication,
   applyPlanToFileSystem,
   undoPlanFromFileSystem,
+  cleanEmptyCreatedDirectories,
   computeBrowserSHA256,
 } = await import("../lib/fs-access.ts");
 
@@ -66,6 +67,7 @@ const {
   parsePackageSpecifier,
   extractPackageFromPath,
   normalizeFindingPackage,
+  normalizePackageName,
   getFindingSignature,
   compareSemver,
 } = await import("../lib/package-utils.ts");
@@ -128,8 +130,31 @@ class MockDirectoryHandle {
   }
 
   async getDirectoryHandle(name, { create } = {}) {
-    // For single level paths
-    return this;
+    if (this.files.has(name)) {
+      const entry = this.files.get(name);
+      return entry;
+    }
+    if (create) {
+      const dir = new MockDirectoryHandle(name);
+      this.files.set(name, dir);
+      return dir;
+    }
+    const err = new Error(`Directory '${name}' not found`);
+    err.name = "NotFoundError";
+    throw err;
+  }
+
+  values() {
+    const list = Array.from(this.files.values());
+    let idx = 0;
+    return {
+      next: async () => {
+        if (idx < list.length) {
+          return { value: list[idx++], done: false };
+        }
+        return { value: undefined, done: true };
+      },
+    };
   }
 
   async removeEntry(name, options = {}) {
@@ -1167,4 +1192,117 @@ test("16. Security timeline finding signatures and dependency comparison", () =>
   assert.equal(compareSemver("4.17.19", "4.17.20"), -1); // downgraded
   assert.equal(compareSemver("1.0.0", "1.0.0"), 0); // unchanged
   assert.equal(compareSemver("2.0.0-beta.2", "2.0.0-beta.1"), 1);
+});
+
+test("17. SemVer 2.0.0 prerelease ordering according to official specification", () => {
+  // Numeric prerelease comparisons: 10 vs 2 must compare numerically, not lexically
+  assert.equal(compareSemver("2.0.0-alpha.10", "2.0.0-alpha.2"), 1);
+  assert.equal(compareSemver("2.0.0-alpha.2", "2.0.0-alpha.10"), -1);
+
+  // Normal version vs prerelease: normal version has higher precedence
+  assert.equal(compareSemver("2.0.0", "2.0.0-rc.1"), 1);
+  assert.equal(compareSemver("2.0.0-rc.1", "2.0.0"), -1);
+
+  // Differing number of prerelease fields: larger set has higher precedence
+  assert.equal(compareSemver("1.0.0-beta.1", "1.0.0-beta"), 1);
+  assert.equal(compareSemver("1.0.0-beta", "1.0.0-beta.1"), -1);
+
+  // Numeric identifier has lower precedence than non-numeric identifier
+  assert.equal(compareSemver("1.0.0-alpha.1", "1.0.0-alpha.beta"), -1);
+  assert.equal(compareSemver("1.0.0-alpha.beta", "1.0.0-alpha.1"), 1);
+
+  // Build metadata is stripped and ignored for precedence
+  assert.equal(compareSemver("1.0.0+001", "1.0.0+20130313144700"), 0);
+  assert.equal(compareSemver("1.0.0-beta+exp.sha.5114f85", "1.0.0-beta"), 0);
+
+  // Invalid / partial version handling
+  assert.equal(compareSemver(null, "1.0.0"), -1);
+  assert.equal(compareSemver("1.0.0", null), 1);
+  assert.equal(compareSemver(null, null), 0);
+});
+
+test("18. Ecosystem-aware package normalization", () => {
+  // npm: preserves scoped prefixes and internal dashes/underscores
+  assert.equal(normalizePackageName("@babel/core", "npm"), "@babel/core");
+  assert.equal(normalizePackageName("@Types/Node", "npm"), "@types/Node");
+  assert.equal(normalizePackageName("lodash_core", "npm"), "lodash_core");
+
+  // PyPI: follows PEP 503 normalization (lowercase, replaces runs of [-_.]+ with single -)
+  assert.equal(normalizePackageName("Flask_RESTful", "pypi"), "flask-restful");
+  assert.equal(normalizePackageName("oslo.config", "pypi"), "oslo-config");
+  assert.equal(normalizePackageName("ruamel.yaml--clib", "pypi"), "ruamel-yaml-clib");
+});
+
+test("19. Rollback and cleanup of empty newly-created directories", async () => {
+  // Create a mock hierarchy: root -> src -> components
+  const createdDirs = ["src/components", "src"];
+  const subDir = new MockDirectoryHandle("components");
+  const parentDir = new MockDirectoryHandle("src");
+  parentDir.files.set("components", subDir);
+
+  const rootDir = new MockDirectoryHandle("root");
+  rootDir.files.set("src", parentDir);
+
+  // Directory is currently empty (subDir has no files)
+  const cleaned = await cleanEmptyCreatedDirectories(rootDir, createdDirs);
+  assert.ok(cleaned.includes("src/components"));
+});
+
+test("20. Undo error classification rejects permission errors rather than assuming file absence", async () => {
+  const plan = {
+    plan_id: "plan_perm_test",
+    scan_id: "scan_perm",
+    title: "Permission test",
+    summary: "Test",
+    priority: "low",
+    expected_outcome: "Done",
+    findings_addressed: [],
+    proposed_changes: [
+      {
+        file_path: "secret.js",
+        operation: "create",
+        original_sha256: "",
+        proposed_sha256: "somehash",
+        edits: [],
+        diff: "",
+        rationale: "",
+        finding_ids: [],
+        expected_result: "",
+      },
+    ],
+    tradeoffs: [],
+    potential_risks: [],
+    assumptions: [],
+    manual_steps: [],
+    recommended_verification: [],
+    limitations: [],
+    status: "applied",
+    created_at: new Date().toISOString(),
+  };
+
+  const dirHandle = new MockDirectoryHandle();
+  // Override getFileHandle to simulate a permission / security denial
+  dirHandle.getFileHandle = async () => {
+    const err = new Error("The request is not allowed by the user agent or the platform in the current context.");
+    err.name = "NotAllowedError";
+    throw err;
+  };
+
+  backupStore.set("plan_perm_test", {
+    plan_id: "plan_perm_test",
+    timestamp: new Date().toISOString(),
+    files: [],
+    createdFiles: ["secret.js"],
+  });
+
+  await assert.rejects(
+    async () => {
+      await undoPlanFromFileSystem(dirHandle, plan);
+    },
+    (err) => {
+      assert.match(err.message, /Cannot safely undo/);
+      assert.match(err.message, /NotAllowedError/);
+      return true;
+    }
+  );
 });

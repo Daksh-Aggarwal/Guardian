@@ -253,8 +253,9 @@ VALID_STATUS_TRANSITIONS: Dict[str, Set[str]] = {
     'proposed': {'approved', 'rejected', 'applying', 'applied', 'failed', 'verified', 'stale'},
     'approved': {'applying', 'applied', 'failed', 'rejected', 'reverted', 'stale'},
     'applying': {'applied', 'failed'},
-    'applied': {'reverted', 'verified', 'failed'},
+    'applied': {'reverted', 'verified', 'failed', 'pr_closed'},
     'reverted': {'approved', 'applying', 'applied', 'failed', 'rejected'},
+    'pr_closed': {'applied', 'approved', 'rejected'},
     'verified': set(),
     'rejected': set(),
     'failed': {'approved', 'applying', 'applied', 'reverted'},
@@ -292,24 +293,65 @@ def get_verification(plan_id: str) -> Optional[VerificationResult]:
         return VerificationResult.model_validate_json(row[0])
     return None
 
-def save_github_installation(installation: dict):
+def save_github_installation(installation: dict, make_active: bool = False):
     now = datetime.now(timezone.utc).isoformat()
     with connection() as db:
-        # Mark other installations inactive for single-active-installation mode
-        db.execute('UPDATE github_installations SET is_active = 0')
+        has_active = db.execute('SELECT 1 FROM github_installations WHERE is_active = 1').fetchone()
+        existing = db.execute('SELECT is_active FROM github_installations WHERE installation_id = ?', (installation['id'],)).fetchone()
+        if make_active:
+            db.execute('UPDATE github_installations SET is_active = 0')
+            is_active = 1
+        elif existing:
+            is_active = existing[0]
+        elif not has_active:
+            is_active = 1
+        else:
+            is_active = 0
+
         db.execute(
-            '''INSERT OR REPLACE INTO github_installations
+            '''INSERT INTO github_installations
                (installation_id, account_login, account_type, account_avatar, repository_selection, installed_at, is_active)
-               VALUES (?, ?, ?, ?, ?, ?, 1)''',
+               VALUES (?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(installation_id) DO UPDATE SET
+               account_login=excluded.account_login,
+               account_type=excluded.account_type,
+               account_avatar=excluded.account_avatar,
+               repository_selection=excluded.repository_selection,
+               is_active=excluded.is_active''',
             (
                 installation['id'],
                 installation['account_login'],
                 installation['account_type'],
                 installation.get('avatar_url'),
                 installation.get('repository_selection', 'all'),
-                installation.get('installed_at', now)
+                installation.get('installed_at', now),
+                is_active
             )
         )
+
+def get_github_installation(installation_id: int) -> Optional[dict]:
+    with connection() as db:
+        row = db.execute(
+            '''SELECT installation_id, account_login, account_type, account_avatar, repository_selection, installed_at, is_active
+               FROM github_installations WHERE installation_id = ?''',
+            (installation_id,)
+        ).fetchone()
+    if row:
+        return {
+            'id': row[0],
+            'account_id': row[0],
+            'account_login': row[1],
+            'account_type': row[2],
+            'avatar_url': row[3],
+            'repository_selection': row[4],
+            'installed_at': row[5],
+            'is_active': bool(row[6]),
+        }
+    return None
+
+def disconnect_github_installation(installation_id: int):
+    with connection() as db:
+        db.execute('UPDATE github_installations SET is_active = 0 WHERE installation_id = ?', (installation_id,))
 
 def get_active_github_installation() -> Optional[dict]:
     with connection() as db:

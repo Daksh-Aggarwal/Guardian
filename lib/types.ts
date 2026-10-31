@@ -250,7 +250,8 @@ export type RemediationPlan = {
     | "reverted"
     | "verified"
     | "failed"
-    | "stale";
+    | "stale"
+    | "pr_closed";
   created_at: string;
   repository_id?: number | null;
   branch?: string | null;
@@ -281,12 +282,15 @@ export type GitHubInstallation = {
   avatar_url?: string | null;
   repository_selection: string;
   installed_at?: string | null;
+  is_selected?: boolean;
+  is_active?: boolean;
 };
 
 export type GitHubStatus = {
   configured: boolean;
   connected: boolean;
   installation?: GitHubInstallation | null;
+  installations?: GitHubInstallation[];
   reason?: string | null;
 };
 

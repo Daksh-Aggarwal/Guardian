@@ -450,20 +450,27 @@ export default function RemediationPanel({
     setStage("Closing Pull Request on GitHub...");
 
     try {
-      await api(`/remediation/plans/${plan.plan_id}/close-github-pr`, {
+      const res = await api<{
+        status: RemediationPlan["status"];
+        pr_state: string;
+        message?: string;
+      }>(`/remediation/plans/${plan.plan_id}/close-github-pr`, {
         method: "POST",
       });
       setPlan((prev) =>
         prev
           ? {
               ...prev,
-              status: "reverted",
-              pr_state: "closed",
+              status: res.status || (res.pr_state === "merged" ? "applied" : "pr_closed"),
+              pr_state: res.pr_state || "closed",
             }
           : null
       );
       setActionSuccess(
-        `Pull Request #${plan.pr_number} was closed. Plan status marked reverted.`
+        res.message ||
+          (res.pr_state === "merged"
+            ? `Pull Request #${plan.pr_number} was already merged. Merged changes cannot be undone by closing the PR; a separate Git revert is required.`
+            : `Pull Request #${plan.pr_number} closed without merge. Remediation branch changes were not merged into target branch.`)
       );
     } catch (err) {
       setError((err as Error).message);

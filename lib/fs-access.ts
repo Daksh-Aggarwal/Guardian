@@ -241,21 +241,101 @@ export async function openProjectDirectory(): Promise<ProjectDirectoryResult> {
 
 /**
  * Resolves a nested file handle inside a directory handle, creating parent directories if needed.
+ * When create is true and createdDirsSet is provided, records any newly created directory paths.
  */
 async function resolveFileHandle(
   root: FileSystemDirectoryHandle,
   relativePath: string,
   create: boolean = false,
+  createdDirsSet?: Set<string>,
 ): Promise<FileSystemFileHandle> {
   const parts = relativePath.split("/").filter(Boolean);
   const fileName = parts.pop()!;
   let currentDir = root;
+  let accumulatedPath = "";
 
   for (const part of parts) {
-    currentDir = await currentDir.getDirectoryHandle(part, { create });
+    accumulatedPath = accumulatedPath ? `${accumulatedPath}/${part}` : part;
+    if (create) {
+      let alreadyExists = true;
+      try {
+        await currentDir.getDirectoryHandle(part, { create: false });
+      } catch (err: any) {
+        if (
+          err.name === "NotFoundError" ||
+          (err.message && err.message.includes("not found"))
+        ) {
+          alreadyExists = false;
+        }
+      }
+      currentDir = await currentDir.getDirectoryHandle(part, { create: true });
+      if (!alreadyExists && createdDirsSet) {
+        createdDirsSet.add(accumulatedPath);
+      }
+    } else {
+      currentDir = await currentDir.getDirectoryHandle(part, { create: false });
+    }
   }
 
   return currentDir.getFileHandle(fileName, { create });
+}
+
+/**
+ * Safely removes empty directories that were newly created during remediation.
+ * Deepest directories are inspected and removed first.
+ * Never removes pre-existing directories or directories containing other files.
+ */
+export async function cleanEmptyCreatedDirectories(
+  root: FileSystemDirectoryHandle,
+  createdDirPaths: string[],
+): Promise<string[]> {
+  const cleaned: string[] = [];
+  const sorted = [...createdDirPaths].sort((a, b) => {
+    const aLen = a.split("/").length;
+    const bLen = b.split("/").length;
+    return bLen - aLen;
+  });
+
+  for (const dirPath of sorted) {
+    const parts = dirPath.split("/").filter(Boolean);
+    const dirName = parts.pop();
+    if (!dirName) continue;
+
+    try {
+      let parentDir = root;
+      for (const p of parts) {
+        parentDir = await parentDir.getDirectoryHandle(p, { create: false });
+      }
+
+      const targetDir = await parentDir.getDirectoryHandle(dirName, {
+        create: false,
+      });
+
+      let isEmpty = true;
+      if (typeof (targetDir as any).values === "function") {
+        const iter = (targetDir as any).values();
+        const first = await iter.next();
+        if (!first.done) {
+          isEmpty = false;
+        }
+      } else if (typeof (targetDir as any).entries === "function") {
+        const iter = (targetDir as any).entries();
+        const first = await iter.next();
+        if (!first.done) {
+          isEmpty = false;
+        }
+      }
+
+      if (isEmpty && typeof (parentDir as any).removeEntry === "function") {
+        await (parentDir as any).removeEntry(dirName);
+        cleaned.push(dirPath);
+      }
+    } catch {
+      // Ignore if directory no longer exists or cannot be removed safely
+    }
+  }
+
+  return cleaned;
 }
 
 /**
@@ -364,11 +444,13 @@ export async function applyPlanToFileSystem(
   }
 
   // 3. Save backup snapshot in browser IndexedDB before touching disk
+  const createdDirsSet = new Set<string>();
   await saveRemediationBackup({
     plan_id: plan.plan_id,
     timestamp: new Date().toISOString(),
     files: backupEntries,
     createdFiles,
+    createdDirs: [],
   });
 
   // 4. Sequentially write modified and created files with touched-file tracking
@@ -398,8 +480,14 @@ export async function applyPlanToFileSystem(
           updatedText = updatedText.replace(edit.old_text, edit.new_text);
         }
 
-        // Open writable and perform write
-        const writable = await (handle as any).createWritable();
+        // Open writable: if opening fails before writing, disk was untouched
+        let writable: any = null;
+        try {
+          writable = await (handle as any).createWritable();
+        } catch (openErr) {
+          throw openErr;
+        }
+
         try {
           await writable.write(updatedText);
           await writable.close();
@@ -426,16 +514,17 @@ export async function applyPlanToFileSystem(
           directoryHandle,
           change.file_path,
           true,
+          createdDirsSet,
         );
+        touchedFiles.add(change.file_path);
         const content = change.created_content || "";
 
-        const writable = await (handle as any).createWritable();
+        let writable: any = null;
         try {
+          writable = await (handle as any).createWritable();
           await writable.write(content);
           await writable.close();
-          touchedFiles.add(change.file_path);
         } catch (createErr) {
-          touchedFiles.add(change.file_path);
           throw createErr;
         }
 
@@ -452,6 +541,15 @@ export async function applyPlanToFileSystem(
         modifiedFiles.push(change.file_path);
       }
     }
+
+    // Update backup with newly created directories for clean rollback
+    await saveRemediationBackup({
+      plan_id: plan.plan_id,
+      timestamp: new Date().toISOString(),
+      files: backupEntries,
+      createdFiles,
+      createdDirs: Array.from(createdDirsSet),
+    });
 
     return { success: true, modifiedFiles };
   } catch (err) {
@@ -491,6 +589,14 @@ export async function applyPlanToFileSystem(
           failedRestoreFiles.push(createdPath);
         }
       }
+    }
+
+    // Safely remove empty directories created during this failed application
+    if (createdDirsSet.size > 0) {
+      await cleanEmptyCreatedDirectories(
+        directoryHandle,
+        Array.from(createdDirsSet),
+      );
     }
 
     const rollbackSuccess = failedRestoreFiles.length === 0;
@@ -562,9 +668,20 @@ export async function undoPlanFromFileSystem(
               `Aborting undo to prevent overwriting your latest manual edits.`,
           );
         }
-      } catch (err) {
-        if ((err as Error).message.startsWith("Cannot safely undo:")) {
+      } catch (err: any) {
+        if (err.message && err.message.startsWith("Cannot safely undo:")) {
           throw err;
+        }
+        // ONLY treat a genuine NotFoundError as evidence that the file is absent
+        const isNotFound =
+          err.name === "NotFoundError" ||
+          (err.message &&
+            (err.message.includes("not found") ||
+              err.message.includes("could not be located")));
+        if (!isNotFound) {
+          throw new Error(
+            `Cannot safely undo: Error verifying '${change.file_path}': ${err.name || "Error"}: ${err.message}.`,
+          );
         }
         // Expected if file was already removed
       }
@@ -620,6 +737,12 @@ export async function undoPlanFromFileSystem(
         `${createdPath} (removal failed: ${(err as Error).message})`,
       );
     }
+  }
+
+  // Safely remove empty directories that were newly created by remediation
+  const createdDirs = backup.createdDirs || [];
+  if (createdDirs.length > 0) {
+    await cleanEmptyCreatedDirectories(directoryHandle, createdDirs);
   }
 
   if (failedUndoFiles.length > 0) {

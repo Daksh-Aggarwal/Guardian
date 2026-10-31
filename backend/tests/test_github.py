@@ -129,29 +129,13 @@ def test_installation_callback_invalid_state(github_env, test_client):
     assert "Invalid or expired OAuth state" in resp.json()["detail"]
 
 def test_installation_callback_without_state(github_env, test_client):
-    """GitHub setup redirect sends installation_id and setup_action without state."""
-    mock_inst = {
-        "id": 777222,
-        "account": {
-            "id": 555,
-            "login": "setup-user",
-            "type": "User",
-            "avatar_url": "https://avatars.githubusercontent.com/u/555"
-        },
-        "repository_selection": "selected",
-        "created_at": "2026-10-31T12:00:00Z"
-    }
-    with patch("backend.guardian.github._call_app_api", return_value=mock_inst):
-        resp = test_client.get(
-            "/api/github/callback?installation_id=777222&setup_action=install",
-            follow_redirects=False
-        )
-        assert resp.status_code == 302
-        assert "github=connected" in resp.headers["location"]
-        active = storage.get_active_github_installation()
-        assert active is not None
-        assert active["id"] == 777222
-        assert active["account_login"] == "setup-user"
+    """Browser-initiated callback without state must be rejected."""
+    resp = test_client.get(
+        "/api/github/callback?installation_id=777222&setup_action=install",
+        follow_redirects=False
+    )
+    assert resp.status_code == 400
+    assert "Missing OAuth state parameter" in resp.json()["detail"]
 
 def test_github_sync_endpoint(github_env, test_client):
     """POST /api/github/sync queries App API and registers installation."""
@@ -537,7 +521,9 @@ def test_apply_remediation_pull_request_success(github_env):
         if endpoint == "/repositories/99/git/ref/heads/main":
             # Target branch still at the expected commit SHA
             return {"object": {"sha": "commit_sha_base_111"}}
-        if "git/trees/commit_sha_base_111" in endpoint:
+        if endpoint == "/repositories/99/git/commits/commit_sha_base_111":
+            return {"sha": "commit_sha_base_111", "tree": {"sha": "tree_sha_base_111"}}
+        if "git/trees/tree_sha_base_111" in endpoint:
             return {"tree": [{"path": "package.json", "type": "blob", "sha": "blob_pkg_orig"}]}
         if "git/blobs/blob_pkg_orig" in endpoint:
             return {"content": base64.b64encode(orig_pkg.encode('utf-8')).decode('utf-8'), "encoding": "base64"}
@@ -562,8 +548,8 @@ def test_apply_remediation_pull_request_success(github_env):
         assert res["status"] == "applied"
         assert res["remediation_branch"] == "guardian/remediation/plan_abc"
 
-        # Verify atomic Git tree payload was constructed properly
-        assert created_tree_payload["base_tree"] == "commit_sha_base_111"
+        # Verify atomic Git tree payload was constructed using the commit's tree SHA (not commit SHA)
+        assert created_tree_payload["base_tree"] == "tree_sha_base_111"
         assert created_tree_payload["tree"][0]["path"] == "package.json"
         assert created_tree_payload["tree"][0]["sha"] == "blob_new_pkg_sha"
 
@@ -632,14 +618,231 @@ def test_close_remediation_pull_request(github_env, test_client):
     )
     storage.save_plan(plan)
 
-    with patch("backend.guardian.github._call_installation_api", return_value={"state": "closed"}):
+    def mock_install_api(inst_id, endpoint, method="GET", json_data=None):
+        if endpoint == "/repositories/99/pulls/55" and method == "GET":
+            return {"number": 55, "state": "open", "merged": False}
+        if endpoint == "/repositories/99/pulls/55" and method == "PATCH":
+            return {"number": 55, "state": "closed", "merged": False}
+        raise ValueError(endpoint)
+
+    with patch("backend.guardian.github._call_installation_api", side_effect=mock_install_api):
         resp = test_client.post("/api/remediation/plans/plan_to_close/close-github-pr")
         assert resp.status_code == 200
         data = resp.json()
         assert data["pr_state"] == "closed"
-        assert data["status"] == "reverted"
+        assert data["status"] == "pr_closed"
 
         # Plan in storage updated
         saved = storage.get_plan("plan_to_close")
-        assert saved.status == "reverted"
+        assert saved.status == "pr_closed"
         assert saved.pr_state == "closed"
+
+# ==========================================
+# 4. GUARDIAN 4.1 REGRESSION & RELIABILITY TESTS
+# ==========================================
+
+def test_multiple_installations_preservation_and_explicit_selection(github_env, test_client):
+    """Part 2.1: Preserve multiple installations without silent switching."""
+    inst1 = {
+        "id": 1001,
+        "account_id": 101,
+        "account_login": "alice-org",
+        "account_type": "Organization",
+        "avatar_url": "https://avatar/alice.png",
+        "repository_selection": "all"
+    }
+    inst2 = {
+        "id": 1002,
+        "account_id": 102,
+        "account_login": "bob-team",
+        "account_type": "User",
+        "avatar_url": "https://avatar/bob.png",
+        "repository_selection": "selected"
+    }
+    storage.save_github_installation(inst1, make_active=True)
+    storage.save_github_installation(inst2, make_active=False)
+
+    # Active installation must be inst1 (alice-org)
+    active = storage.get_active_github_installation()
+    assert active["id"] == 1001
+    assert active["account_login"] == "alice-org"
+
+    # Synchronizing multiple installations must preserve Alice as active without silent switch
+    mock_gh_installations = [
+        {"id": 1001, "account": {"id": 101, "login": "alice-org", "type": "Organization"}, "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z"},
+        {"id": 1002, "account": {"id": 102, "login": "bob-team", "type": "User"}, "created_at": "2026-02-01T00:00:00Z", "updated_at": "2026-10-31T20:00:00Z"}
+    ]
+    with patch("backend.guardian.github._call_app_api", return_value=mock_gh_installations):
+        sync_resp = test_client.post("/api/github/sync")
+        assert sync_resp.status_code == 200
+        # Active account is still alice-org
+        active_after_sync = storage.get_active_github_installation()
+        assert active_after_sync["id"] == 1001
+
+        # Listing installations exposes both accounts
+        list_resp = test_client.get("/api/github/installations")
+        assert list_resp.status_code == 200
+        inst_list = list_resp.json()
+        assert len(inst_list) == 2
+        logins = {i["account_login"] for i in inst_list}
+        assert "alice-org" in logins
+        assert "bob-team" in logins
+
+        # Explicitly switch account to bob-team
+        sel_resp = test_client.post("/api/github/installations/1002/select")
+        assert sel_resp.status_code == 200
+        assert sel_resp.json()["id"] == 1002
+
+        # Active account is now bob-team
+        active_now = storage.get_active_github_installation()
+        assert active_now["id"] == 1002
+        assert active_now["account_login"] == "bob-team"
+
+def test_disconnect_selected_installation_preserves_others(github_env, test_client):
+    """Part 2.4: Disconnecting one installation preserves other connected accounts."""
+    storage.save_github_installation({"id": 2001, "account_login": "user-one", "account_type": "User"}, make_active=True)
+    storage.save_github_installation({"id": 2002, "account_login": "user-two", "account_type": "User"}, make_active=False)
+
+    # Disconnect user-two
+    resp = test_client.post("/api/github/installations/2002/disconnect")
+    assert resp.status_code == 200
+    assert resp.json()["installation_id"] == 2002
+
+    # user-one is still active and preserved
+    active = storage.get_active_github_installation()
+    assert active is not None
+    assert active["id"] == 2001
+
+    # Disconnect target user-one
+    resp2 = test_client.post("/api/github/installations/2001/disconnect")
+    assert resp2.status_code == 200
+    assert storage.get_active_github_installation() is None
+
+def test_oauth_state_validation_and_session_binding(github_env):
+    """Part 2.3: OAuth state requires non-empty, unexpired, single-use, session-bound tokens."""
+    sess_A = "session_user_A"
+    sess_B = "session_user_B"
+
+    # Missing state fails
+    assert verify_and_consume_state(None) is False
+    assert verify_and_consume_state("") is False
+
+    # Mismatched session fails
+    state_mismatch = create_install_state(session_id=sess_A)
+    assert verify_and_consume_state(state_mismatch, session_id=sess_B) is False
+
+    # Correct session succeeds and consumes the token
+    state_valid = create_install_state(session_id=sess_A)
+    assert verify_and_consume_state(state_valid, session_id=sess_A) is True
+
+    # Replay attempt fails (already consumed)
+    assert verify_and_consume_state(state_valid, session_id=sess_A) is False
+
+def test_branch_name_encoding(github_env):
+    """Part 3.2: Verify Git ref and branch encoding preserves slash semantics while encoding special chars."""
+    storage.save_github_installation({"id": 500, "account_login": "repo-owner", "account_type": "User"})
+
+    requested_urls = []
+    def mock_install_api(inst_id, endpoint, method="GET", json_data=None):
+        requested_urls.append(endpoint)
+        return {
+            "sha": "commit_sha_123",
+            "commit": {"message": "commit msg", "author": {"name": "Dev", "date": "2026-10-31"}}
+        }
+
+    with patch("backend.guardian.github._call_installation_api", side_effect=mock_install_api):
+        # Slash-separated branch
+        get_branch_commit(99, "feature/auth")
+        assert requested_urls[-1] == "/repositories/99/commits/feature/auth"
+
+        # Release branch
+        get_branch_commit(99, "release/v2.1")
+        assert requested_urls[-1] == "/repositories/99/commits/release/v2.1"
+
+        # Branch with spaces
+        get_branch_commit(99, "bugfix/login redirect")
+        assert requested_urls[-1] == "/repositories/99/commits/bugfix/login%20redirect"
+
+def test_remediation_preflight_lockfile_protection(github_env):
+    """Part 4.1 & AGENTS.md: Automated remediation is strictly forbidden from modifying lockfiles."""
+    storage.save_github_installation({"id": 500, "account_login": "repo-owner", "account_type": "User"})
+
+    plan = RemediationPlan(
+        plan_id="plan_lockfile_tamper",
+        scan_id="scan_1",
+        title="Tamper lockfile",
+        summary="Should be rejected",
+        expected_outcome="Reject",
+        repository_id=99,
+        branch="main",
+        commit_sha="commit_sha_111",
+        status="approved",
+        created_at="2026-10-31T12:00:00Z",
+        proposed_changes=[
+            ProposedFileChange(
+                file_path="package-lock.json",
+                operation="update",
+                original_sha256="abc",
+                proposed_sha256="def",
+                rationale="Should fail",
+                finding_ids=["f1"],
+                expected_result="Fail"
+            )
+        ]
+    )
+
+    def mock_install_api(inst_id, endpoint, method="GET", json_data=None):
+        if endpoint == "/repositories/99/git/ref/heads/main":
+            return {"object": {"sha": "commit_sha_111"}}
+        if endpoint == "/repositories/99/git/commits/commit_sha_111":
+            return {"sha": "commit_sha_111", "tree": {"sha": "tree_sha_111"}}
+        if "git/trees/tree_sha_111" in endpoint:
+            return {"tree": [{"path": "package-lock.json", "type": "blob", "sha": "blob_lock"}]}
+        raise ValueError(endpoint)
+
+    with patch("backend.guardian.github._call_installation_api", side_effect=mock_install_api):
+        with pytest.raises(ValueError) as exc:
+            apply_remediation_pull_request(plan)
+        assert "forbidden" in str(exc.value).lower()
+        assert "package-lock.json" in str(exc.value)
+
+def test_close_merged_pull_request_preserves_applied(github_env, test_client):
+    """Part 4.4: Closing a merged PR must preserve 'applied' status and explain revert guidance."""
+    storage.save_github_installation({"id": 500, "account_login": "repo-owner", "account_type": "User"})
+
+    plan = RemediationPlan(
+        plan_id="plan_merged_pr",
+        scan_id="scan_1",
+        title="Merged plan",
+        summary="Already merged into base",
+        expected_outcome="Applied",
+        repository_id=99,
+        branch="main",
+        commit_sha="commit_111",
+        pr_number=88,
+        pr_url="https://github.com/acme/app/pull/88",
+        status="applied",
+        created_at="2026-10-31T12:00:00Z"
+    )
+    storage.save_plan(plan)
+
+    # GitHub reports PR as merged
+    def mock_install_api(inst_id, endpoint, method="GET", json_data=None):
+        if endpoint == "/repositories/99/pulls/88" and method == "GET":
+            return {"number": 88, "state": "closed", "merged": True}
+        raise ValueError(endpoint)
+
+    with patch("backend.guardian.github._call_installation_api", side_effect=mock_install_api):
+        resp = test_client.post("/api/remediation/plans/plan_merged_pr/close-github-pr")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["pr_state"] == "merged"
+        assert data["status"] == "applied"
+        assert "already merged" in data["message"]
+        assert "separate Git revert commit is required" in data["message"]
+
+        # Ensure plan in storage is NOT marked 'reverted'
+        saved = storage.get_plan("plan_merged_pr")
+        assert saved.status == "applied"
+        assert saved.pr_state == "merged"
+

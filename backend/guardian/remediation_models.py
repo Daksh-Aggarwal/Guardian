@@ -12,7 +12,8 @@ PlanStatus = Literal[
     'reverted',
     'verified',
     'failed',
-    'stale'
+    'stale',
+    'pr_closed'
 ]
 OperationType = Literal['update', 'create']
 

@@ -22,6 +22,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   api,
   GitHubStatus,
+  GitHubInstallation,
   GitHubRepository,
   GitHubBranch,
 } from "@/lib/types";
@@ -162,14 +163,34 @@ export default function GitHubConnectPanel({
     }
   };
 
-  // Disconnect GitHub
-  const handleDisconnect = async () => {
+  // Explicit installation selection
+  const handleSelectInstallation = async (instId: number) => {
+    setLoading(true);
     setError(null);
     try {
-      await api("/github/disconnect", { method: "POST" });
-      setStatus((prev) => (prev ? { ...prev, connected: false, installation: null } : null));
+      await api<GitHubInstallation>(`/github/installations/${instId}/select`, { method: "POST" });
       setSelectedRepo(null);
       setRepos([]);
+      await fetchStatus();
+    } catch (err) {
+      setError((err as Error).message);
+      setLoading(false);
+    }
+  };
+
+  // Disconnect GitHub
+  const handleDisconnect = async (instId?: number) => {
+    setError(null);
+    try {
+      const targetId = instId || status?.installation?.id;
+      if (targetId) {
+        await api(`/github/installations/${targetId}/disconnect`, { method: "POST" });
+      } else {
+        await api("/github/disconnect", { method: "POST" });
+      }
+      setSelectedRepo(null);
+      setRepos([]);
+      await fetchStatus();
     } catch (err) {
       setError((err as Error).message);
     }
@@ -350,7 +371,7 @@ export default function GitHubConnectPanel({
           border: "1px solid var(--line)",
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
           {installation?.avatar_url ? (
             <img
               src={installation.avatar_url}
@@ -378,9 +399,43 @@ export default function GitHubConnectPanel({
           <span style={{ fontSize: "11px", color: "var(--muted)" }}>
             ({installation?.account_type})
           </span>
+
+          {status?.installations && status.installations.length > 1 && (
+            <div style={{ display: "inline-flex", alignItems: "center", gap: "6px", marginLeft: "8px" }}>
+              <label style={{ fontSize: "11px", color: "var(--muted)" }}>Switch Account:</label>
+              <select
+                value={installation?.id}
+                onChange={(e) => handleSelectInstallation(Number(e.target.value))}
+                style={{
+                  fontSize: "12px",
+                  padding: "3px 8px",
+                  borderRadius: "4px",
+                  border: "1px solid var(--line)",
+                  background: "var(--surface)",
+                  color: "var(--text)",
+                  cursor: "pointer",
+                }}
+              >
+                {status.installations.map((inst) => (
+                  <option key={inst.id} value={inst.id}>
+                    {inst.account_login} ({inst.account_type})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <button
+            onClick={handleConnect}
+            className="button secondary compact"
+            title="Connect another GitHub account or organization"
+            style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "11px" }}
+          >
+            <GitBranch size={12} />
+            <span>+ Add Account</span>
+          </button>
           <button
             onClick={() => fetchRepos(search)}
             disabled={loadingRepos}
@@ -392,8 +447,9 @@ export default function GitHubConnectPanel({
             <span>Refresh</span>
           </button>
           <button
-            onClick={handleDisconnect}
+            onClick={() => handleDisconnect()}
             className="button secondary compact"
+            title="Disconnect current GitHub account"
             style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "11px", color: "#f87171" }}
           >
             <LogOut size={12} />

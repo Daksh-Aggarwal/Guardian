@@ -35,7 +35,7 @@ from typing import Literal, Optional
 
 app = FastAPI(title='Guardian', version='0.1.0')
 app.add_middleware(RequestSizeLimit)
-app.add_middleware(CORSMiddleware, allow_origins=['http://localhost:3000','http://127.0.0.1:3000'], allow_methods=['GET','POST'], allow_headers=['Content-Type'])
+app.add_middleware(CORSMiddleware, allow_origins=['http://localhost:3000','http://127.0.0.1:3000'], allow_methods=['GET','POST'], allow_headers=['*'])
 JOBS = {}
 CANCELLATIONS = {}
 LOCK = threading.Lock()
@@ -552,7 +552,7 @@ def get_scan_remediation_plans(scan_id: str):
         raise HTTPException(404, 'Report not found')
     return storage.get_plans_for_scan(scan_id)
 
-@app.get('/api/projects/{name}/remediation/history')
+@app.get('/api/projects/{name:path}/remediation/history')
 def get_project_remediation_history(name: str):
     plans = storage.get_plans_for_project(name)
     history = []
@@ -564,19 +564,50 @@ def get_project_remediation_history(name: str):
         })
     return history
 
+def _get_session_id(request: Request) -> str:
+    session_id = request.headers.get("x-guardian-session")
+    if not session_id:
+        session_id = request.cookies.get("guardian_session")
+    if not session_id:
+        session_id = github.session_manager.create_session()
+    return session_id
+
 class GitHubScanRequest(BaseModel):
     repository_id: int
     branch: Optional[str] = None
     profile: Literal['fast', 'deep'] = 'fast'
 
 @app.get('/api/github/status')
-def github_status():
-    return github.get_connection_status()
+def github_status(request: Request):
+    session_id = _get_session_id(request)
+    return github.get_connection_status(session_id=session_id)
+
+@app.get('/api/github/installations')
+def github_installations(request: Request):
+    session_id = _get_session_id(request)
+    return github.list_installations(session_id=session_id)
+
+@app.post('/api/github/installations/{installation_id}/select')
+def select_github_installation(installation_id: int, request: Request):
+    session_id = _get_session_id(request)
+    try:
+        return github.select_installation(installation_id, session_id=session_id)
+    except ValueError as err:
+        raise HTTPException(404, str(err))
+
+@app.post('/api/github/installations/{installation_id}/disconnect')
+def disconnect_github_installation_endpoint(installation_id: int, request: Request):
+    session_id = _get_session_id(request)
+    try:
+        return github.disconnect_installation(installation_id, session_id=session_id)
+    except ValueError as err:
+        raise HTTPException(400, str(err))
 
 @app.post('/api/github/connect')
-def github_connect():
+def github_connect(request: Request):
+    session_id = _get_session_id(request)
     try:
-        return github.create_connect_flow()
+        return github.create_connect_flow(session_id=session_id)
     except Exception as err:
         raise HTTPException(400, str(err))
 
@@ -588,8 +619,9 @@ def github_callback(
     setup_action: Optional[str] = None,
     code: Optional[str] = None
 ):
+    session_id = _get_session_id(request)
     try:
-        github.handle_installation_callback(installation_id=installation_id, state=state)
+        github.handle_installation_callback(installation_id=installation_id, state=state, session_id=session_id)
         host = request.headers.get("host", "")
         if ":8000" in host:
             redirect_url = os.getenv("GUARDIAN_FRONTEND_URL", "http://localhost:3000").rstrip('/') + "/?github=connected"
@@ -600,49 +632,56 @@ def github_callback(
         raise HTTPException(400, f"GitHub installation callback failed: {err}")
 
 @app.post('/api/github/sync')
-def github_sync():
+def github_sync(request: Request):
+    session_id = _get_session_id(request)
     try:
-        return github.sync_installations()
+        return github.sync_installations(session_id=session_id)
     except Exception as err:
         raise HTTPException(400, f"GitHub synchronization failed: {err}")
 
 @app.post('/api/github/disconnect')
-def github_disconnect():
-    return github.disconnect_github()
+def github_disconnect(request: Request):
+    session_id = _get_session_id(request)
+    return github.disconnect_github(session_id=session_id)
 
 @app.get('/api/github/repositories')
-def github_repositories(q: Optional[str] = None):
+def github_repositories(request: Request, q: Optional[str] = None):
+    session_id = _get_session_id(request)
     try:
-        return github.list_repositories(query=q)
+        return github.list_repositories(query=q, session_id=session_id)
     except ValueError as err:
         raise HTTPException(400, str(err))
     except Exception as err:
         raise HTTPException(500, f"Failed to list repositories: {err}")
 
 @app.get('/api/github/repositories/{repo_id}')
-def github_repository(repo_id: int):
+def github_repository(repo_id: int, request: Request):
+    session_id = _get_session_id(request)
     try:
-        return github.get_repository(repo_id)
+        return github.get_repository(repo_id, session_id=session_id)
     except ValueError as err:
         raise HTTPException(400, str(err))
     except Exception as err:
         raise HTTPException(500, f"Failed to retrieve repository metadata: {err}")
 
 @app.get('/api/github/repositories/{repo_id}/branches')
-def github_branches(repo_id: int):
+def github_branches(repo_id: int, request: Request):
+    session_id = _get_session_id(request)
     try:
-        return github.list_branches(repo_id)
+        return github.list_branches(repo_id, session_id=session_id)
     except ValueError as err:
         raise HTTPException(400, str(err))
     except Exception as err:
         raise HTTPException(500, f"Failed to list branches: {err}")
 
 @app.post('/api/scans/github', status_code=202)
-def scan_github_repository(request: GitHubScanRequest):
+def scan_github_repository(scan_req: GitHubScanRequest, request: Request):
+    session_id = _get_session_id(request)
     try:
         repo_full_name, files_dict, gh_meta, warnings = github.retrieve_repository_snapshot(
-            repo_id=request.repository_id,
-            branch=request.branch
+            repo_id=scan_req.repository_id,
+            branch=scan_req.branch,
+            session_id=session_id
         )
     except ValueError as err:
         raise HTTPException(400, str(err))
@@ -655,7 +694,7 @@ def scan_github_repository(request: GitHubScanRequest):
             scan_id=job_id,
             name=repo_full_name,
             raw_files=files_dict,
-            project_id=f"github:{request.repository_id}"
+            project_id=f"github:{scan_req.repository_id}"
         )
     except ValueError as err:
         raise HTTPException(400, str(err))
@@ -664,7 +703,7 @@ def scan_github_repository(request: GitHubScanRequest):
         return submit(
             loader=lambda: (dict(snapshot.files), warnings),
             source=f"github: {repo_full_name}@{gh_meta.branch}",
-            profile=request.profile,
+            profile=scan_req.profile,
             job_id=job_id,
             classification='real',
             project_id=snapshot.project_id,
@@ -675,7 +714,8 @@ def scan_github_repository(request: GitHubScanRequest):
         raise
 
 @app.post('/api/remediation/plans/{plan_id}/apply-github')
-def apply_remediation_github(plan_id: str):
+def apply_remediation_github(plan_id: str, request: Request):
+    session_id = _get_session_id(request)
     plan = storage.get_plan(plan_id)
     if not plan:
         raise HTTPException(404, 'Remediation plan not found.')
@@ -683,7 +723,7 @@ def apply_remediation_github(plan_id: str):
         raise HTTPException(400, 'Remediation plan is not associated with a GitHub repository.')
 
     try:
-        res = github.apply_remediation_pull_request(plan)
+        res = github.apply_remediation_pull_request(plan, session_id=session_id)
         return res
     except ValueError as err:
         raise HTTPException(409 if "Pre-flight check failed" in str(err) else 400, str(err))
@@ -691,7 +731,8 @@ def apply_remediation_github(plan_id: str):
         raise HTTPException(502, f"Failed to apply GitHub remediation: {err}")
 
 @app.post('/api/remediation/plans/{plan_id}/close-github-pr')
-def close_remediation_github_pr(plan_id: str):
+def close_remediation_github_pr(plan_id: str, request: Request):
+    session_id = _get_session_id(request)
     plan = storage.get_plan(plan_id)
     if not plan:
         raise HTTPException(404, 'Remediation plan not found.')
@@ -699,10 +740,11 @@ def close_remediation_github_pr(plan_id: str):
         raise HTTPException(400, 'Remediation plan does not have an active GitHub pull request.')
 
     try:
-        return github.close_remediation_pull_request(plan)
+        return github.close_remediation_pull_request(plan, session_id=session_id)
     except ValueError as err:
         raise HTTPException(400, str(err))
     except Exception as err:
         raise HTTPException(502, f"Failed to close pull request: {err}")
+
 
 

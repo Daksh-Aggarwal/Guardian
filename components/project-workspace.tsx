@@ -198,6 +198,29 @@ export default function ProjectWorkspace({
     [activeReport],
   );
 
+  // Helper to persist and retrieve stable project IDs for local folders across page reloads
+  function getOrPersistLocalProjectId(
+    projectName: string,
+    existingId?: string | null,
+  ): string {
+    if (existingId) return existingId;
+    if (typeof window === "undefined" || !window.localStorage) {
+      return `proj_${Math.random().toString(36).substring(2, 10)}`;
+    }
+    try {
+      const raw = localStorage.getItem("guardian_local_project_ids");
+      const map = raw ? JSON.parse(raw) : {};
+      if (map[projectName]) return map[projectName];
+      const sanitized = projectName.replace(/[^a-zA-Z0-9_-]/g, "_");
+      const newId = `proj_${sanitized}_${Math.random().toString(36).substring(2, 8)}`;
+      map[projectName] = newId;
+      localStorage.setItem("guardian_local_project_ids", JSON.stringify(map));
+      return newId;
+    } catch {
+      return `proj_${Math.random().toString(36).substring(2, 10)}`;
+    }
+  }
+
   // Connect local folder via File System Access API
   async function handleConnectProject() {
     setError(null);
@@ -208,9 +231,12 @@ export default function ProjectWorkspace({
       const existingProj = allReports.find(
         (r) => r.name === result.projectName,
       );
-      setSelectedProjectId(
-        existingProj ? getProjectKey(existingProj) : result.projectName,
+      const stableId = getOrPersistLocalProjectId(
+        result.projectName,
+        existingProj?.project_id,
       );
+      setSelectedProjectId(stableId);
+      setLocalFolderProjectId(stableId);
       if (onDirectoryHandleChange) {
         onDirectoryHandleChange(result.directoryHandle);
       }
@@ -243,7 +269,7 @@ export default function ProjectWorkspace({
       const stableId =
         activeReport?.project_id ||
         localFolderProjectId ||
-        `proj_${Math.random().toString(36).substring(2, 10)}`;
+        getOrPersistLocalProjectId(projectData.projectName);
       if (!localFolderProjectId) {
         setLocalFolderProjectId(stableId);
       }

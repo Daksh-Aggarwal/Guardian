@@ -90,18 +90,20 @@ export default function SecurityTimeline({
       baseSignatures.has(getFindingSignature(f)),
     );
 
-    // Dependency diffs: separate identity from version
-    const baseDepMap = new Map<string, { version: string; direct: boolean }>();
-    baseReport.dependencies.forEach((d) =>
-      baseDepMap.set(d.name, { version: d.version, direct: d.direct }),
-    );
-    const targetDepMap = new Map<
-      string,
-      { version: string; direct: boolean }
-    >();
-    targetReport.dependencies.forEach((d) =>
-      targetDepMap.set(d.name, { version: d.version, direct: d.direct }),
-    );
+    // Multi-version aware dependency comparison: separate identity from version
+    const baseDepMap = new Map<string, Array<{ version: string; direct: boolean }>>();
+    baseReport.dependencies.forEach((d) => {
+      const list = baseDepMap.get(d.name) || [];
+      list.push({ version: d.version, direct: d.direct });
+      baseDepMap.set(d.name, list);
+    });
+
+    const targetDepMap = new Map<string, Array<{ version: string; direct: boolean }>>();
+    targetReport.dependencies.forEach((d) => {
+      const list = targetDepMap.get(d.name) || [];
+      list.push({ version: d.version, direct: d.direct });
+      targetDepMap.set(d.name, list);
+    });
 
     const addedDependencies: Array<{
       name: string;
@@ -131,46 +133,84 @@ export default function SecurityTimeline({
       direct: boolean;
     }> = [];
 
-    targetDepMap.forEach((targetInfo, name) => {
-      const baseInfo = baseDepMap.get(name);
-      if (!baseInfo) {
-        addedDependencies.push({
-          name,
-          version: targetInfo.version,
-          direct: targetInfo.direct,
-        });
-      } else {
-        const cmp = compareSemver(targetInfo.version, baseInfo.version);
+    const allPackageNames = new Set([...baseDepMap.keys(), ...targetDepMap.keys()]);
+
+    allPackageNames.forEach((name) => {
+      const baseVersions = baseDepMap.get(name) || [];
+      const targetVersions = targetDepMap.get(name) || [];
+
+      if (baseVersions.length === 0) {
+        targetVersions.forEach((tv) =>
+          addedDependencies.push({ name, version: tv.version, direct: tv.direct }),
+        );
+        return;
+      }
+      if (targetVersions.length === 0) {
+        baseVersions.forEach((bv) =>
+          removedDependencies.push({ name, version: bv.version, direct: bv.direct }),
+        );
+        return;
+      }
+
+      // Check for exact matching versions (unchanged)
+      const unmatchedBase: Array<{ version: string; direct: boolean }> = [];
+      const targetVersionMap = new Map(targetVersions.map((tv) => [tv.version, tv]));
+
+      baseVersions.forEach((bv) => {
+        if (targetVersionMap.has(bv.version)) {
+          unchangedDependencies.push({ name, version: bv.version, direct: bv.direct });
+          targetVersionMap.delete(bv.version);
+        } else {
+          unmatchedBase.push(bv);
+        }
+      });
+
+      const unmatchedTarget: Array<{ version: string; direct: boolean }> = Array.from(
+        targetVersionMap.values(),
+      );
+
+      // Pair unmatched base and target versions by sort order for upgrade/downgrade detection
+      unmatchedBase.sort((a, b) => compareSemver(a.version, b.version));
+      unmatchedTarget.sort((a, b) => compareSemver(a.version, b.version));
+
+      const pairsToCompare = Math.min(unmatchedBase.length, unmatchedTarget.length);
+      for (let i = 0; i < pairsToCompare; i++) {
+        const b = unmatchedBase[i];
+        const t = unmatchedTarget[i];
+        const cmp = compareSemver(t.version, b.version);
         if (cmp > 0) {
           upgradedDependencies.push({
             name,
-            fromVersion: baseInfo.version,
-            toVersion: targetInfo.version,
-            direct: targetInfo.direct,
+            fromVersion: b.version,
+            toVersion: t.version,
+            direct: t.direct,
           });
         } else if (cmp < 0) {
           downgradedDependencies.push({
             name,
-            fromVersion: baseInfo.version,
-            toVersion: targetInfo.version,
-            direct: targetInfo.direct,
+            fromVersion: b.version,
+            toVersion: t.version,
+            direct: t.direct,
           });
         } else {
-          unchangedDependencies.push({
-            name,
-            version: targetInfo.version,
-            direct: targetInfo.direct,
-          });
+          unchangedDependencies.push({ name, version: t.version, direct: t.direct });
         }
       }
-    });
 
-    baseDepMap.forEach((baseInfo, name) => {
-      if (!targetDepMap.has(name)) {
+      // Remaining unmatched base are removed
+      for (let i = pairsToCompare; i < unmatchedBase.length; i++) {
         removedDependencies.push({
           name,
-          version: baseInfo.version,
-          direct: baseInfo.direct,
+          version: unmatchedBase[i].version,
+          direct: unmatchedBase[i].direct,
+        });
+      }
+      // Remaining unmatched target are added
+      for (let i = pairsToCompare; i < unmatchedTarget.length; i++) {
+        addedDependencies.push({
+          name,
+          version: unmatchedTarget[i].version,
+          direct: unmatchedTarget[i].direct,
         });
       }
     });

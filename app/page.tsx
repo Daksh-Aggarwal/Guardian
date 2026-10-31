@@ -71,6 +71,9 @@ export default function Home() {
   const [workspaceProjectName, setWorkspaceProjectName] = useState<
     string | null
   >(null);
+  const [workspaceProjectId, setWorkspaceProjectId] = useState<string | null>(
+    null,
+  );
   const [workspaceInitialReport, setWorkspaceInitialReport] =
     useState<Report | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -242,7 +245,7 @@ export default function Home() {
     });
   }, [reports, datasetFilter]);
 
-  // Reconcile workspace initial selections when dataset filter changes
+  // Reconcile workspace and active report selections when dataset filter changes
   useEffect(() => {
     if (workspaceInitialReport) {
       const cls =
@@ -253,9 +256,18 @@ export default function Home() {
       if (datasetFilter !== "all" && cls !== datasetFilter) {
         setWorkspaceInitialReport(null);
         setWorkspaceProjectName(null);
+        setWorkspaceProjectId(null);
       }
     }
-  }, [datasetFilter, workspaceInitialReport]);
+    if (report && datasetFilter !== "all") {
+      const cls =
+        report.classification ||
+        (report.source === "synthetic fixture" ? "demo" : "real");
+      if (cls !== datasetFilter) {
+        setReport(null);
+      }
+    }
+  }, [datasetFilter, workspaceInitialReport, report]);
 
   const realReportsCount = useMemo(
     () =>
@@ -638,6 +650,7 @@ export default function Home() {
                 }}
                 onInvestigateProject={(r) => {
                   setWorkspaceProjectName(r.name);
+                  setWorkspaceProjectId(r.project_id || r.name);
                   setWorkspaceInitialReport(r);
                   navigate("Project workspace");
                 }}
@@ -675,7 +688,7 @@ export default function Home() {
               onDirectoryHandleChange={setConnectedDirectoryHandle}
               initialReport={workspaceInitialReport}
               initialProjectName={workspaceProjectName}
-              initialProjectId={workspaceInitialReport?.project_id || undefined}
+              initialProjectId={workspaceProjectId || workspaceInitialReport?.project_id || undefined}
               allReports={filteredReports}
               onOpenReportView={(r) => openReport(r)}
             />
@@ -1243,6 +1256,7 @@ export default function Home() {
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     setWorkspaceProjectName(r.name);
+                                    setWorkspaceProjectId(r.project_id || r.name);
                                     setWorkspaceInitialReport(r);
                                     navigate("Project workspace");
                                   }}

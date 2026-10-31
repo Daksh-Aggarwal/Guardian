@@ -7,7 +7,22 @@ import httpx
 from .engine import finding
 from .models import Evidence, Advisory
 
-EXACT = re.compile(r'^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$')
+NPM_EXACT = re.compile(r'^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$')
+PYPI_EXACT = re.compile(r'^\d+\.\d+(?:\.\d+)?(?:[a-zA-Z0-9_.+-]+)?$')
+FORBIDDEN_VERSION_CHARS = re.compile(r'[><=~!*^,]')
+
+def is_exact_resolved_version(version: str, ecosystem: str = 'npm') -> bool:
+    """Verifies that a version string represents an exact resolved version and not a range/constraint."""
+    if not version or not isinstance(version, str):
+        return False
+    clean = version.strip()
+    if clean in ('unresolved', 'latest', '*', '') or FORBIDDEN_VERSION_CHARS.search(clean):
+        return False
+    if ecosystem.lower() == 'pypi':
+        return bool(PYPI_EXACT.fullmatch(clean))
+    return bool(NPM_EXACT.fullmatch(clean))
+
+EXACT = NPM_EXACT
 SEVERITIES = {'LOW': 'low', 'MODERATE': 'medium', 'MEDIUM': 'medium', 'HIGH': 'high', 'CRITICAL': 'critical'}
 VALID_CVSS_TYPES = {'CVSS_V2', 'CVSS_V3', 'CVSS_V4'}
 MAX_BATCH_SIZE = 4 * 1024 * 1024
@@ -18,7 +33,10 @@ def check_osv(dependencies):
     if os.getenv('GUARDIAN_OSV_ENABLED', 'true').lower() != 'true':
         return [], 'disabled', ['OSV intelligence disabled; known vulnerabilities were not checked.']
     unique = {(d.name, d.version): d for d in dependencies}
-    eligible = [d for d in unique.values() if EXACT.fullmatch(d.version)]
+    eligible = [
+        d for d in unique.values()
+        if is_exact_resolved_version(d.version, getattr(d, 'ecosystem', 'npm'))
+    ]
     warnings = []
     has_partial = False
     if len(eligible) != len(unique):

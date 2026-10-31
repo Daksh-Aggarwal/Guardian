@@ -11,7 +11,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import urlencode
+from urllib.parse import urlencode, quote
 
 import requests
 from cryptography.hazmat.primitives import hashes, serialization
@@ -48,11 +48,26 @@ SUPPORTED_EXTENSIONS = {
 # Supported filenames without standard extensions
 SUPPORTED_FILENAMES = {
     'package.json', 'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml',
-    'tsconfig.json', 'jsconfig.json', '.npmrc'
+    'tsconfig.json', 'jsconfig.json', '.npmrc',
+    'pyproject.toml', 'poetry.lock', 'Pipfile', 'Pipfile.lock', 'requirements.txt'
+}
+
+# Protected files that must not be modified by automated remediation
+PROTECTED_REMEDIATION_FILES = {
+    'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', 'poetry.lock', 'Pipfile.lock'
 }
 
 STATE_TTL_SECONDS = 600  # 10 minutes
 TOKEN_EXPIRY_BUFFER = 60  # Refresh token 60s before expiration
+
+# Ingestion budgets
+MAX_SNAPSHOT_REQUESTS = 60
+MAX_SNAPSHOT_SECONDS = 30.0
+
+# Independent remediation limits
+MAX_REMEDIATION_FILES = 25
+MAX_REMEDIATION_FILE_SIZE = 1_048_576  # 1 MB
+MAX_REMEDIATION_AGGREGATE_SIZE = 2 * 1024 * 1024  # 2 MB
 
 class GitHubConfig:
     """Server-side GitHub App configuration."""
@@ -75,7 +90,6 @@ class GitHubConfig:
     def private_key_pem(cls) -> Optional[bytes]:
         raw = os.getenv("GITHUB_APP_PRIVATE_KEY")
         if not raw:
-            # Check key file path if configured
             key_path = os.getenv("GITHUB_APP_PRIVATE_KEY_PATH")
             if key_path and os.path.exists(key_path):
                 try:
@@ -84,7 +98,6 @@ class GitHubConfig:
                     logger.error(f"Failed to read GitHub App private key from path: {err}")
             return None
         
-        # Check if base64 encoded
         cleaned = raw.strip()
         if cleaned.startswith("-----BEGIN"):
             return cleaned.encode('utf-8')
@@ -108,12 +121,98 @@ class GitHubConfig:
     def is_configured(cls) -> bool:
         return bool(cls.app_id() and cls.private_key_pem())
 
+# Minimal Application Session Model
+class SessionManager:
+    """In-memory session manager for minimal authenticated application sessions."""
+    def __init__(self, ttl_seconds: int = 86400):
+        self._lock = threading.Lock()
+        self._sessions: Dict[str, Dict[str, Any]] = {}
+        self._ttl_seconds = ttl_seconds
+
+    def create_session(self) -> str:
+        session_id = secrets.token_urlsafe(32)
+        with self._lock:
+            self._sessions[session_id] = {
+                "created_at": time.time(),
+                "last_active": time.time(),
+                "authorized_installations": set(),
+                "selected_installation_id": None,
+            }
+        return session_id
+
+    def get_session(self, session_id: Optional[str]) -> Optional[Dict[str, Any]]:
+        if not session_id:
+            return None
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if not session:
+                return None
+            if time.time() - session["last_active"] > self._ttl_seconds:
+                del self._sessions[session_id]
+                return None
+            session["last_active"] = time.time()
+            return session
+
+    def authorize_installation(self, session_id: str, installation_id: int):
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if not session:
+                session = {
+                    "created_at": time.time(),
+                    "last_active": time.time(),
+                    "authorized_installations": set(),
+                    "selected_installation_id": None,
+                }
+                self._sessions[session_id] = session
+            session["authorized_installations"].add(installation_id)
+            session["selected_installation_id"] = installation_id
+
+    def select_installation(self, session_id: str, installation_id: int) -> bool:
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if not session:
+                session = {
+                    "created_at": time.time(),
+                    "last_active": time.time(),
+                    "authorized_installations": set(),
+                    "selected_installation_id": None,
+                }
+                self._sessions[session_id] = session
+            inst = storage.get_github_installation(installation_id)
+            if not inst:
+                return False
+            session["authorized_installations"].add(installation_id)
+            session["selected_installation_id"] = installation_id
+            return True
+
+    def get_selected_installation_id(self, session_id: Optional[str]) -> Optional[int]:
+        if session_id:
+            with self._lock:
+                session = self._sessions.get(session_id)
+                if session and session.get("selected_installation_id"):
+                    return session["selected_installation_id"]
+        # Fallback to active installation in SQLite (preserves single-active / demo workflow)
+        active = storage.get_active_github_installation()
+        return active["id"] if active else None
+
+    def disconnect_installation(self, session_id: Optional[str], installation_id: int):
+        with self._lock:
+            if session_id and session_id in self._sessions:
+                session = self._sessions[session_id]
+                session["authorized_installations"].discard(installation_id)
+                if session.get("selected_installation_id") == installation_id:
+                    session["selected_installation_id"] = None
+
+session_manager = SessionManager()
+
 # Thread-safe in-memory state store and token cache
 _state_lock = threading.Lock()
-_state_store: Dict[str, float] = {}  # state -> timestamp
+_state_store: Dict[str, Any] = {}  # state -> (created_at, session_id) or created_at
 
 _token_lock = threading.Lock()
 _token_cache: Dict[int, Tuple[str, float]] = {}  # installation_id -> (token, expires_at_timestamp)
+
+_last_response_headers = threading.local()
 
 def _generate_app_jwt() -> str:
     """Generates RS256 JWT for GitHub App authentication."""
@@ -172,14 +271,15 @@ def _call_app_api(endpoint: str, method: str = "GET", json_data: Any = None) -> 
 
     return resp.json() if resp.content else {}
 
-def get_installation_access_token(installation_id: int) -> str:
+def get_installation_access_token(installation_id: int, force_refresh: bool = False) -> str:
     """Retrieves short-lived installation access token with in-memory caching."""
     now = time.time()
-    with _token_lock:
-        if installation_id in _token_cache:
-            token, expires_at = _token_cache[installation_id]
-            if expires_at > now + TOKEN_EXPIRY_BUFFER:
-                return token
+    if not force_refresh:
+        with _token_lock:
+            if installation_id in _token_cache:
+                token, expires_at = _token_cache[installation_id]
+                if expires_at > now + TOKEN_EXPIRY_BUFFER:
+                    return token
 
     # Generate new token
     res = _call_app_api(f"/app/installations/{installation_id}/access_tokens", method="POST")
@@ -188,14 +288,12 @@ def get_installation_access_token(installation_id: int) -> str:
     if not token:
         raise RuntimeError("GitHub did not return an installation access token.")
 
-    # Parse ISO 8601 expiration time
     try:
         dt = datetime.fromisoformat(expires_str.replace("Z", "+00:00"))
         expires_at = dt.timestamp()
     except Exception:
         expires_at = now + 3600
 
-    # Validate minimal permissions
     permissions = res.get("permissions", {})
     if permissions.get("contents") not in ("read", "write"):
         logger.warning(f"Installation {installation_id} has insufficient 'contents' permission: {permissions.get('contents')}")
@@ -205,67 +303,182 @@ def get_installation_access_token(installation_id: int) -> str:
 
     return token
 
-def _call_installation_api(installation_id: int, endpoint: str, method: str = "GET", json_data: Any = None) -> Any:
-    """Calls GitHub API authenticated with Installation token."""
-    token = get_installation_access_token(installation_id)
-    url = f"{GitHubConfig.api_base()}{endpoint}"
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-        "User-Agent": "Guardian-Security-Engine"
-    }
+def _call_installation_api_raw(
+    installation_id: int,
+    url_or_endpoint: str,
+    method: str = "GET",
+    json_data: Any = None
+) -> requests.Response:
+    """Raw HTTP call to GitHub Installation API with rate limit, retry, and token refresh handling."""
+    if url_or_endpoint.startswith("http://") or url_or_endpoint.startswith("https://"):
+        url = url_or_endpoint
+    else:
+        url = f"{GitHubConfig.api_base()}{url_or_endpoint}"
 
-    try:
-        resp = requests.request(method, url, headers=headers, json=json_data, timeout=20)
-    except Exception as err:
-        logger.error(f"GitHub Installation API connection failure ({endpoint}): {type(err).__name__}")
-        raise RuntimeError(f"Failed to communicate with GitHub API: {type(err).__name__}")
+    max_retries = 2
+    for attempt in range(max_retries + 1):
+        token = get_installation_access_token(installation_id, force_refresh=(attempt > 0))
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "User-Agent": "Guardian-Security-Engine"
+        }
 
-    if resp.status_code >= 400:
-        logger.warning(f"GitHub Installation API returned {resp.status_code} for {endpoint}")
         try:
-            err_msg = resp.json().get("message", resp.text)
-        except Exception:
-            err_msg = resp.text
-        raise RuntimeError(f"GitHub API error ({resp.status_code}): {err_msg}")
+            resp = requests.request(method, url, headers=headers, json=json_data, timeout=15)
+        except Exception as err:
+            if attempt < max_retries:
+                time.sleep(0.5 * (2 ** attempt))
+                continue
+            logger.error(f"GitHub Installation API connection failure ({url_or_endpoint}): {type(err).__name__}")
+            raise RuntimeError(f"Failed to communicate with GitHub API: {type(err).__name__}")
 
+        # Check for expired token (401)
+        if resp.status_code == 401 and attempt < max_retries:
+            with _token_lock:
+                _token_cache.pop(installation_id, None)
+            continue
+
+        # Check for Rate Limiting / Retry-After
+        if resp.status_code in (403, 429):
+            retry_after = resp.headers.get("Retry-After")
+            if retry_after:
+                try:
+                    wait_s = int(retry_after)
+                    if wait_s <= 3 and attempt < max_retries:
+                        time.sleep(wait_s)
+                        continue
+                    raise RuntimeError(f"GitHub rate limit exceeded. Retry-After {wait_s}s.")
+                except ValueError:
+                    pass
+
+            # Check primary rate limit
+            if resp.headers.get("X-RateLimit-Remaining") == "0":
+                reset_ts = resp.headers.get("X-RateLimit-Reset")
+                raise RuntimeError(f"GitHub API primary rate limit exceeded. Rate limit resets at {reset_ts}.")
+
+            # Check secondary rate limit message
+            try:
+                body = resp.json()
+                msg = body.get("message", "")
+                if "secondary rate limit" in msg.lower() or "rate limit" in msg.lower():
+                    raise RuntimeError(f"GitHub secondary rate limit hit: {msg}")
+            except Exception:
+                pass
+
+        # Transient server errors (500, 502, 503, 504) -> Bounded exponential backoff
+        if resp.status_code in (500, 502, 503, 504) and attempt < max_retries:
+            time.sleep(0.5 * (2 ** attempt))
+            continue
+
+        if resp.status_code >= 400:
+            logger.warning(f"GitHub Installation API returned {resp.status_code} for {url_or_endpoint}")
+            try:
+                err_msg = resp.json().get("message", resp.text)
+            except Exception:
+                err_msg = resp.text
+            raise RuntimeError(f"GitHub API error ({resp.status_code}): {err_msg}")
+
+        _last_response_headers.headers = resp.headers
+        return resp
+
+    raise RuntimeError(f"GitHub API request failed after {max_retries} retries: {url_or_endpoint}")
+
+def _call_installation_api(
+    installation_id: int,
+    endpoint: str,
+    method: str = "GET",
+    json_data: Any = None
+) -> Any:
+    """Calls GitHub API authenticated with Installation token and returns parsed JSON content."""
+    resp = _call_installation_api_raw(installation_id, endpoint, method=method, json_data=json_data)
     return resp.json() if resp.content else {}
 
+def _parse_next_link(link_header: Optional[str]) -> Optional[str]:
+    """Extracts next page URL from standard GitHub HTTP Link header."""
+    if not link_header:
+        return None
+    for part in link_header.split(','):
+        match = re.search(r'<([^>]+)>;\s*rel=["\']next["\']', part.strip())
+        if match:
+            return match.group(1)
+    return None
+
+def _paginate_installation_api(
+    installation_id: int,
+    endpoint: str,
+    key: Optional[str] = None,
+    max_pages: int = 5
+) -> List[Any]:
+    """Safely follows GitHub pagination Link headers up to bounded max_pages budget."""
+    results: List[Any] = []
+    current_url: Optional[str] = endpoint
+    pages_fetched = 0
+
+    while current_url and pages_fetched < max_pages:
+        data = _call_installation_api(installation_id, current_url)
+        pages_fetched += 1
+
+        if key and isinstance(data, dict):
+            items = data.get(key, [])
+            if isinstance(items, list):
+                results.extend(items)
+        elif isinstance(data, list):
+            results.extend(data)
+        else:
+            break
+
+        headers = getattr(_last_response_headers, "headers", {})
+        link_header = headers.get("Link")
+        current_url = _parse_next_link(link_header)
+
+    return results
+
 # State Management for CSRF & Replay Prevention
-def create_install_state() -> str:
-    """Creates a cryptographically secure, single-use state token."""
+def create_install_state(session_id: Optional[str] = None) -> str:
+    """Creates a cryptographically secure, single-use state token bound to the session."""
     state = secrets.token_urlsafe(32)
     with _state_lock:
         now = time.time()
         # Clean expired states
-        expired = [k for k, v in _state_store.items() if now - v > STATE_TTL_SECONDS]
+        expired = [k for k, (ts, _) in _state_store.items() if now - ts > STATE_TTL_SECONDS]
         for k in expired:
             del _state_store[k]
-        _state_store[state] = now
+        _state_store[state] = (now, session_id)
     return state
 
-def verify_and_consume_state(state: str) -> bool:
-    """Validates state existence and unexpired status, immediately consuming it."""
-    if not state:
+def verify_and_consume_state(state: Optional[str], session_id: Optional[str] = None) -> bool:
+    """Validates state existence, single-use unconsumed status, unexpired TTL, and session binding."""
+    if not state or not isinstance(state, str) or not state.strip():
         return False
+    state = state.strip()
     with _state_lock:
         if state not in _state_store:
             return False
-        created_at = _state_store.pop(state)
-        return (time.time() - created_at) <= STATE_TTL_SECONDS
+        val = _state_store.pop(state)
+        if isinstance(val, (tuple, list)):
+            created_at, bound_session_id = val[0], val[1]
+        else:
+            created_at, bound_session_id = val, None
+        if (time.time() - created_at) > STATE_TTL_SECONDS:
+            return False
+        if bound_session_id is not None and session_id is not None and bound_session_id != session_id:
+            return False
+        return True
 
 # Authentication & Connection Flow
-def sync_installations() -> Dict[str, Any]:
+def sync_installations(session_id: Optional[str] = None) -> Dict[str, Any]:
     """Discovers and synchronizes installations from GitHub App API with SQLite.
     
-    Returns the current connection status after synchronization.
+    Preserves multiple installations and maintains explicit selection.
     """
     if not GitHubConfig.is_configured():
         return {
             "configured": False,
             "connected": False,
             "installation": None,
+            "installations": [],
             "reason": "GitHub App ID or private key is not configured in server environment."
         }
 
@@ -273,51 +486,113 @@ def sync_installations() -> Dict[str, Any]:
         installations = _call_app_api("/app/installations")
     except Exception as err:
         logger.error(f"Failed to query installations from GitHub App API: {err}")
+        active = storage.get_active_github_installation()
+        all_insts = storage.list_github_installations()
         return {
             "configured": True,
-            "connected": False,
-            "installation": None,
+            "connected": bool(active),
+            "installation": active,
+            "installations": all_insts,
             "reason": f"Failed to contact GitHub: {err}"
         }
 
     if not installations or not isinstance(installations, list) or len(installations) == 0:
-        storage.deactivate_github_installations()
+        # Do not deactivate all installations if GitHub returns empty; report existing
+        active = storage.get_active_github_installation()
+        all_insts = storage.list_github_installations()
         return {
             "configured": True,
-            "connected": False,
-            "installation": None,
-            "reason": "No installations found for this GitHub App on GitHub."
+            "connected": bool(active),
+            "installation": active,
+            "installations": all_insts,
+            "reason": "No installations found for this GitHub App on GitHub." if not active else None
         }
 
-    # Sort installations by updated_at or created_at descending (most recent first)
-    sorted_insts = sorted(
-        installations,
-        key=lambda x: x.get("updated_at") or x.get("created_at") or "",
-        reverse=True
-    )
-    latest = sorted_insts[0]
-    account = latest.get("account", {})
-    inst_record = {
-        "id": latest.get("id"),
-        "account_id": account.get("id"),
-        "account_login": account.get("login"),
-        "account_type": account.get("type", "User"),
-        "avatar_url": account.get("avatar_url"),
-        "repository_selection": latest.get("repository_selection", "all"),
-        "installed_at": latest.get("created_at", datetime.now(timezone.utc).isoformat())
-    }
+    # Store all discovered installations without overwriting active selection
+    for inst in installations:
+        account = inst.get("account", {})
+        inst_record = {
+            "id": inst.get("id"),
+            "account_id": account.get("id"),
+            "account_login": account.get("login"),
+            "account_type": account.get("type", "User"),
+            "avatar_url": account.get("avatar_url"),
+            "repository_selection": inst.get("repository_selection", "all"),
+            "installed_at": inst.get("created_at", datetime.now(timezone.utc).isoformat())
+        }
+        storage.save_github_installation(inst_record, make_active=False)
+        if session_id:
+            session_manager.authorize_installation(session_id, inst_record["id"])
 
-    storage.save_github_installation(inst_record)
-    logger.info(f"Auto-synchronized GitHub installation {inst_record['id']} for {inst_record['account_login']}")
+    # If no active installation in SQLite, activate the most recently updated one
+    active = storage.get_active_github_installation()
+    if not active:
+        sorted_insts = sorted(
+            installations,
+            key=lambda x: x.get("updated_at") or x.get("created_at") or "",
+            reverse=True
+        )
+        first_id = sorted_insts[0].get("id")
+        storage.set_active_github_installation(first_id)
+        active = storage.get_github_installation(first_id)
 
+    if session_id and active:
+        session_manager.select_installation(session_id, active["id"])
+
+    all_insts = list_installations(session_id)
     return {
         "configured": True,
         "connected": True,
-        "installation": inst_record,
+        "installation": active,
+        "installations": all_insts,
         "reason": None
     }
 
-def get_connection_status() -> Dict[str, Any]:
+def list_installations(session_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Lists all stored GitHub App installations with selection flag."""
+    records = storage.list_github_installations()
+    selected_id = session_manager.get_selected_installation_id(session_id)
+    for r in records:
+        r["is_selected"] = (r["id"] == selected_id)
+    return records
+
+def select_installation(installation_id: int, session_id: Optional[str] = None) -> Dict[str, Any]:
+    """Explicitly selects an installation for the session and globally."""
+    inst = storage.get_github_installation(installation_id)
+    if not inst:
+        raise ValueError(f"GitHub App installation {installation_id} not found.")
+
+    storage.set_active_github_installation(installation_id)
+    if session_id:
+        session_manager.select_installation(session_id, installation_id)
+
+    inst["is_selected"] = True
+    return inst
+
+def disconnect_installation(
+    installation_id: Optional[int] = None,
+    session_id: Optional[str] = None
+) -> Dict[str, Any]:
+    """Disconnects only the specified installation, preserving other installations."""
+    target_id = installation_id or session_manager.get_selected_installation_id(session_id)
+    if not target_id:
+        raise ValueError("No GitHub App installation specified or currently active to disconnect.")
+
+    storage.disconnect_github_installation(target_id)
+    with _token_lock:
+        _token_cache.pop(target_id, None)
+
+    if session_id:
+        session_manager.disconnect_installation(session_id, target_id)
+
+    return {"status": "disconnected", "installation_id": target_id}
+
+def disconnect_github(session_id: Optional[str] = None) -> Dict[str, str]:
+    """Disconnects the currently selected installation for backwards compatibility."""
+    res = disconnect_installation(session_id=session_id)
+    return {"status": "disconnected"}
+
+def get_connection_status(session_id: Optional[str] = None) -> Dict[str, Any]:
     """Returns current GitHub App configuration and connection status."""
     configured = GitHubConfig.is_configured()
     if not configured:
@@ -325,19 +600,21 @@ def get_connection_status() -> Dict[str, Any]:
             "configured": False,
             "connected": False,
             "installation": None,
+            "installations": [],
             "reason": "GitHub App ID or private key is not configured in server environment."
         }
 
-    active = storage.get_active_github_installation()
+    selected_id = session_manager.get_selected_installation_id(session_id)
+    active = storage.get_github_installation(selected_id) if selected_id else storage.get_active_github_installation()
+
     if not active:
-        # If no active installation in SQLite, check if any installation was ever recorded.
-        # If SQLite has 0 installation records, attempt auto-discovery from GitHub.
         if not storage.has_any_github_installation():
-            return sync_installations()
+            return sync_installations(session_id=session_id)
         return {
             "configured": True,
             "connected": False,
             "installation": None,
+            "installations": list_installations(session_id),
             "reason": "No active GitHub App installation connected."
         }
 
@@ -352,39 +629,40 @@ def get_connection_status() -> Dict[str, Any]:
             "account_type": account.get("type", "User"),
             "avatar_url": account.get("avatar_url"),
             "repository_selection": inst.get("repository_selection", "all"),
-            "installed_at": inst.get("created_at")
+            "installed_at": inst.get("created_at"),
+            "is_selected": True
         }
         return {
             "configured": True,
             "connected": True,
             "installation": active_info,
+            "installations": list_installations(session_id),
             "reason": None
         }
     except Exception as err:
         logger.warning(f"Connected installation {active['id']} failed verification: {err}")
-        # Try re-syncing in case the installation ID changed or was re-installed
-        res = sync_installations()
+        res = sync_installations(session_id=session_id)
         if res.get("connected"):
             return res
         return {
             "configured": True,
             "connected": False,
             "installation": None,
+            "installations": list_installations(session_id),
             "reason": f"GitHub installation is no longer accessible ({err})."
         }
 
-def create_connect_flow() -> Dict[str, str]:
-    """Generates an installation URL with single-use CSRF state."""
+def create_connect_flow(session_id: Optional[str] = None) -> Dict[str, str]:
+    """Generates an installation URL with single-use CSRF state bound to session."""
     if not GitHubConfig.is_configured():
         raise ValueError("GitHub App configuration is missing on server.")
 
-    state = create_install_state()
+    state = create_install_state(session_id=session_id)
     base_install_url = GitHubConfig.install_url()
     if base_install_url:
         sep = "&" if "?" in base_install_url else "?"
         install_url = f"{base_install_url}{sep}state={state}"
     else:
-        # Default GitHub App installation URL format
         app_info = _call_app_api("/app")
         slug = app_info.get("slug")
         if not slug:
@@ -398,14 +676,18 @@ def create_connect_flow() -> Dict[str, str]:
 
 def handle_installation_callback(
     installation_id: Optional[int] = None,
-    state: Optional[str] = None
+    state: Optional[str] = None,
+    session_id: Optional[str] = None
 ) -> Dict[str, Any]:
-    """Validates installation callback parameters, consumes state (if provided), and saves installation."""
-    if state and not verify_and_consume_state(state):
+    """Validates installation callback parameters, strictly requiring and consuming state."""
+    if not state or not state.strip():
+        raise ValueError("Missing OAuth state parameter. Browser-initiated callback requires valid state.")
+
+    if not verify_and_consume_state(state, session_id=session_id):
         raise ValueError("Invalid or expired OAuth state parameter. Possible CSRF or replay attempt.")
 
     if not installation_id:
-        res = sync_installations()
+        res = sync_installations(session_id=session_id)
         if not res.get("connected") or not res.get("installation"):
             raise ValueError("No installation ID provided and no installations found on GitHub.")
         return res["installation"]
@@ -423,27 +705,31 @@ def handle_installation_callback(
         "installed_at": inst_data.get("created_at", datetime.now(timezone.utc).isoformat())
     }
 
-    # Persist in SQLite
-    storage.save_github_installation(inst_record)
+    # Save to SQLite; if first installation, make active
+    has_active = storage.get_active_github_installation()
+    make_active = not bool(has_active)
+    storage.save_github_installation(inst_record, make_active=make_active)
+
+    if session_id:
+        session_manager.authorize_installation(session_id, installation_id)
+        if make_active:
+            session_manager.select_installation(session_id, installation_id)
+
     logger.info(f"Successfully connected GitHub installation {installation_id} for {inst_record['account_login']}")
     return inst_record
 
-def disconnect_github() -> Dict[str, str]:
-    """Disconnects the current active GitHub installation."""
-    storage.deactivate_github_installations()
-    with _token_lock:
-        _token_cache.clear()
-    return {"status": "disconnected"}
+def _resolve_active_installation_id(session_id: Optional[str] = None) -> int:
+    """Helper to resolve active installation ID with session and storage fallback."""
+    inst_id = session_manager.get_selected_installation_id(session_id)
+    if not inst_id:
+        raise ValueError("No GitHub App installation is connected.")
+    return inst_id
 
 # Repository Discovery
-def list_repositories(query: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Lists repositories accessible to the active installation."""
-    active = storage.get_active_github_installation()
-    if not active:
-        raise ValueError("No GitHub App installation is connected.")
-
-    data = _call_installation_api(active["id"], "/installation/repositories?per_page=100")
-    repos = data.get("repositories", [])
+def list_repositories(query: Optional[str] = None, session_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Lists repositories accessible to the active installation with bounded pagination."""
+    inst_id = _resolve_active_installation_id(session_id)
+    repos = _paginate_installation_api(inst_id, "/installation/repositories?per_page=100", key="repositories", max_pages=5)
     
     results = []
     for r in repos:
@@ -466,13 +752,10 @@ def list_repositories(query: Optional[str] = None) -> List[Dict[str, Any]]:
         })
     return results
 
-def get_repository(repo_id: int) -> Dict[str, Any]:
+def get_repository(repo_id: int, session_id: Optional[str] = None) -> Dict[str, Any]:
     """Retrieves metadata for a specific repository by GitHub ID."""
-    active = storage.get_active_github_installation()
-    if not active:
-        raise ValueError("No GitHub App installation is connected.")
-
-    r = _call_installation_api(active["id"], f"/repositories/{repo_id}")
+    inst_id = _resolve_active_installation_id(session_id)
+    r = _call_installation_api(inst_id, f"/repositories/{repo_id}")
     return {
         "id": r.get("id"),
         "name": r.get("name"),
@@ -487,16 +770,13 @@ def get_repository(repo_id: int) -> Dict[str, Any]:
         "permissions": r.get("permissions", {})
     }
 
-def list_branches(repo_id: int) -> List[Dict[str, Any]]:
-    """Lists branches for a specific repository."""
-    active = storage.get_active_github_installation()
-    if not active:
-        raise ValueError("No GitHub App installation is connected.")
-
-    repo = get_repository(repo_id)
+def list_branches(repo_id: int, session_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Lists branches for a specific repository with bounded pagination."""
+    inst_id = _resolve_active_installation_id(session_id)
+    repo = get_repository(repo_id, session_id=session_id)
     default_branch = repo.get("default_branch", "main")
 
-    branches_data = _call_installation_api(active["id"], f"/repositories/{repo_id}/branches?per_page=100")
+    branches_data = _paginate_installation_api(inst_id, f"/repositories/{repo_id}/branches?per_page=100", max_pages=5)
     results = []
     for b in branches_data:
         name = b.get("name", "")
@@ -511,13 +791,14 @@ def list_branches(repo_id: int) -> List[Dict[str, Any]]:
     results.sort(key=lambda x: (not x["is_default"], x["name"]))
     return results
 
-def get_branch_commit(repo_id: int, branch: str) -> Dict[str, Any]:
-    """Resolves a branch name to an immutable commit SHA and latest commit metadata."""
-    active = storage.get_active_github_installation()
-    if not active:
-        raise ValueError("No GitHub App installation is connected.")
-
-    data = _call_installation_api(active["id"], f"/repositories/{repo_id}/commits/{branch}")
+def get_branch_commit(repo_id: int, branch: str, session_id: Optional[str] = None) -> Dict[str, Any]:
+    """Resolves a branch name to an immutable commit SHA and latest commit metadata.
+    
+    Properly encodes branch names while preserving slash semantics (e.g. feature/auth).
+    """
+    inst_id = _resolve_active_installation_id(session_id)
+    encoded_branch = quote(branch.strip(), safe="/")
+    data = _call_installation_api(inst_id, f"/repositories/{repo_id}/commits/{encoded_branch}")
     return {
         "sha": data.get("sha"),
         "message": data.get("commit", {}).get("message", ""),
@@ -536,34 +817,35 @@ def is_eligible_code_file(path: str) -> bool:
 
 def retrieve_repository_snapshot(
     repo_id: int,
-    branch: Optional[str] = None
+    branch: Optional[str] = None,
+    session_id: Optional[str] = None
 ) -> Tuple[str, Dict[str, str], GitHubMetadata, List[str]]:
     """
     Retrieves repository files bounded by strict security limits:
     - Target branch resolved to immutable commit SHA.
     - Git Trees API with truncated tree detection.
     - Path traversal, secret files, binary files, and exclusions rejected.
-    - Ceilings: 250 files, 1 MB per file, 10 MB aggregate snapshot.
+    - Budgets: 250 files, 1 MB per file, 10 MB aggregate snapshot, 60 requests, 30s elapsed time.
     Returns: (repo_full_name, files_dict, github_metadata, warnings).
     """
-    active = storage.get_active_github_installation()
-    if not active:
-        raise ValueError("No GitHub App installation is connected.")
-
-    inst_id = active["id"]
-    repo_meta = get_repository(repo_id)
+    inst_id = _resolve_active_installation_id(session_id)
+    repo_meta = get_repository(repo_id, session_id=session_id)
     target_branch = branch or repo_meta.get("default_branch", "main")
     
     # Resolve branch to immutable commit SHA
-    commit_info = get_branch_commit(repo_id, target_branch)
+    commit_info = get_branch_commit(repo_id, target_branch, session_id=session_id)
     commit_sha = commit_info["sha"]
     if not commit_sha:
         raise ValueError(f"Could not resolve branch '{target_branch}' to a commit SHA.")
 
     warnings: List[str] = []
+    start_time = time.monotonic()
+    requests_count = 2  # Already fetched repo_meta and branch_commit
 
     # Retrieve recursive Git Tree
     tree_data = _call_installation_api(inst_id, f"/repositories/{repo_id}/git/trees/{commit_sha}?recursive=1")
+    requests_count += 1
+
     is_truncated = tree_data.get("truncated", False)
     if is_truncated:
         warnings.append(
@@ -603,15 +885,35 @@ def retrieve_repository_snapshot(
             f"Repository contains {len(eligible_blobs)} eligible code files, exceeding the limit of {MAX_PROJECT_FILES} files."
         )
 
-    # Fetch blob contents
+    # Fetch blob contents bounded by request count and time budgets
     files_dict: Dict[str, str] = {}
     aggregate_bytes = 0
 
     for blob_info in eligible_blobs:
+        # Enforce request count budget
+        if requests_count >= MAX_SNAPSHOT_REQUESTS:
+            warnings.append(
+                f"Repository snapshot halted: exceeded request budget of {MAX_SNAPSHOT_REQUESTS} requests. Coverage is partial."
+            )
+            break
+
+        # Enforce elapsed time budget
+        if time.monotonic() - start_time >= MAX_SNAPSHOT_SECONDS:
+            warnings.append(
+                f"Repository snapshot halted: exceeded elapsed time budget of {MAX_SNAPSHOT_SECONDS}s. Coverage is partial."
+            )
+            break
+
         path = blob_info["path"]
         blob_sha = blob_info["sha"]
 
-        blob_data = _call_installation_api(inst_id, f"/repositories/{repo_id}/git/blobs/{blob_sha}")
+        try:
+            blob_data = _call_installation_api(inst_id, f"/repositories/{repo_id}/git/blobs/{blob_sha}")
+            requests_count += 1
+        except Exception as err:
+            warnings.append(f"Failed to fetch blob for '{path}': {err}")
+            continue
+
         content_b64 = blob_data.get("content", "")
         encoding = blob_data.get("encoding", "base64")
 
@@ -660,33 +962,34 @@ def retrieve_repository_snapshot(
     return (repo_meta["full_name"], files_dict, gh_meta, warnings)
 
 # GitHub-Native Autopilot Remediation
-def apply_remediation_pull_request(plan: RemediationPlan) -> Dict[str, Any]:
+def preflight_validate_remediation(
+    inst_id: int,
+    plan: RemediationPlan
+) -> Tuple[str, Dict[str, str], str]:
     """
-    Applies an approved remediation plan to a GitHub repository:
-    1. Pre-flight check: validates target branch reference still matches plan.commit_sha.
-    2. Validates original file SHA-256 hashes against current repository tree.
-    3. Creates Git blobs for updated and created files.
-    4. Creates an atomic Git tree.
-    5. Creates a Git commit.
-    6. Creates dedicated remediation branch `guardian/remediation/<short-plan-id>`.
-    7. Opens a detailed Pull Request.
-    8. Records PR details against the remediation plan.
+    Stage A: Complete preflight validation before any GitHub object creation.
+    
+    Validates:
+    - Target branch still points to plan.commit_sha.
+    - Base tree SHA resolved from commit.
+    - File count and aggregate size limits.
+    - Valid relative paths and secret/excluded directory exclusions.
+    - Disallow modification of lockfiles by LLM.
+    - Existing vs new file operation semantics.
+    - Original file content SHA-256 matches.
+    - Edit anchors exist and are unambiguous.
+    - Proposed content SHA-256 matches computed content.
+    
+    Returns: (base_tree_sha, prepared_contents, remediation_branch)
     """
     if not plan.repository_id or not plan.branch or not plan.commit_sha:
         raise ValueError("Remediation plan is missing GitHub repository, branch, or commit SHA context.")
 
-    active = storage.get_active_github_installation()
-    if not active:
-        raise ValueError("No GitHub App installation is connected.")
-
-    inst_id = active["id"]
     repo_id = plan.repository_id
-    repo_meta = get_repository(repo_id)
-    owner = repo_meta["owner"]
-    repo_name = repo_meta["name"]
+    encoded_branch = quote(plan.branch.strip(), safe="/")
 
-    # 1. Pre-flight verification: target branch must not have moved
-    branch_ref_data = _call_installation_api(inst_id, f"/repositories/{repo_id}/git/ref/heads/{plan.branch}")
+    # 1. Target branch must not have moved
+    branch_ref_data = _call_installation_api(inst_id, f"/repositories/{repo_id}/git/ref/heads/{encoded_branch}")
     current_branch_sha = branch_ref_data.get("object", {}).get("sha")
 
     if current_branch_sha != plan.commit_sha:
@@ -697,33 +1000,61 @@ def apply_remediation_pull_request(plan: RemediationPlan) -> Dict[str, Any]:
             f"The remediation plan is stale; please rescan the branch to generate a valid plan."
         )
 
-    # 2. Revalidate file contents and calculate new content
-    tree_data = _call_installation_api(inst_id, f"/repositories/{repo_id}/git/trees/{plan.commit_sha}?recursive=1")
+    if not plan.proposed_changes:
+        raise ValueError("Remediation plan contains no proposed changes.")
+
+    if len(plan.proposed_changes) > MAX_REMEDIATION_FILES:
+        raise ValueError(
+            f"Remediation plan proposes changes to {len(plan.proposed_changes)} files, "
+            f"exceeding the limit of {MAX_REMEDIATION_FILES} files."
+        )
+
+    # 2. Extract base tree SHA from the original commit (Git Trees API expects tree SHA, not commit SHA)
+    commit_data = _call_installation_api(inst_id, f"/repositories/{repo_id}/git/commits/{plan.commit_sha}")
+    base_tree_sha = commit_data.get("tree", {}).get("sha")
+    if not base_tree_sha:
+        raise ValueError(f"Could not determine base tree SHA for commit {plan.commit_sha[:7]}.")
+
+    # 3. Retrieve current repository tree
+    tree_data = _call_installation_api(inst_id, f"/repositories/{repo_id}/git/trees/{base_tree_sha}?recursive=1")
     existing_tree = {item["path"]: item for item in tree_data.get("tree", []) if item.get("type") == "blob"}
 
-    new_blobs_to_create: List[Dict[str, Any]] = []
+    prepared_contents: Dict[str, str] = {}
+    seen_paths = set()
+    aggregate_proposed_size = 0
 
     for change in plan.proposed_changes:
-        path = change.file_path.strip().lstrip('/')
-        
-        # Verify forbidden paths
-        if is_secret_file(path) or any(part in EXCLUDED_DIR_NAMES for part in path.split('/')):
-            raise ValueError(f"Forbidden target path in remediation change: '{path}'")
+        raw_path = change.file_path.strip().lstrip('/')
+        norm_path = validate_and_normalize_path(raw_path)
+
+        if norm_path in seen_paths:
+            raise ValueError(f"Duplicate/conflicting change proposed for file '{norm_path}'.")
+        seen_paths.add(norm_path)
+
+        # Forbid modification of lockfiles by LLM
+        if posixpath.basename(norm_path) in PROTECTED_REMEDIATION_FILES:
+            raise ValueError(f"Modification of lockfile '{norm_path}' by automated remediation is forbidden.")
+
+        if change.operation not in ("create", "update"):
+            raise ValueError(f"Unsupported remediation operation '{change.operation}' on '{norm_path}'.")
 
         if change.operation == "create":
-            if path in existing_tree:
-                raise ValueError(f"Create operation collision: file '{path}' already exists in source tree.")
+            if norm_path in existing_tree:
+                raise ValueError(f"Create operation collision: file '{norm_path}' already exists in source tree.")
             new_content = change.created_content or ""
+            content_bytes = len(new_content.encode('utf-8'))
+            if content_bytes > MAX_REMEDIATION_FILE_SIZE:
+                raise ValueError(f"Created file '{norm_path}' ({content_bytes} bytes) exceeds limit of {MAX_REMEDIATION_FILE_SIZE} bytes.")
             if compute_sha256(new_content) != change.proposed_sha256:
-                raise ValueError(f"Hash mismatch for created content in '{path}'.")
-            new_blobs_to_create.append({"path": path, "content": new_content})
+                raise ValueError(f"Hash mismatch for created content in '{norm_path}'.")
+            aggregate_proposed_size += content_bytes
+            prepared_contents[norm_path] = new_content
 
         elif change.operation == "update":
-            if path not in existing_tree:
-                raise ValueError(f"Update target '{path}' does not exist in commit {plan.commit_sha[:7]}.")
-            
-            # Fetch current blob and verify original sha256
-            blob_sha = existing_tree[path]["sha"]
+            if norm_path not in existing_tree:
+                raise ValueError(f"Update target '{norm_path}' does not exist in commit {plan.commit_sha[:7]}.")
+
+            blob_sha = existing_tree[norm_path]["sha"]
             blob_data = _call_installation_api(inst_id, f"/repositories/{repo_id}/git/blobs/{blob_sha}")
             raw_bytes = base64.b64decode(blob_data.get("content", ""))
             current_text = raw_bytes.decode('utf-8')
@@ -731,53 +1062,83 @@ def apply_remediation_pull_request(plan: RemediationPlan) -> Dict[str, Any]:
 
             if current_hash != change.original_sha256:
                 raise ValueError(
-                    f"File '{path}' content hash mismatch (expected {change.original_sha256[:8]}, found {current_hash[:8]}). "
+                    f"File '{norm_path}' content hash mismatch (expected {change.original_sha256[:8]}, found {current_hash[:8]}). "
                     f"File may have been altered."
                 )
 
-            # Apply edits to produce new content
             updated_text = current_text
             for edit in change.edits:
                 if edit.old_text not in updated_text:
-                    raise ValueError(f"Edit anchor not found in '{path}'.")
+                    raise ValueError(f"Edit anchor not found in '{norm_path}'.")
                 if updated_text.count(edit.old_text) > 1:
-                    raise ValueError(f"Ambiguous edit anchor occurs multiple times in '{path}'.")
+                    raise ValueError(f"Ambiguous edit anchor occurs multiple times in '{norm_path}'.")
                 updated_text = updated_text.replace(edit.old_text, edit.new_text, 1)
 
             if compute_sha256(updated_text) != change.proposed_sha256:
-                raise ValueError(f"Computed content hash for '{path}' does not match proposed hash.")
+                raise ValueError(f"Computed content hash for '{norm_path}' does not match proposed hash.")
 
-            new_blobs_to_create.append({"path": path, "content": updated_text})
+            content_bytes = len(updated_text.encode('utf-8'))
+            if content_bytes > MAX_REMEDIATION_FILE_SIZE:
+                raise ValueError(f"Updated file '{norm_path}' ({content_bytes} bytes) exceeds limit of {MAX_REMEDIATION_FILE_SIZE} bytes.")
 
-    # 3. Create Git Blobs
+            aggregate_proposed_size += content_bytes
+            prepared_contents[norm_path] = updated_text
+
+    if aggregate_proposed_size > MAX_REMEDIATION_AGGREGATE_SIZE:
+        raise ValueError(
+            f"Remediation changes aggregate size ({aggregate_proposed_size} bytes) exceeds limit of {MAX_REMEDIATION_AGGREGATE_SIZE} bytes."
+        )
+
+    short_id = plan.plan_id[:8]
+    remediation_branch = f"guardian/remediation/{short_id}"
+
+    return (base_tree_sha, prepared_contents, remediation_branch)
+
+def apply_remediation_pull_request(
+    plan: RemediationPlan,
+    session_id: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Applies an approved remediation plan to a GitHub repository:
+    Stage A: Preflight validation (rejects entire plan before creating any objects).
+    Stage B: Git object creation (blobs, tree with base_tree tree SHA, commit, branch, PR).
+    """
+    inst_id = _resolve_active_installation_id(session_id)
+    repo_id = plan.repository_id
+
+    # Stage A: Preflight Validation
+    base_tree_sha, prepared_contents, remediation_branch = preflight_validate_remediation(inst_id, plan)
+
+    # Stage B: GitHub Object Creation (only executes after all validations succeed)
+    # 1. Create Git Blobs
     tree_items: List[Dict[str, Any]] = []
-    for item in new_blobs_to_create:
+    for path, content in prepared_contents.items():
         blob_res = _call_installation_api(
             inst_id,
             f"/repositories/{repo_id}/git/blobs",
             method="POST",
-            json_data={"content": item["content"], "encoding": "utf-8"}
+            json_data={"content": content, "encoding": "utf-8"}
         )
         tree_items.append({
-            "path": item["path"],
+            "path": path,
             "mode": "100644",
             "type": "blob",
             "sha": blob_res["sha"]
         })
 
-    # 4. Create Atomic Git Tree
+    # 2. Create Atomic Git Tree using actual base tree SHA (preserves unchanged files)
     new_tree_res = _call_installation_api(
         inst_id,
         f"/repositories/{repo_id}/git/trees",
         method="POST",
         json_data={
-            "base_tree": plan.commit_sha,
+            "base_tree": base_tree_sha,
             "tree": tree_items
         }
     )
     new_tree_sha = new_tree_res["sha"]
 
-    # 5. Create Commit
+    # 3. Create Commit
     short_id = plan.plan_id[:8]
     commit_msg = (
         f"Guardian Autopilot: {plan.title}\n\n"
@@ -797,8 +1158,7 @@ def apply_remediation_pull_request(plan: RemediationPlan) -> Dict[str, Any]:
     )
     new_commit_sha = new_commit_res["sha"]
 
-    # 6. Create dedicated remediation branch
-    remediation_branch = f"guardian/remediation/{short_id}"
+    # 4. Create remediation branch
     try:
         _call_installation_api(
             inst_id,
@@ -810,7 +1170,6 @@ def apply_remediation_pull_request(plan: RemediationPlan) -> Dict[str, Any]:
             }
         )
     except Exception as err:
-        # If branch collision, append random suffix
         if "Reference already exists" in str(err):
             remediation_branch = f"guardian/remediation/{short_id}-{secrets.token_hex(2)}"
             _call_installation_api(
@@ -825,7 +1184,7 @@ def apply_remediation_pull_request(plan: RemediationPlan) -> Dict[str, Any]:
         else:
             raise
 
-    # 7. Create Pull Request
+    # 5. Create Pull Request
     pr_body = _format_pull_request_body(plan, new_commit_sha, remediation_branch)
     pr_title = f"🛡️ Guardian Autopilot: {plan.title}"
     
@@ -841,7 +1200,7 @@ def apply_remediation_pull_request(plan: RemediationPlan) -> Dict[str, Any]:
         }
     )
 
-    # 8. Update plan in SQLite
+    # 6. Update plan in SQLite
     plan.status = "applied"
     plan.pr_number = pr_data.get("number")
     plan.pr_url = pr_data.get("html_url")
@@ -861,26 +1220,52 @@ def apply_remediation_pull_request(plan: RemediationPlan) -> Dict[str, Any]:
         "status": "applied"
     }
 
-def close_remediation_pull_request(plan: RemediationPlan) -> Dict[str, Any]:
-    """Safely closes a Guardian Autopilot pull request on GitHub."""
+def close_remediation_pull_request(
+    plan: RemediationPlan,
+    session_id: Optional[str] = None
+) -> Dict[str, Any]:
+    """Safely closes a Guardian Autopilot pull request on GitHub with correct lifecycle semantics.
+    
+    Distinguishes:
+    - Merged PR: closing does not revert merged code; preserves 'applied' status and explains revert steps.
+    - Unmerged PR: closing sets status to 'pr_closed' (not 'reverted').
+    """
     if not plan.repository_id or not plan.pr_number:
         raise ValueError("Remediation plan has no associated GitHub pull request.")
 
-    active = storage.get_active_github_installation()
-    if not active:
-        raise ValueError("No GitHub App installation is connected.")
-
-    inst_id = active["id"]
+    inst_id = _resolve_active_installation_id(session_id)
     repo_id = plan.repository_id
 
-    res = _call_installation_api(
-        inst_id,
-        f"/repositories/{repo_id}/pulls/{plan.pr_number}",
-        method="PATCH",
-        json_data={"state": "closed"}
-    )
+    # Inspect current PR state on GitHub
+    pr_data = _call_installation_api(inst_id, f"/repositories/{repo_id}/pulls/{plan.pr_number}")
+    is_merged = pr_data.get("merged", False)
+    current_state = pr_data.get("state", "open")
 
-    plan.status = "reverted"
+    if is_merged:
+        plan.pr_state = "merged"
+        storage.save_plan(plan)
+        return {
+            "plan_id": plan.plan_id,
+            "pr_number": plan.pr_number,
+            "pr_state": "merged",
+            "status": plan.status,
+            "message": (
+                f"Pull request #{plan.pr_number} was already merged into '{plan.branch}'. "
+                "Closing the PR does not undo merged changes. "
+                "A separate Git revert commit is required to reverse merged changes."
+            )
+        }
+
+    # Close unmerged PR on GitHub if still open
+    if current_state != "closed":
+        _call_installation_api(
+            inst_id,
+            f"/repositories/{repo_id}/pulls/{plan.pr_number}",
+            method="PATCH",
+            json_data={"state": "closed"}
+        )
+
+    plan.status = "pr_closed"
     plan.pr_state = "closed"
     storage.save_plan(plan)
 
@@ -888,7 +1273,8 @@ def close_remediation_pull_request(plan: RemediationPlan) -> Dict[str, Any]:
         "plan_id": plan.plan_id,
         "pr_number": plan.pr_number,
         "pr_state": "closed",
-        "status": "reverted"
+        "status": "pr_closed",
+        "message": f"Pull request #{plan.pr_number} was closed without merging. Changes were not applied to '{plan.branch}'."
     }
 
 def _format_pull_request_body(plan: RemediationPlan, commit_sha: str, remediation_branch: str) -> str:

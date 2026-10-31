@@ -44,6 +44,7 @@ export default function RemediationHistory({
     async function fetchHistory() {
       setLoading(true);
       setError(null);
+      setHistory([]);
       try {
         const projectKey = report.project_id || report.name;
         const data = await api<RemediationEvent[]>(
@@ -71,11 +72,15 @@ export default function RemediationHistory({
     return () => {
       cancelled = true;
     };
-  }, [report.name, report.id]);
+  }, [report.project_id, report.name, report.id]);
 
   async function handleClosePR(planId: string) {
     try {
-      await api(`/remediation/plans/${planId}/close-github-pr`, { method: "POST" });
+      const res = await api<{
+        status: RemediationPlan["status"];
+        pr_state: string;
+        message?: string;
+      }>(`/remediation/plans/${planId}/close-github-pr`, { method: "POST" });
       setHistory((prev) =>
         prev.map((item) =>
           item.plan.plan_id === planId
@@ -83,19 +88,64 @@ export default function RemediationHistory({
                 ...item,
                 plan: {
                   ...item.plan,
-                  status: "reverted",
-                  pr_state: "closed",
+                  status: res.status || (res.pr_state === "merged" ? "applied" : "pr_closed"),
+                  pr_state: res.pr_state || "closed",
                 },
               }
             : item
         )
       );
+      if (res.message) {
+        alert(res.message);
+      }
     } catch (err) {
       alert(`Failed to close pull request: ${(err as Error).message}`);
     }
   }
 
-  function getStatusBadge(status: string) {
+  function getStatusBadge(status: string, prState?: string | null) {
+    if (status === "pr_closed") {
+      return (
+        <span
+          style={{
+            padding: "3px 8px",
+            borderRadius: "4px",
+            background: "rgba(239, 68, 68, 0.15)",
+            color: "#f87171",
+            fontSize: "11px",
+            fontWeight: 600,
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "4px",
+          }}
+        >
+          <XCircle size={12} />
+          PR Closed (Unmerged)
+        </span>
+      );
+    }
+
+    if (prState === "merged") {
+      return (
+        <span
+          style={{
+            padding: "3px 8px",
+            borderRadius: "4px",
+            background: "rgba(16, 185, 129, 0.15)",
+            color: "#10b981",
+            fontSize: "11px",
+            fontWeight: 600,
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "4px",
+          }}
+        >
+          <GitPullRequest size={12} />
+          PR Merged
+        </span>
+      );
+    }
+
     switch (status) {
       case "verified":
         return (
@@ -132,7 +182,7 @@ export default function RemediationHistory({
             }}
           >
             <CheckCircle2 size={12} />
-            Applied (Awaiting Rescan)
+            {prState ? "PR Open" : "Applied to Disk"}
           </span>
         );
       case "reverted":
@@ -151,7 +201,7 @@ export default function RemediationHistory({
             }}
           >
             <RotateCcw size={12} />
-            Undone / Reverted
+            Filesystem Reverted
           </span>
         );
       case "approved":
@@ -374,7 +424,7 @@ export default function RemediationHistory({
                     }}
                   >
                     <strong style={{ fontSize: "15px" }}>{plan.title}</strong>
-                    {getStatusBadge(plan.status)}
+                    {getStatusBadge(plan.status, plan.pr_state)}
                     {plan.pr_number ? (
                       <span
                         style={{
@@ -543,7 +593,7 @@ export default function RemediationHistory({
                       <ExternalLink size={11} />
                     </a>
 
-                    {plan.pr_state !== "closed" && (
+                    {plan.pr_state === "open" && (
                       <button
                         onClick={() => handleClosePR(plan.plan_id)}
                         className="button secondary compact"
@@ -551,6 +601,17 @@ export default function RemediationHistory({
                       >
                         Close PR
                       </button>
+                    )}
+                    {plan.pr_state === "merged" && (
+                      <span
+                        style={{
+                          fontSize: "11px",
+                          color: "#10b981",
+                          fontStyle: "italic",
+                        }}
+                      >
+                        Merged changes require Git revert
+                      </span>
                     )}
                   </div>
                 </div>
