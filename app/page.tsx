@@ -119,9 +119,26 @@ export default function Home() {
         .catch((e) => setError(e.message));
     }
 
-    const gh = new URLSearchParams(window.location.search).get("github");
-    if (gh === "connected") {
+    const urlParams = new URLSearchParams(window.location.search);
+    const gh = urlParams.get("github");
+    const installationId = urlParams.get("installation_id");
+
+    if (installationId) {
+      const setupAction = urlParams.get("setup_action");
+      api(`/github/callback?installation_id=${installationId}&setup_action=${setupAction || ""}`)
+        .then(() => {
+          setNotice("GitHub App successfully connected. You can now browse and inspect repositories.");
+          window.history.replaceState(null, "", window.location.pathname);
+        })
+        .catch((e) => {
+          console.error("GitHub callback error:", e);
+          window.history.replaceState(null, "", window.location.pathname);
+        });
+    } else if (gh === "connected") {
       setNotice("GitHub App successfully connected. You can now browse and inspect repositories.");
+      window.history.replaceState(null, "", window.location.pathname);
+    } else if (gh === "error") {
+      setError("Failed to connect GitHub App. Please check your GitHub App configuration and permissions.");
       window.history.replaceState(null, "", window.location.pathname);
     }
   }, [refresh]);

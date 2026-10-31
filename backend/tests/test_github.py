@@ -128,6 +128,87 @@ def test_installation_callback_invalid_state(github_env, test_client):
     assert resp.status_code == 400
     assert "Invalid or expired OAuth state" in resp.json()["detail"]
 
+def test_installation_callback_without_state(github_env, test_client):
+    """GitHub setup redirect sends installation_id and setup_action without state."""
+    mock_inst = {
+        "id": 777222,
+        "account": {
+            "id": 555,
+            "login": "setup-user",
+            "type": "User",
+            "avatar_url": "https://avatars.githubusercontent.com/u/555"
+        },
+        "repository_selection": "selected",
+        "created_at": "2026-10-31T12:00:00Z"
+    }
+    with patch("backend.guardian.github._call_app_api", return_value=mock_inst):
+        resp = test_client.get(
+            "/api/github/callback?installation_id=777222&setup_action=install",
+            follow_redirects=False
+        )
+        assert resp.status_code == 302
+        assert "github=connected" in resp.headers["location"]
+        active = storage.get_active_github_installation()
+        assert active is not None
+        assert active["id"] == 777222
+        assert active["account_login"] == "setup-user"
+
+def test_github_sync_endpoint(github_env, test_client):
+    """POST /api/github/sync queries App API and registers installation."""
+    mock_installations = [
+        {
+            "id": 333444,
+            "account": {
+                "id": 888,
+                "login": "synced-user",
+                "type": "User",
+                "avatar_url": "https://avatars.githubusercontent.com/u/888"
+            },
+            "repository_selection": "all",
+            "created_at": "2026-10-31T12:00:00Z",
+            "updated_at": "2026-10-31T12:30:00Z"
+        }
+    ]
+    with patch("backend.guardian.github._call_app_api", return_value=mock_installations):
+        resp = test_client.post("/api/github/sync")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["connected"] is True
+        assert data["installation"]["id"] == 333444
+        assert data["installation"]["account_login"] == "synced-user"
+
+        active = storage.get_active_github_installation()
+        assert active is not None
+        assert active["id"] == 333444
+
+def test_status_auto_discovery(github_env, test_client):
+    """GET /api/github/status auto-discovers installations if database is empty."""
+    # Ensure database is clean
+    with storage.connection() as db:
+        db.execute("DELETE FROM github_installations")
+
+    mock_installations = [
+        {
+            "id": 444555,
+            "account": {
+                "id": 999,
+                "login": "discovered-user",
+                "type": "User",
+                "avatar_url": "https://avatars.githubusercontent.com/u/999"
+            },
+            "repository_selection": "selected",
+            "created_at": "2026-10-31T12:00:00Z",
+            "updated_at": "2026-10-31T12:45:00Z"
+        }
+    ]
+    with patch("backend.guardian.github._call_app_api", return_value=mock_installations):
+        resp = test_client.get("/api/github/status")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["connected"] is True
+        assert data["installation"]["id"] == 444555
+        assert data["installation"]["account_login"] == "discovered-user"
+
 def test_disconnect(github_env, test_client):
     storage.save_github_installation({
         "id": 999111,

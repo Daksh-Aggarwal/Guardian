@@ -30,6 +30,12 @@ from .projects import (
 from .remediation_models import RemediationPlan
 from . import storage
 
+try:
+    from .advisor import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
+
 logger = logging.getLogger("guardian.github")
 
 # Supported file extensions for repository code scanning
@@ -250,6 +256,67 @@ def verify_and_consume_state(state: str) -> bool:
         return (time.time() - created_at) <= STATE_TTL_SECONDS
 
 # Authentication & Connection Flow
+def sync_installations() -> Dict[str, Any]:
+    """Discovers and synchronizes installations from GitHub App API with SQLite.
+    
+    Returns the current connection status after synchronization.
+    """
+    if not GitHubConfig.is_configured():
+        return {
+            "configured": False,
+            "connected": False,
+            "installation": None,
+            "reason": "GitHub App ID or private key is not configured in server environment."
+        }
+
+    try:
+        installations = _call_app_api("/app/installations")
+    except Exception as err:
+        logger.error(f"Failed to query installations from GitHub App API: {err}")
+        return {
+            "configured": True,
+            "connected": False,
+            "installation": None,
+            "reason": f"Failed to contact GitHub: {err}"
+        }
+
+    if not installations or not isinstance(installations, list) or len(installations) == 0:
+        storage.deactivate_github_installations()
+        return {
+            "configured": True,
+            "connected": False,
+            "installation": None,
+            "reason": "No installations found for this GitHub App on GitHub."
+        }
+
+    # Sort installations by updated_at or created_at descending (most recent first)
+    sorted_insts = sorted(
+        installations,
+        key=lambda x: x.get("updated_at") or x.get("created_at") or "",
+        reverse=True
+    )
+    latest = sorted_insts[0]
+    account = latest.get("account", {})
+    inst_record = {
+        "id": latest.get("id"),
+        "account_id": account.get("id"),
+        "account_login": account.get("login"),
+        "account_type": account.get("type", "User"),
+        "avatar_url": account.get("avatar_url"),
+        "repository_selection": latest.get("repository_selection", "all"),
+        "installed_at": latest.get("created_at", datetime.now(timezone.utc).isoformat())
+    }
+
+    storage.save_github_installation(inst_record)
+    logger.info(f"Auto-synchronized GitHub installation {inst_record['id']} for {inst_record['account_login']}")
+
+    return {
+        "configured": True,
+        "connected": True,
+        "installation": inst_record,
+        "reason": None
+    }
+
 def get_connection_status() -> Dict[str, Any]:
     """Returns current GitHub App configuration and connection status."""
     configured = GitHubConfig.is_configured()
@@ -263,11 +330,15 @@ def get_connection_status() -> Dict[str, Any]:
 
     active = storage.get_active_github_installation()
     if not active:
+        # If no active installation in SQLite, check if any installation was ever recorded.
+        # If SQLite has 0 installation records, attempt auto-discovery from GitHub.
+        if not storage.has_any_github_installation():
+            return sync_installations()
         return {
             "configured": True,
             "connected": False,
             "installation": None,
-            "reason": "No GitHub App installation connected."
+            "reason": "No active GitHub App installation connected."
         }
 
     # Verify installation is still valid with GitHub
@@ -291,6 +362,10 @@ def get_connection_status() -> Dict[str, Any]:
         }
     except Exception as err:
         logger.warning(f"Connected installation {active['id']} failed verification: {err}")
+        # Try re-syncing in case the installation ID changed or was re-installed
+        res = sync_installations()
+        if res.get("connected"):
+            return res
         return {
             "configured": True,
             "connected": False,
@@ -321,10 +396,19 @@ def create_connect_flow() -> Dict[str, str]:
         "state": state
     }
 
-def handle_installation_callback(installation_id: int, state: str) -> Dict[str, Any]:
-    """Validates installation callback parameters, consumes state, and saves installation."""
-    if not verify_and_consume_state(state):
+def handle_installation_callback(
+    installation_id: Optional[int] = None,
+    state: Optional[str] = None
+) -> Dict[str, Any]:
+    """Validates installation callback parameters, consumes state (if provided), and saves installation."""
+    if state and not verify_and_consume_state(state):
         raise ValueError("Invalid or expired OAuth state parameter. Possible CSRF or replay attempt.")
+
+    if not installation_id:
+        res = sync_installations()
+        if not res.get("connected") or not res.get("installation"):
+            raise ValueError("No installation ID provided and no installations found on GitHub.")
+        return res["installation"]
 
     # Verify installation identity directly with GitHub App API
     inst_data = _call_app_api(f"/app/installations/{installation_id}")

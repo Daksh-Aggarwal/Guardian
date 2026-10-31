@@ -333,3 +333,34 @@ def deactivate_github_installations():
     with connection() as db:
         db.execute('UPDATE github_installations SET is_active = 0')
 
+def has_any_github_installation() -> bool:
+    with connection() as db:
+        row = db.execute('SELECT COUNT(*) FROM github_installations').fetchone()
+        return bool(row and row[0] > 0)
+
+def list_github_installations() -> list[dict]:
+    with connection() as db:
+        rows = db.execute(
+            '''SELECT installation_id, account_login, account_type, account_avatar, repository_selection, installed_at, is_active
+               FROM github_installations ORDER BY is_active DESC, installation_id DESC'''
+        ).fetchall()
+        return [
+            {
+                'id': r[0],
+                'account_id': r[0],
+                'account_login': r[1],
+                'account_type': r[2],
+                'avatar_url': r[3],
+                'repository_selection': r[4],
+                'installed_at': r[5],
+                'is_active': bool(r[6]),
+            }
+            for r in rows
+        ]
+
+def set_active_github_installation(installation_id: int):
+    with connection() as db:
+        db.execute('UPDATE github_installations SET is_active = 0')
+        db.execute('UPDATE github_installations SET is_active = 1 WHERE installation_id = ?', (installation_id,))
+
+
