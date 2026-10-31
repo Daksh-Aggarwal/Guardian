@@ -7,6 +7,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from urllib.parse import quote
+import yaml
 from . import ingestion
 from .config import Budget
 from .integrity import verify
@@ -97,37 +98,27 @@ class RegistrySession:
 
 def declarations(value):
     out={}
+    if not isinstance(value, dict):
+        return out
     for key in ('dependencies','devDependencies','optionalDependencies'):
         if isinstance(value.get(key),dict):out.update(value[key])
     return out
 
 
-def lock_graph(files):
-    """Resolve lockfile locations with Node's nearest node_modules lookup."""
-    warnings=[]
-    paths=sorted((p for p in files if PurePosixPath(p).name=='package-lock.json'),key=lambda p:(len(PurePosixPath(p).parts),p))
-    if not paths:
-        manifests=sorted((p for p in files if PurePosixPath(p).name=='package.json'),key=lambda p:(len(PurePosixPath(p).parts),p))
-        root=json.loads(files[manifests[0]]) if manifests else {}
-        root_decls = declarations(root)
-        nodes = []
-        for index, (n, v) in enumerate(root_decls.items()):
-            if index < MAX_DISCOVERED:
-                nodes.append(PackageInspection(name=n, version=str(v), location='manifest:'+n, direct=True, status='unresolved', reason='No lockfile exact resolution available.'))
-            else:
-                nodes.append(PackageInspection(name=n, version=str(v), location='manifest:'+n, direct=True, status='skipped', reason=f'Omitted: dependency graph inventory ceiling ({MAX_DISCOVERED}) reached.'))
-        if len(root_decls) > MAX_DISCOVERED:
-            warnings.append(f'Dependency graph inventory capped at {MAX_DISCOVERED} locations.')
-        return nodes,{},['No modern lockfile: declared dependency source is uninspected.'] if nodes else []
-    path=paths[0]; lock=json.loads(files[path]); packages=lock.get('packages')
-    if not isinstance(packages,dict):
-        return [],{},['Lockfile v1 has no modern packages graph; recursive inspection is unavailable.']
-    if len(paths)>1:warnings.append('Only the shallowest package-lock.json graph is inspected; other project lockfiles are uninspected.')
+def _npm_lock_graph(files, paths):
+    warnings = []
+    path = paths[0]
+    lock = json.loads(files[path])
+    packages = lock.get('packages')
+    if not isinstance(packages, dict):
+        return [], {}, ['Lockfile v1 has no modern packages graph; recursive inspection is unavailable.']
+    if len(paths) > 1:
+        warnings.append('Only the shallowest package-lock.json graph is inspected; other project lockfiles are uninspected.')
 
-    root=packages.get('',{})
+    root = packages.get('', {})
     if not root:
-        manifest_path=str(PurePosixPath(path).parent/'package.json')
-        root=json.loads(files[manifest_path]) if manifest_path in files else {}
+        manifest_path = str(PurePosixPath(path).parent / 'package.json')
+        root = json.loads(files[manifest_path]) if manifest_path in files else {}
     root_decls = declarations(root)
 
     all_pkg_records = [(loc, p) for loc, p in packages.items() if loc and isinstance(p, dict)]
@@ -137,13 +128,15 @@ def lock_graph(files):
     traversable_records = {loc: p for loc, p in all_pkg_records[:MAX_DISCOVERED]}
     omitted_records = {loc: p for loc, p in all_pkg_records[MAX_DISCOVERED:]}
 
-    def resolve(parent,name):
-        current=parent
+    def resolve(parent, name):
+        current = parent
         while True:
-            candidate=(current+'/' if current else '')+'node_modules/'+name
-            if candidate in traversable_records:return candidate
-            if not current:break
-            current=current.rsplit('/node_modules/',1)[0] if '/node_modules/' in current else ''
+            candidate = (current + '/' if current else '') + 'node_modules/' + name
+            if candidate in traversable_records:
+                return candidate
+            if not current:
+                break
+            current = current.rsplit('/node_modules/', 1)[0] if '/node_modules/' in current else ''
         return None
 
     nodes = {}
@@ -219,6 +212,386 @@ def lock_graph(files):
                 node.dependencies.append(missing)
 
     return list(nodes.values()), expected, warnings
+
+
+def _parse_pnpm_key(k, p):
+    if isinstance(p, dict) and p.get('name') and p.get('version'):
+        return str(p['name']), str(p['version'])
+    cleaned = k.lstrip('/')
+    if '(' in cleaned and cleaned.endswith(')'):
+        cleaned = cleaned[:cleaned.index('(')]
+    if '_' in cleaned and '@' in cleaned:
+        first_part = cleaned.split('_')[0]
+        if '@' in first_part:
+            cleaned = first_part
+    if cleaned.startswith('@'):
+        parts = cleaned.split('@')
+        if len(parts) >= 3:
+            name = '@' + parts[1]
+            version = parts[2]
+            return name, version
+    elif '@' in cleaned:
+        name, version = cleaned.split('@', 1)
+        return name, version
+    return cleaned, 'unresolved'
+
+
+def _pnpm_lock_graph(files, paths):
+    warnings = []
+    path = paths[0]
+    try:
+        lock = yaml.safe_load(files[path])
+    except Exception as e:
+        return [], {}, [f'Could not parse pnpm-lock.yaml: {e}']
+    if not isinstance(lock, dict):
+        return [], {}, ['pnpm-lock.yaml must contain a YAML mapping.']
+    if len(paths) > 1:
+        warnings.append('Only the shallowest pnpm-lock.yaml graph is inspected; other project lockfiles are uninspected.')
+
+    root_decls = {}
+    if isinstance(lock.get('importers'), dict) and isinstance(lock['importers'].get('.'), dict):
+        importer_root = lock['importers']['.']
+        for key in ('dependencies', 'devDependencies', 'optionalDependencies'):
+            group = importer_root.get(key)
+            if isinstance(group, dict):
+                for dep_name, dep_val in group.items():
+                    if isinstance(dep_val, dict):
+                        ver = dep_val.get('version') or dep_val.get('specifier') or ''
+                    else:
+                        ver = str(dep_val)
+                    root_decls[dep_name] = ver
+    for key in ('dependencies', 'devDependencies', 'optionalDependencies'):
+        group = lock.get(key)
+        if isinstance(group, dict):
+            for dep_name, dep_val in group.items():
+                if dep_name not in root_decls:
+                    if isinstance(dep_val, dict):
+                        ver = dep_val.get('version') or dep_val.get('specifier') or ''
+                    else:
+                        ver = str(dep_val)
+                    root_decls[dep_name] = ver
+
+    manifest_path = str(PurePosixPath(path).parent / 'package.json')
+    if manifest_path in files:
+        try:
+            pkg_json = json.loads(files[manifest_path])
+            if isinstance(pkg_json, dict):
+                for k, v in declarations(pkg_json).items():
+                    if k not in root_decls:
+                        root_decls[k] = str(v)
+        except Exception:
+            pass
+
+    raw_packages = lock.get('packages', {})
+    snapshots = lock.get('snapshots', {})
+    if not isinstance(raw_packages, dict): raw_packages = {}
+    if not isinstance(snapshots, dict): snapshots = {}
+
+    all_keys = list(dict.fromkeys(list(raw_packages.keys()) + list(snapshots.keys())))
+    if len(all_keys) > MAX_DISCOVERED:
+        warnings.append(f'Dependency graph inventory capped at {MAX_DISCOVERED} locations.')
+
+    traversable_keys = all_keys[:MAX_DISCOVERED]
+    omitted_keys = all_keys[MAX_DISCOVERED:]
+
+    records = {}
+    for k in traversable_keys:
+        pkg_data = dict(raw_packages.get(k) or {})
+        if k in snapshots and isinstance(snapshots[k], dict):
+            snap_deps = snapshots[k].get('dependencies')
+            if snap_deps and 'dependencies' not in pkg_data:
+                pkg_data['dependencies'] = snap_deps
+            snap_opt = snapshots[k].get('optionalDependencies')
+            if snap_opt and 'optionalDependencies' not in pkg_data:
+                pkg_data['optionalDependencies'] = snap_opt
+        records[k] = pkg_data
+
+    name_to_keys = {}
+    nodes = {}
+    expected = {}
+
+    for k in traversable_keys:
+        p = records[k]
+        name, version = _parse_pnpm_key(k, p)
+        loc = f"pnpm:{k.lstrip('/')}"
+        name_to_keys.setdefault(name, []).append((version, loc, k))
+        nodes[loc] = PackageInspection(
+            name=name,
+            version=version,
+            location=loc,
+            direct=False,
+            status='unresolved',
+            reason='Not reachable from the root dependency declarations.'
+        )
+        res = p.get('resolution') if isinstance(p, dict) else None
+        if isinstance(res, dict) and res.get('integrity'):
+            expected[loc] = str(res['integrity'])
+        elif isinstance(p, dict) and p.get('integrity'):
+            expected[loc] = str(p['integrity'])
+
+    for k in omitted_keys:
+        p = raw_packages.get(k) or snapshots.get(k) or {}
+        name, version = _parse_pnpm_key(k, p)
+        loc = f"pnpm:{k.lstrip('/')}"
+        is_direct = (name in root_decls)
+        nodes[loc] = PackageInspection(
+            name=name,
+            version=version,
+            location=loc,
+            direct=is_direct,
+            status='skipped',
+            reason=f'Omitted: dependency graph inventory ceiling ({MAX_DISCOVERED}) reached.'
+        )
+
+    def resolve_pnpm(name, spec=None):
+        candidates = name_to_keys.get(name, [])
+        if not candidates:
+            return None
+        if len(candidates) == 1:
+            return candidates[0][1], candidates[0][2]
+        if spec:
+            for ver, loc, k in candidates:
+                if ver == str(spec) or (EXACT.fullmatch(ver) and str(spec).endswith(ver)):
+                    return loc, k
+        return candidates[0][1], candidates[0][2]
+
+    queue = deque()
+    seen = set()
+
+    for name, spec in root_decls.items():
+        resolved = resolve_pnpm(name, spec)
+        if resolved:
+            loc, k = resolved
+            nodes[loc].direct = True
+            queue.append((loc, k, 1))
+        else:
+            loc = 'unresolved:' + name
+            if len(nodes) < MAX_DISCOVERED or loc in nodes:
+                nodes[loc] = PackageInspection(name=name, version=str(spec), location=loc, direct=True, status='unresolved', reason='Root dependency has no matching lockfile entry.')
+            else:
+                nodes[loc] = PackageInspection(name=name, version=str(spec), location=loc, direct=True, status='skipped', reason=f'Omitted: dependency graph inventory ceiling ({MAX_DISCOVERED}) reached.')
+
+    while queue:
+        loc, k, depth = queue.popleft()
+        if loc in seen:
+            continue
+        seen.add(loc)
+        node = nodes[loc]
+        node.depth = depth
+        integ = expected.get(loc)
+        node.integrity = IntegrityResult(expected=integ, source='pnpm-lock.yaml')
+        if not EXACT.fullmatch(node.version):
+            node.status = 'unresolved'
+            node.reason = 'Workspace/link or non-exact version is not registry-resolvable.'
+        else:
+            node.status = 'uninspected'
+            node.reason = 'Awaiting bounded source inspection.'
+
+        entry = records.get(k, {})
+        for dep_name, dep_spec in declarations(entry).items():
+            target = resolve_pnpm(dep_name, str(dep_spec))
+            if target:
+                target_loc, target_k = target
+                node.dependencies.append(target_loc)
+                if target_loc in seen:
+                    warnings.append(f'Reused/cyclic dependency edge: {loc} → {target_loc}; visited once.')
+                else:
+                    queue.append((target_loc, target_k, depth + 1))
+            else:
+                missing = loc + '/unresolved:' + dep_name
+                if len(nodes) < MAX_DISCOVERED or missing in nodes:
+                    nodes[missing] = PackageInspection(name=dep_name, version=str(dep_spec), location=missing, direct=False, depth=depth + 1, status='unresolved', reason='Transitive dependency has no matching lockfile entry.')
+                else:
+                    nodes[missing] = PackageInspection(name=dep_name, version=str(dep_spec), location=missing, direct=False, depth=depth + 1, status='skipped', reason=f'Omitted: dependency graph inventory ceiling ({MAX_DISCOVERED}) reached.')
+                node.dependencies.append(missing)
+
+    return list(nodes.values()), expected, warnings
+
+
+def _parse_yarn_descriptor(desc):
+    d = desc.strip().strip('"\'')
+    if d.startswith('@'):
+        parts = d.split('@')
+        name = '@' + parts[1]
+        spec = parts[2] if len(parts) > 2 else ''
+    elif '@' in d:
+        name, spec = d.split('@', 1)
+    else:
+        name, spec = d, ''
+    if spec.startswith('npm:'):
+        spec = spec[4:]
+    elif spec.startswith('workspace:'):
+        spec = spec[10:]
+    return name, spec
+
+
+def _yarn_lock_graph(files, paths):
+    warnings = []
+    path = paths[0]
+    try:
+        lock = yaml.safe_load(files[path])
+    except Exception as e:
+        return [], {}, [f'Could not parse yarn.lock: {e}']
+    if not isinstance(lock, dict):
+        return [], {}, ['yarn.lock must contain a YAML mapping.']
+
+    if '__metadata' not in lock:
+        return [], {}, ['Yarn v1 lockfile format is not supported; modern Yarn Berry (v2+) or npm/pnpm lockfile required.']
+
+    if len(paths) > 1:
+        warnings.append('Only the shallowest yarn.lock graph is inspected; other project lockfiles are uninspected.')
+
+    manifest_path = str(PurePosixPath(path).parent / 'package.json')
+    root_decls = {}
+    if manifest_path in files:
+        try:
+            pkg_json = json.loads(files[manifest_path])
+            if isinstance(pkg_json, dict):
+                root_decls.update(declarations(pkg_json))
+        except Exception:
+            pass
+
+    pkg_entries = [(k, v) for k, v in lock.items() if k != '__metadata' and isinstance(v, dict)]
+    if len(pkg_entries) > MAX_DISCOVERED:
+        warnings.append(f'Dependency graph inventory capped at {MAX_DISCOVERED} locations.')
+
+    traversable_entries = pkg_entries[:MAX_DISCOVERED]
+    omitted_entries = pkg_entries[MAX_DISCOVERED:]
+
+    records = {}
+    name_to_records = {}
+    nodes = {}
+    expected = {}
+
+    for k, v in traversable_entries:
+        descriptors = [_parse_yarn_descriptor(desc) for desc in k.split(',')]
+        primary_name, _ = descriptors[0]
+        version = str(v.get('version', 'unresolved'))
+        loc = f"yarn:{primary_name}@{version}"
+        records[loc] = (v, descriptors)
+
+        nodes[loc] = PackageInspection(
+            name=primary_name,
+            version=version,
+            location=loc,
+            direct=False,
+            status='unresolved',
+            reason='Not reachable from the root dependency declarations.'
+        )
+
+        for name, spec in descriptors:
+            name_to_records.setdefault(name, []).append((spec, version, loc, v))
+
+        checksum = v.get('checksum')
+        if isinstance(checksum, str) and checksum.startswith(('sha512-', 'sha384-', 'sha256-', 'sha1-')):
+            expected[loc] = checksum
+
+    for k, v in omitted_entries:
+        descriptors = [_parse_yarn_descriptor(desc) for desc in k.split(',')]
+        primary_name, _ = descriptors[0]
+        version = str(v.get('version', 'unresolved'))
+        loc = f"yarn:{primary_name}@{version}"
+        is_direct = (primary_name in root_decls)
+        nodes[loc] = PackageInspection(
+            name=primary_name,
+            version=version,
+            location=loc,
+            direct=is_direct,
+            status='skipped',
+            reason=f'Omitted: dependency graph inventory ceiling ({MAX_DISCOVERED}) reached.'
+        )
+
+    def resolve_yarn(name, spec=None):
+        candidates = name_to_records.get(name, [])
+        if not candidates:
+            return None
+        if len(candidates) == 1:
+            return candidates[0][2], candidates[0][3]
+        if spec:
+            for s, ver, loc, entry in candidates:
+                if s == str(spec) or ver == str(spec):
+                    return loc, entry
+        return candidates[0][2], candidates[0][3]
+
+    queue = deque()
+    seen = set()
+
+    for name, spec in root_decls.items():
+        resolved = resolve_yarn(name, str(spec))
+        if resolved:
+            loc, entry = resolved
+            nodes[loc].direct = True
+            queue.append((loc, entry, 1))
+        else:
+            loc = 'unresolved:' + name
+            if len(nodes) < MAX_DISCOVERED or loc in nodes:
+                nodes[loc] = PackageInspection(name=name, version=str(spec), location=loc, direct=True, status='unresolved', reason='Root dependency has no matching lockfile entry.')
+            else:
+                nodes[loc] = PackageInspection(name=name, version=str(spec), location=loc, direct=True, status='skipped', reason=f'Omitted: dependency graph inventory ceiling ({MAX_DISCOVERED}) reached.')
+
+    while queue:
+        loc, entry, depth = queue.popleft()
+        if loc in seen:
+            continue
+        seen.add(loc)
+        node = nodes[loc]
+        node.depth = depth
+        integ = expected.get(loc)
+        node.integrity = IntegrityResult(expected=integ, source='yarn.lock')
+        if not EXACT.fullmatch(node.version):
+            node.status = 'unresolved'
+            node.reason = 'Workspace or non-exact version is not registry-resolvable.'
+        else:
+            node.status = 'uninspected'
+            node.reason = 'Awaiting bounded source inspection.'
+
+        for dep_name, dep_spec in declarations(entry).items():
+            target = resolve_yarn(dep_name, str(dep_spec))
+            if target:
+                target_loc, target_entry = target
+                node.dependencies.append(target_loc)
+                if target_loc in seen:
+                    warnings.append(f'Reused/cyclic dependency edge: {loc} → {target_loc}; visited once.')
+                else:
+                    queue.append((target_loc, target_entry, depth + 1))
+            else:
+                missing = loc + '/unresolved:' + dep_name
+                if len(nodes) < MAX_DISCOVERED or missing in nodes:
+                    nodes[missing] = PackageInspection(name=dep_name, version=str(dep_spec), location=missing, direct=False, depth=depth + 1, status='unresolved', reason='Transitive dependency has no matching lockfile entry.')
+                else:
+                    nodes[missing] = PackageInspection(name=dep_name, version=str(dep_spec), location=missing, direct=False, depth=depth + 1, status='skipped', reason=f'Omitted: dependency graph inventory ceiling ({MAX_DISCOVERED}) reached.')
+                node.dependencies.append(missing)
+
+    return list(nodes.values()), expected, warnings
+
+
+def lock_graph(files):
+    """Resolve lockfile locations across npm (package-lock.json), pnpm (pnpm-lock.yaml), or Yarn Berry (yarn.lock)."""
+    npm_paths = sorted((p for p in files if PurePosixPath(p).name == 'package-lock.json'), key=lambda p: (len(PurePosixPath(p).parts), p))
+    if npm_paths:
+        return _npm_lock_graph(files, npm_paths)
+
+    pnpm_paths = sorted((p for p in files if PurePosixPath(p).name == 'pnpm-lock.yaml'), key=lambda p: (len(PurePosixPath(p).parts), p))
+    if pnpm_paths:
+        return _pnpm_lock_graph(files, pnpm_paths)
+
+    yarn_paths = sorted((p for p in files if PurePosixPath(p).name == 'yarn.lock'), key=lambda p: (len(PurePosixPath(p).parts), p))
+    if yarn_paths:
+        return _yarn_lock_graph(files, yarn_paths)
+
+    manifests = sorted((p for p in files if PurePosixPath(p).name == 'package.json'), key=lambda p: (len(PurePosixPath(p).parts), p))
+    root = json.loads(files[manifests[0]]) if manifests else {}
+    root_decls = declarations(root)
+    nodes = []
+    for index, (n, v) in enumerate(root_decls.items()):
+        if index < MAX_DISCOVERED:
+            nodes.append(PackageInspection(name=n, version=str(v), location='manifest:' + n, direct=True, status='unresolved', reason='No lockfile exact resolution available.'))
+        else:
+            nodes.append(PackageInspection(name=n, version=str(v), location='manifest:' + n, direct=True, status='skipped', reason=f'Omitted: dependency graph inventory ceiling ({MAX_DISCOVERED}) reached.'))
+    warnings = []
+    if len(root_decls) > MAX_DISCOVERED:
+        warnings.append(f'Dependency graph inventory capped at {MAX_DISCOVERED} locations.')
+    return nodes, {}, ['No modern lockfile: declared dependency source is uninspected.'] if nodes else []
 
 
 def inspect_dependencies(files, analyzer, profile='fast', session=None, cancel=None):

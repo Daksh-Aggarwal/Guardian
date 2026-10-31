@@ -53,7 +53,7 @@ export default function ScanPanel({
       if (tab === "upload") {
         if (!files.length) {
           throw new Error(
-            "Choose a project ZIP or npm manifest (package.json / package-lock.json) to inspect.",
+            "Choose a project ZIP or manifest (package.json, package-lock.json, pnpm-lock.yaml, yarn.lock) to inspect.",
           );
         }
         const data = new FormData();
@@ -139,7 +139,7 @@ export default function ScanPanel({
             ref={fileInputRef}
             type="file"
             multiple
-            accept=".zip,.json"
+            accept=".zip,.json,.yaml,.yml,.lock"
             aria-label="Upload project files"
             className="visually-hidden"
             onChange={(e) => chooseFiles(Array.from(e.target.files || []))}
@@ -172,7 +172,7 @@ export default function ScanPanel({
                 </motion.div>
                 <strong>Drop project archive or browse files</strong>
                 <span>
-                  Supports project .ZIP, package.json, or package-lock.json
+                  Supports project .ZIP, package.json, package-lock.json, pnpm-lock.yaml, or yarn.lock
                 </span>
                 <small>
                   Bounded local memory inspection · Up to 10 MB · Code is never

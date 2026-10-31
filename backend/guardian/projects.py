@@ -82,7 +82,7 @@ def detect_project_metadata(files: Dict[str, str], scan_id: str, name: str) -> P
     runtime: Optional[str] = None
     language: Optional[str] = None
     test_framework: Optional[str] = None
-    manifest_paths = [p for p in files if posixpath.basename(p) in {'package.json', 'package-lock.json'}]
+    manifest_paths = [p for p in files if posixpath.basename(p) in {'package.json', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock'}]
 
     # Inspect root package.json if present
     pkg_json_content = files.get('package.json')

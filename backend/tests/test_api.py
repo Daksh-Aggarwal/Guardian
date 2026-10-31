@@ -244,3 +244,34 @@ def test_osv_outage_does_not_make_source_coverage_incomplete(monkeypatch):
     assert report['assessments']['vulnerabilities']['status'] == 'unavailable'
     assert report['risk'] == 'No elevated signals'
     assert 'source inspection was incomplete' not in report['rationale']
+
+
+def test_pnpm_manifests_upload():
+    pnpm_data = b"""lockfileVersion: '6.0'
+dependencies:
+  react: 19.0.0
+packages:
+  /react@19.0.0:
+    resolution: {integrity: sha512-dummy}
+"""
+    report = completed(client.post('/api/scans/upload', files=[
+        ('files', ('package.json', b'{"name":"project","dependencies":{"react":"^19.0.0"}}', 'application/json')),
+        ('files', ('pnpm-lock.yaml', pnpm_data, 'application/x-yaml'))
+    ]))
+    assert len(report['dependencies']) >= 1
+    assert any(d['name'] == 'react' for d in report['dependencies'])
+
+def test_yarn_manifests_upload():
+    yarn_data = b"""__metadata:
+  version: 6
+  cacheKey: 8
+"react@npm:^19.0.0":
+  version: 19.0.0
+  resolution: "react@npm:19.0.0"
+"""
+    report = completed(client.post('/api/scans/upload', files=[
+        ('files', ('package.json', b'{"name":"project","dependencies":{"react":"^19.0.0"}}', 'application/json')),
+        ('files', ('yarn.lock', yarn_data, 'text/plain'))
+    ]))
+    assert len(report['dependencies']) >= 1
+    assert any(d['name'] == 'react' for d in report['dependencies'])
