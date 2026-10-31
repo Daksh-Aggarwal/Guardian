@@ -811,90 +811,10 @@ export default function Home() {
                     />
                   </div>
 
-                  {/* Meaningful Security Overview Metrics */}
-                  <div className="metrics-grid">
-                    <MetricCard
-                      label="Projects Inspected"
-                      value={metrics.uniqueProjectsCount}
-                      icon={<Package size={18} />}
-                      detail={`${metrics.totalScansCount} total ${metrics.totalScansCount === 1 ? "scan" : "scans"} recorded`}
-                      status="neutral"
-                    />
-                    <MetricCard
-                      label="Requiring Attention"
-                      value={metrics.elevatedProjectsCount}
-                      icon={<AlertTriangle size={18} />}
-                      detail={`${metrics.totalActionableFindings} actionable ${metrics.totalActionableFindings === 1 ? "signal" : "signals"} to review`}
-                      status={
-                        metrics.elevatedProjectsCount > 0
-                          ? "warning"
-                          : "success"
-                      }
-                    />
-                    <MetricCard
-                      label="Dependencies Inventoried"
-                      value={metrics.uniqueDependencyNamesCount}
-                      icon={<ShieldCheck size={18} />}
-                      detail={`${metrics.dependencyVersionsCount} resolved versions mapped`}
-                      status="neutral"
-                    />
-                    <MetricCard
-                      label="Critical Advisories"
-                      value={metrics.criticalAdvisoriesCount}
-                      icon={<Activity size={18} />}
-                      detail="Upstream OSV vulnerability matches"
-                      status={
-                        metrics.criticalAdvisoriesCount > 0
-                          ? "danger"
-                          : "success"
-                      }
-                    />
-                  </div>
-
-                  {/* Evidence-Grounded Recommended Actions */}
-                  {recommendedActions.length > 0 && (
-                    <section className="recommended-actions-section">
-                      <div className="section-title-row">
-                        <div>
-                          <Eyebrow>PRIORITIZED NEXT STEPS</Eyebrow>
-                          <h2>Recommended Actions</h2>
-                          <p>
-                            Grounded in actual findings from your recent
-                            security scans.
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="actions-grid">
-                        {recommendedActions.map((act) => (
-                          <RecommendedActionCard
-                            key={act.id}
-                            priority={act.priority}
-                            project={act.project}
-                            title={act.title}
-                            reason={act.reason}
-                            onClick={() => {
-                              openReport(act.report);
-                              if (act.findingId) {
-                                setTimeout(() => {
-                                  document
-                                    .getElementById("finding-" + act.findingId)
-                                    ?.scrollIntoView({
-                                      behavior: "smooth",
-                                      block: "center",
-                                    });
-                                }, 250);
-                              }
-                            }}
-                          />
-                        ))}
-                      </div>
-                    </section>
-                  )}
-                </>
+                  </>
               )}
 
-              {/* All Scans Table (dedicated to Scan history page) */}
+{/* All Scans Table (dedicated to Scan history page) */}
               {page === "Scan history" && (
                 <section className="recent-section">
                   <div className="section-heading">

@@ -6333,50 +6333,45 @@ h1,h2,h3,h4,h5,h6 {line-height:1.2 !important;}
 }
 
 
-/* Overview Single-Page Viewport Constraints (Strictly Non-Scrollable) */
+/* Overview Single-Page Viewport Constraints (Strictly Non-Scrollable & Spacious) */
 .main-overview {
-  padding: 8px 32px 0 !important;
+  padding: 16px 40px 0 !important;
   overflow: hidden;
   max-height: calc(100vh - 64px);
+  display: flex;
+  flex-direction: column;
 }
 .main-overview .heatmap-hero-card {
   padding: 0 !important;
-  margin: 0 auto 8px auto !important;
+  margin: 0 auto 18px auto !important;
 }
 .main-overview .heatmap-header {
-  margin-bottom: 6px !important;
+  margin-bottom: 12px !important;
 }
 .main-overview .scan-launchpad-section {
-  margin-bottom: 10px !important;
+  margin-bottom: 20px !important;
 }
 .main-overview .scan-launchpad-card {
-  padding: 14px 22px !important;
+  padding: 22px 28px !important;
 }
 .main-overview .launchpad-header {
-  margin-bottom: 8px !important;
+  margin-bottom: 14px !important;
 }
 .main-overview .launchpad-tabs {
-  margin-bottom: 10px !important;
+  margin-bottom: 16px !important;
 }
 .main-overview .dropzone-box {
-  padding: 10px 16px !important;
-  margin-bottom: 6px !important;
+  padding: 22px 24px !important;
+  margin-bottom: 12px !important;
 }
 .main-overview .dropzone-icon-wrap {
-  width: 34px !important;
-  height: 34px !important;
-  margin-bottom: 2px !important;
+  width: 44px !important;
+  height: 44px !important;
+  margin-bottom: 6px !important;
 }
 .main-overview .connect-folder-hint {
-  margin-top: 4px !important;
+  margin-top: 8px !important;
 }
 .main-overview .launchpad-footer {
-  margin-top: 10px !important;
-}
-.main-overview .metrics-grid {
-  margin-bottom: 8px !important;
-  gap: 10px !important;
-}
-.main-overview .metric-card {
-  padding: 10px 16px !important;
+  margin-top: 16px !important;
 }
