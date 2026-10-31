@@ -322,12 +322,12 @@ export function MagneticDropZone({
   return (
     <motion.div
       className={cn(
-        "relative flex min-h-64 w-full flex-col items-center justify-center overflow-hidden rounded-2xl border px-6 py-8 text-center small-shadow outline-none transition-[border-color,background-color] duration-200 [transition-timing-function:cubic-bezier(0.23,1,0.32,1)] dark:shadow-none",
+        "relative flex min-h-64 w-full flex-col items-center justify-center overflow-hidden rounded-xl border border-dashed px-6 py-8 text-center outline-none transition-[border-color,background-color] duration-200 [transition-timing-function:cubic-bezier(0.23,1,0.32,1)]",
         isOver
-          ? "border-blue-8 bg-blue-3/70"
+          ? "border-[var(--accent)] bg-[var(--accent-soft)]/40"
           : isNear
-            ? "border-blue-7 bg-blue-2/70"
-            : "border-grayscale-4 bg-grayscale-2/70 dark:border-grayscale-5 dark:bg-grayscale-3",
+            ? "border-[var(--accent-border)] bg-[var(--surface-subtle)]"
+            : "border-[var(--line)] bg-[var(--surface-muted)] hover:border-[var(--accent-border)] hover:bg-[var(--surface-subtle)]/60",
         disabled && "opacity-60 pointer-events-none",
         className,
       )}
@@ -351,7 +351,7 @@ export function MagneticDropZone({
       <motion.div
         aria-hidden="true"
         className={cn(
-          "pointer-events-none absolute top-1/2 left-1/2 -mt-20 -ml-20 size-40 rounded-full bg-blue-5/30 blur-3xl transition-opacity duration-200",
+          "pointer-events-none absolute top-1/2 left-1/2 -mt-20 -ml-20 size-40 rounded-full bg-[var(--accent)]/15 blur-3xl transition-opacity duration-200",
           isNear ? "opacity-100" : "opacity-0",
         )}
         style={{ transform: glowTransform }}
@@ -359,27 +359,27 @@ export function MagneticDropZone({
 
       {firstFile ? (
         <div className="relative flex w-full flex-col items-center">
-          <div className="flex size-12 items-center justify-center rounded-xl border border-blue-6 bg-blue-3 text-blue-11 shadow-sm dark:bg-blue-4">
+          <div className="flex size-12 items-center justify-center rounded-xl border border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--accent)] shadow-sm">
             <FileTypeIcon aria-hidden="true" size={23} weight="fill" />
           </div>
           <div className="mt-4 flex items-center gap-1.5">
             <CheckCircleIcon
               aria-hidden="true"
-              className="text-green-9"
+              className="text-[var(--accent)]"
               size={15}
               weight="fill"
             />
-            <p className="font-medium text-grayscale-12 text-sm">
+            <p className="font-medium text-[var(--text)] text-sm">
               {files.length === 1
                 ? "Ready to inspect"
                 : `${files.length} files ready`}
             </p>
           </div>
-          <p className="mt-1 max-w-full truncate text-grayscale-11 text-sm">
+          <p className="mt-1 max-w-full truncate text-[var(--text-secondary)] text-sm">
             {firstFile.name}
             {files.length > 1 ? ` +${files.length - 1}` : ""}
           </p>
-          <p className="mt-0.5 font-mono text-[10px] text-grayscale-9 uppercase">
+          <p className="mt-0.5 font-mono text-[10px] text-[var(--muted)] uppercase">
             {formatBytes(files.reduce((acc, f) => acc + f.size, 0))}
           </p>
 
@@ -389,10 +389,10 @@ export function MagneticDropZone({
               {files.map((file, i) => (
                 <div
                   key={`${file.name}-${i}`}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-grayscale-4 bg-grayscale-1/90 px-2.5 py-1 text-xs text-grayscale-11 shadow-xs dark:border-grayscale-6 dark:bg-grayscale-3/90"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--line)] bg-[var(--surface)] px-2.5 py-1 text-xs text-[var(--text-secondary)] shadow-xs"
                 >
                   <span className="max-w-[140px] truncate font-medium">{file.name}</span>
-                  <span className="font-mono text-[10px] text-grayscale-9">
+                  <span className="font-mono text-[10px] text-[var(--muted)]">
                     {formatBytes(file.size)}
                   </span>
                   <button
@@ -401,7 +401,7 @@ export function MagneticDropZone({
                       e.stopPropagation();
                       removeIndividualFile(i);
                     }}
-                    className="cursor-pointer text-grayscale-9 hover:text-grayscale-12 transition-colors"
+                    className="cursor-pointer text-[var(--muted)] hover:text-[var(--text)] transition-colors"
                     aria-label={`Remove ${file.name}`}
                   >
                     <XIcon size={12} weight="bold" />
@@ -413,7 +413,7 @@ export function MagneticDropZone({
 
           <div className="mt-5 flex items-center gap-2">
             <button
-              className="flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-grayscale-4 bg-grayscale-1 px-3 font-medium text-grayscale-11 text-xs transition-[background-color,border-color,transform] duration-150 active:scale-[0.97] dark:border-grayscale-6 dark:bg-grayscale-3 dark:hover:bg-grayscale-4"
+              className="flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-[var(--line)] bg-[var(--surface)] px-3 font-medium text-[var(--text)] text-xs transition-[background-color,border-color,transform] duration-150 hover:bg-[var(--surface-subtle)] active:scale-[0.97]"
               onClick={openFilePicker}
               type="button"
             >
@@ -422,7 +422,7 @@ export function MagneticDropZone({
             </button>
             <button
               aria-label={`Remove ${firstFile.name}`}
-              className="flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-grayscale-4 bg-grayscale-1 px-3 font-medium text-grayscale-11 text-xs transition-[background-color,border-color,transform] duration-150 active:scale-[0.97] dark:border-grayscale-6 dark:bg-grayscale-3 dark:hover:bg-grayscale-4"
+              className="flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-[var(--line)] bg-[var(--surface)] px-3 font-medium text-[var(--muted)] hover:text-[var(--text)] text-xs transition-[background-color,border-color,transform] duration-150 hover:bg-[var(--surface-subtle)] active:scale-[0.97]"
               onClick={clearFiles}
               type="button"
             >
@@ -433,32 +433,30 @@ export function MagneticDropZone({
         </div>
       ) : (
         <button
-          className="relative flex cursor-pointer flex-col items-center rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-blue-8 focus-visible:ring-offset-4 focus-visible:ring-offset-grayscale-2"
+          className="relative flex cursor-pointer flex-col items-center rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface)]"
           onClick={openFilePicker}
           type="button"
         >
           <div
             className={cn(
-              "flex size-12 items-center justify-center rounded-xl border border-grayscale-4 bg-grayscale-1 text-grayscale-11 shadow-sm transition-[border-color,background-color] duration-200 dark:border-grayscale-6 dark:bg-grayscale-3",
-              isOver && "dark:border-blue-7 dark:bg-blue-4",
+              "flex size-12 items-center justify-center rounded-xl border border-[var(--line)] bg-[var(--surface)] text-[var(--accent)] shadow-sm transition-[border-color,background-color,color] duration-200",
+              isNear && "border-[var(--accent-border)] text-[var(--accent-hover)]",
+              isOver && "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]",
             )}
           >
             <FileArrowUpIcon
               aria-hidden="true"
-              className={cn(
-                "transition-colors duration-200 dark:text-grayscale-12",
-                isNear ? "text-blue-11" : "text-grayscale-11",
-              )}
+              className="transition-colors duration-200"
               size={23}
               weight="fill"
             />
           </div>
-          <p className="mt-4 font-medium text-grayscale-12 text-sm">{displayTitle}</p>
-          <p className="mt-1 text-grayscale-10 text-xs leading-5">
+          <p className="mt-4 font-medium text-[var(--text)] text-sm">{displayTitle}</p>
+          <p className="mt-1 text-[var(--muted)] text-xs leading-5">
             {subtitle ?? `or click to browse · up to ${formatBytes(maxSize)}`}
           </p>
           {hint && (
-            <p className="mt-1 text-[11px] text-grayscale-9 leading-4 max-w-sm">
+            <p className="mt-1 text-[11px] text-[var(--muted)] leading-4 max-w-sm">
               {hint}
             </p>
           )}
@@ -468,7 +466,7 @@ export function MagneticDropZone({
       {error ? (
         <p
           aria-live="polite"
-          className="relative mt-4 max-w-sm text-red-10 text-xs leading-5"
+          className="relative mt-4 max-w-sm text-[var(--danger)] text-xs leading-5"
         >
           {error}
         </p>
