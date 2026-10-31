@@ -249,6 +249,7 @@ code {
   letter-spacing: 1.4px;
   color: var(--muted);
   padding-left: 13px;
+  margin-top: 28px;
   margin-bottom: 12px;
 }
 nav {
@@ -320,7 +321,7 @@ nav button span {
   padding: 0;
 }
 .sidebar-bottom {
-  margin-top: 22px;
+  margin-top: auto;
   padding: 20px 0;
   display: flex;
   gap: 10px;

@@ -490,14 +490,7 @@ export default function Home() {
           </button>
         </div>
 
-        <div className="workspace-label">
-          <span className="workspace-icon">G</span>
-          <div>
-            <span className="workspace-name">Personal Workspace</span>
-            <small>LOCAL EDITION · v3.0</small>
-          </div>
-          <ChevronRight size={14} className="workspace-chevron" />
-        </div>
+
 
         <div className="nav-label">COMMAND CENTRE</div>
         <nav>
@@ -530,25 +523,7 @@ export default function Home() {
           ))}
         </nav>
 
-        {/* Sidebar trust banner */}
-        <div className="sidebar-note">
-          <div className="tiny-shield">
-            <ShieldCheck size={20} />
-          </div>
-          <h4>Evidence Over Assumptions</h4>
-          <p>
-            Static AST inspection. Transparent coverage boundaries. Grounded AI
-            explanations.
-          </p>
-          <button
-            type="button"
-            onClick={() => navigate("How it works")}
-            className="sidebar-note-link"
-          >
-            <span>Methodology</span>
-            <ArrowUpRight size={13} />
-          </button>
-        </div>
+
 
         {/* Sidebar footer */}
         <div className="sidebar-bottom">
@@ -586,10 +561,7 @@ export default function Home() {
           </div>
 
           <div className="top-actions">
-            <span className={`service-status ${connected ? "online" : ""}`}>
-              <i className="status-indicator-dot" />
-              <span>{connected ? "Scanner connected" : "Scanner offline"}</span>
-            </span>
+
 
             <button
               aria-label={dark ? "Switch to light mode" : "Switch to dark mode"}
@@ -751,89 +723,50 @@ export default function Home() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: reducedMotion ? 0 : 0.32 }}
             >
-              {/* Command Centre Page Header */}
-              <div className="page-heading">
-                <div>
-                  <Eyebrow>SUPPLY-CHAIN SECURITY COMMAND CENTRE</Eyebrow>
-                  <h1 className="heading-title">
-                    {page === "Overview"
-                      ? "Security Command Centre"
-                      : "Inspection History"}
-                  </h1>
-                  <p className="heading-subtitle">
-                    {page === "Overview"
-                      ? "Evidence-grounded supply chain security, AST behavioral inspection, and verified advisory tracking."
-                      : "Complete repository of past inspections with full evidence trails preserved."}
-                  </p>
-                </div>
-
-                <div className="page-heading-actions">
-                  <div
-                    className="dataset-filter-control"
-                    role="group"
-                    aria-label="Dataset Filter"
-                  >
-                    <button
-                      type="button"
-                      className={`dataset-filter-btn ${datasetFilter === "all" ? "active" : ""}`}
-                      onClick={() => setDatasetFilter("all")}
-                      title="Show all projects and demo data"
-                    >
-                      All{" "}
-                      <span className="dataset-count-pill">
-                        {reports.length}
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      className={`dataset-filter-btn ${datasetFilter === "real" ? "active" : ""}`}
-                      onClick={() => setDatasetFilter("real")}
-                      title="Show only real projects and registry lookups"
-                    >
-                      Real Projects{" "}
-                      <span className="dataset-count-pill">
-                        {realReportsCount}
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      className={`dataset-filter-btn ${datasetFilter === "demo" ? "active" : ""}`}
-                      onClick={() => setDatasetFilter("demo")}
-                      title="Show only synthetic fixtures and demo data"
-                    >
-                      Demo Data{" "}
-                      <span className="dataset-count-pill">
-                        {demoReportsCount}
-                      </span>
-                    </button>
+              {/* Header only for Scan History */}
+              {page === "Scan history" && (
+                <div className="page-heading">
+                  <div>
+                    <h1 className="heading-title">Inspection History</h1>
+                    <p className="heading-subtitle">
+                      Complete repository of past inspections with full evidence trails preserved.
+                    </p>
                   </div>
 
-                  <button
-                    className="button secondary"
-                    onClick={() => navigate("Project workspace")}
-                  >
-                    <FolderOpen size={16} />
-                    <span>Project workspace</span>
-                  </button>
-                  <button
-                    className="button primary"
-                    onClick={() => {
-                      navigate("Overview");
-                      setTimeout(
-                        () =>
-                          document.getElementById("new-scan")?.scrollIntoView({
-                            behavior: "smooth",
-                            block: "center",
-                          }),
-                        50,
-                      );
-                    }}
-                  >
-                    <Plus size={16} />
-                    <span>New scan</span>
-                  </button>
+                  <div className="page-heading-actions">
+                    <div
+                      className="dataset-filter-control"
+                      role="group"
+                      aria-label="Dataset Filter"
+                    >
+                      <button
+                        type="button"
+                        className={`dataset-filter-btn ${datasetFilter === "all" ? "active" : ""}`}
+                        onClick={() => setDatasetFilter("all")}
+                        title="Show all projects and demo data"
+                      >
+                        All <span className="dataset-count-pill">{reports.length}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className={`dataset-filter-btn ${datasetFilter === "real" ? "active" : ""}`}
+                        onClick={() => setDatasetFilter("real")}
+                        title="Show only real projects and registry lookups"
+                      >
+                        Real Projects <span className="dataset-count-pill">{realReportsCount}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className={`dataset-filter-btn ${datasetFilter === "demo" ? "active" : ""}`}
+                        onClick={() => setDatasetFilter("demo")}
+                        title="Show only synthetic fixtures and demo data"
+                      >
+                        Demo Data <span className="dataset-count-pill">{demoReportsCount}</span>
+                      </button>
+                    </div>
+                  </div>
                 </div>
-              </div>
+              )}
 
               {page === "Overview" && (
                 <>
