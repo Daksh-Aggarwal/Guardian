@@ -123,6 +123,16 @@ class MockDirectoryHandle {
     // For single level paths
     return this;
   }
+
+  async removeEntry(name, options = {}) {
+    if (this.files.has(name)) {
+      this.files.delete(name);
+      return;
+    }
+    const err = new Error(`File '${name}' not found`);
+    err.name = "NotFoundError";
+    throw err;
+  }
 }
 
 test("1. Reapplication refuses when an affected file's hash has changed", async () => {
@@ -473,4 +483,272 @@ test("6. Failed reapplication rolls back safely and does not leave files in part
   assert.equal(dirHandle.files.get("f1.txt").content, origFile1);
   // File 2 is also at original content
   assert.equal(dirHandle.files.get("f2.txt").content, origFile2);
+});
+
+test("7. Undo removes newly created files from disk while restoring updated files", async () => {
+  const origUpdated = 'console.log("existing");';
+  const propUpdated = 'console.log("existing safe");';
+  const origHashUpdated = await computeBrowserSHA256(origUpdated);
+  const propHashUpdated = await computeBrowserSHA256(propUpdated);
+
+  const createdContent = 'export const helper = () => true;\n';
+  const createdHash = await computeBrowserSHA256(createdContent);
+
+  const plan = {
+    plan_id: "plan_test_create_and_undo",
+    scan_id: "scan_create_undo",
+    title: "Create helper and update existing",
+    summary: "Create and update",
+    priority: "medium",
+    expected_outcome: "Fixed",
+    findings_addressed: ["f1", "f2"],
+    proposed_changes: [
+      {
+        file_path: "existing.js",
+        operation: "update",
+        original_sha256: origHashUpdated,
+        proposed_sha256: propHashUpdated,
+        edits: [{ old_text: '"existing"', new_text: '"existing safe"' }],
+        diff: "diff-existing",
+        rationale: "Sanitize existing",
+        finding_ids: ["f1"],
+        expected_result: "Sanitized",
+      },
+      {
+        file_path: "new_helper.js",
+        operation: "create",
+        original_sha256: "",
+        proposed_sha256: createdHash,
+        edits: [],
+        diff: "diff-new-helper",
+        rationale: "Add helper module",
+        finding_ids: ["f2"],
+        expected_result: "Created helper module",
+        created_content: createdContent,
+      },
+    ],
+    tradeoffs: [],
+    potential_risks: [],
+    assumptions: [],
+    manual_steps: [],
+    recommended_verification: [],
+    limitations: [],
+    status: "approved",
+    created_at: new Date().toISOString(),
+  };
+
+  const dirHandle = new MockDirectoryHandle();
+  dirHandle.files.set("existing.js", new MockFileHandle("existing.js", origUpdated));
+
+  // Ensure new_helper.js does not exist initially
+  assert.equal(dirHandle.files.has("new_helper.js"), false);
+
+  // 1. Apply plan
+  const applyRes = await applyPlanToFileSystem(dirHandle, plan);
+  assert.equal(applyRes.success, true);
+  assert.equal(applyRes.modifiedFiles.length, 2);
+  assert.equal(dirHandle.files.get("existing.js").content, propUpdated);
+  assert.equal(dirHandle.files.has("new_helper.js"), true);
+  assert.equal(dirHandle.files.get("new_helper.js").content, createdContent);
+
+  // 2. Undo plan
+  const undoRes = await undoPlanFromFileSystem(dirHandle, plan);
+  assert.equal(undoRes.success, true);
+  assert.equal(undoRes.restoredFiles.length, 2);
+  assert.ok(undoRes.restoredFiles.includes("existing.js"));
+  assert.ok(undoRes.restoredFiles.includes("new_helper.js"));
+
+  // Check filesystem: existing.js restored, new_helper.js removed!
+  assert.equal(dirHandle.files.get("existing.js").content, origUpdated);
+  assert.equal(dirHandle.files.has("new_helper.js"), false);
+});
+
+test("8. Undo refuses if a newly created file was modified after application", async () => {
+  const createdContent = 'export const safeConfig = { secure: true };\n';
+  const createdHash = await computeBrowserSHA256(createdContent);
+
+  const plan = {
+    plan_id: "plan_test_create_modified_undo",
+    scan_id: "scan_create_mod",
+    title: "Create safe config",
+    summary: "Create config",
+    priority: "high",
+    expected_outcome: "Created",
+    findings_addressed: ["f1"],
+    proposed_changes: [
+      {
+        file_path: "safe-config.js",
+        operation: "create",
+        original_sha256: "",
+        proposed_sha256: createdHash,
+        edits: [],
+        diff: "diff",
+        rationale: "Add safe config",
+        finding_ids: ["f1"],
+        expected_result: "Created",
+        created_content: createdContent,
+      },
+    ],
+    tradeoffs: [],
+    potential_risks: [],
+    assumptions: [],
+    manual_steps: [],
+    recommended_verification: [],
+    limitations: [],
+    status: "approved",
+    created_at: new Date().toISOString(),
+  };
+
+  const dirHandle = new MockDirectoryHandle();
+
+  // Apply plan
+  await applyPlanToFileSystem(dirHandle, plan);
+  assert.equal(dirHandle.files.has("safe-config.js"), true);
+
+  // User manually edits safe-config.js after Guardian created it
+  dirHandle.files.get("safe-config.js").content = '// User manual comment\n' + createdContent;
+
+  // Undo must refuse
+  await assert.rejects(
+    async () => {
+      await undoPlanFromFileSystem(dirHandle, plan);
+    },
+    (err) => {
+      assert.match(err.message, /Cannot safely undo/);
+      assert.match(err.message, /Created file 'safe-config.js' has been modified/);
+      return true;
+    }
+  );
+
+  // File was NOT removed because undo was aborted to protect user's manual edits
+  assert.equal(dirHandle.files.has("safe-config.js"), true);
+});
+
+test("9. Failed application rolls back newly created files written midway", async () => {
+  const createdContent = 'const helper = "temp";';
+  const createdHash = await computeBrowserSHA256(createdContent);
+
+  const origFile2 = "hello world";
+  const origHash2 = await computeBrowserSHA256(origFile2);
+  const propHash2 = await computeBrowserSHA256("hello modified");
+
+  const plan = {
+    plan_id: "plan_test_create_midway_rollback",
+    scan_id: "scan_midway",
+    title: "Create file then fail on next update",
+    summary: "Rollback test",
+    priority: "high",
+    expected_outcome: "Clean rollback",
+    findings_addressed: [],
+    proposed_changes: [
+      {
+        file_path: "created_temp.js",
+        operation: "create",
+        original_sha256: "",
+        proposed_sha256: createdHash,
+        edits: [],
+        diff: "diff",
+        rationale: "Create helper",
+        finding_ids: [],
+        expected_result: "Created",
+        created_content: createdContent,
+      },
+      {
+        file_path: "f2.txt",
+        operation: "update",
+        original_sha256: origHash2,
+        proposed_sha256: propHash2,
+        edits: [{ old_text: "world", new_text: "modified" }],
+        diff: "diff2",
+        rationale: "Update",
+        finding_ids: [],
+        expected_result: "Updated",
+      },
+    ],
+    tradeoffs: [],
+    potential_risks: [],
+    assumptions: [],
+    manual_steps: [],
+    recommended_verification: [],
+    limitations: [],
+    status: "approved",
+    created_at: new Date().toISOString(),
+  };
+
+  const dirHandle = new MockDirectoryHandle();
+  // f2 will fail during write
+  dirHandle.files.set("f2.txt", new MockFileHandle("f2.txt", origFile2, true));
+
+  await assert.rejects(
+    async () => {
+      await applyPlanToFileSystem(dirHandle, plan);
+    },
+    (err) => {
+      assert.match(err.message, /Application failed midway/);
+      return true;
+    }
+  );
+
+  // created_temp.js was written before f2 threw, but rollback removed it!
+  assert.equal(dirHandle.files.has("created_temp.js"), false);
+  // f2 remains untouched
+  assert.equal(dirHandle.files.get("f2.txt").content, origFile2);
+});
+
+test("10. Reapplication succeeds after undoing a plan containing newly created files", async () => {
+  const createdContent = 'module.exports = { secure: true };';
+  const createdHash = await computeBrowserSHA256(createdContent);
+
+  const plan = {
+    plan_id: "plan_test_create_reapply",
+    scan_id: "scan_create_reapply",
+    title: "Create security module",
+    summary: "Reapplication test with create",
+    priority: "medium",
+    expected_outcome: "Created and reapplied",
+    findings_addressed: [],
+    proposed_changes: [
+      {
+        file_path: "security.js",
+        operation: "create",
+        original_sha256: "",
+        proposed_sha256: createdHash,
+        edits: [],
+        diff: "diff",
+        rationale: "Add security module",
+        finding_ids: [],
+        expected_result: "Security module present",
+        created_content: createdContent,
+      },
+    ],
+    tradeoffs: [],
+    potential_risks: [],
+    assumptions: [],
+    manual_steps: [],
+    recommended_verification: [],
+    limitations: [],
+    status: "reverted",
+    created_at: new Date().toISOString(),
+  };
+
+  const dirHandle = new MockDirectoryHandle();
+
+  // 1. Initial apply
+  await applyPlanToFileSystem(dirHandle, plan);
+  assert.equal(dirHandle.files.has("security.js"), true);
+
+  // 2. Undo
+  await undoPlanFromFileSystem(dirHandle, plan);
+  assert.equal(dirHandle.files.has("security.js"), false);
+
+  // 3. Reapplication pre-check validation passes because created file was cleaned up on undo
+  const validation = await validatePlanFilesForReapplication(dirHandle, plan);
+  assert.equal(validation.valid, true);
+  assert.equal(validation.staleFiles.length, 0);
+
+  // 4. Reapplication succeeds
+  const reapplyRes = await applyPlanToFileSystem(dirHandle, plan);
+  assert.equal(reapplyRes.success, true);
+  assert.equal(dirHandle.files.has("security.js"), true);
+  assert.equal(dirHandle.files.get("security.js").content, createdContent);
 });

@@ -212,15 +212,35 @@ def get_plans_for_scan(scan_id: str) -> List[RemediationPlan]:
         rows = db.execute('SELECT plan_json FROM remediation_plans WHERE scan_id = ? ORDER BY created_at DESC', (scan_id,)).fetchall()
     return [RemediationPlan.model_validate_json(r[0]) for r in rows]
 
+def get_plans_for_project(project_name: str) -> List[RemediationPlan]:
+    with connection() as db:
+        all_scans = db.execute('SELECT id, report FROM scans').fetchall()
+        matching_scan_ids = []
+        for sid, rep_json in all_scans:
+            try:
+                rep_data = json.loads(rep_json)
+                if rep_data.get('name') == project_name:
+                    matching_scan_ids.append(sid)
+            except Exception:
+                pass
+        if not matching_scan_ids:
+            return []
+        placeholders = ','.join('?' for _ in matching_scan_ids)
+        rows = db.execute(
+            f'SELECT plan_json FROM remediation_plans WHERE scan_id IN ({placeholders}) ORDER BY created_at DESC',
+            matching_scan_ids
+        ).fetchall()
+    return [RemediationPlan.model_validate_json(r[0]) for r in rows]
+
 VALID_STATUS_TRANSITIONS: Dict[str, Set[str]] = {
     'proposed': {'approved', 'rejected', 'applying', 'applied', 'failed', 'verified'},
-    'approved': {'applying', 'applied', 'failed', 'rejected'},
+    'approved': {'applying', 'applied', 'failed', 'rejected', 'reverted'},
     'applying': {'applied', 'failed'},
     'applied': {'reverted', 'verified', 'failed'},
     'reverted': {'approved', 'applying', 'applied', 'failed', 'rejected'},
     'verified': set(),
     'rejected': set(),
-    'failed': {'approved', 'applying', 'applied'},
+    'failed': {'approved', 'applying', 'applied', 'reverted'},
     'stale': set(),
 }
 

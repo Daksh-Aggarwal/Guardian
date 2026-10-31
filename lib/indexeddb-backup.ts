@@ -17,6 +17,7 @@ export type RemediationBackup = {
   plan_id: string;
   timestamp: string;
   files: BackupFileEntry[];
+  createdFiles?: string[];
 };
 
 function openDB(): Promise<IDBDatabase> {

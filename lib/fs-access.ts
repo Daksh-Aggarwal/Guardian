@@ -259,6 +259,42 @@ async function resolveFileHandle(
 }
 
 /**
+ * Removes a file inside a directory handle, resolving nested subdirectories.
+ */
+export async function removeFileHandle(
+  root: FileSystemDirectoryHandle,
+  relativePath: string,
+): Promise<boolean> {
+  const parts = relativePath.split("/").filter(Boolean);
+  const fileName = parts.pop();
+  if (!fileName) {
+    throw new Error(`Invalid file path '${relativePath}'`);
+  }
+  let currentDir = root;
+
+  try {
+    for (const part of parts) {
+      currentDir = await currentDir.getDirectoryHandle(part, { create: false });
+    }
+    if (typeof (currentDir as any).removeEntry === "function") {
+      await (currentDir as any).removeEntry(fileName);
+      return true;
+    }
+    return false;
+  } catch (err) {
+    const msg = (err as Error).message || "";
+    if (
+      (err as any).name === "NotFoundError" ||
+      msg.includes("not found") ||
+      msg.includes("could not be located")
+    ) {
+      return false;
+    }
+    throw err;
+  }
+}
+
+/**
  * Applies approved remediation changes sequentially with SHA-256 pre-check and rollback protection.
  */
 export async function applyPlanToFileSystem(
@@ -277,6 +313,7 @@ export async function applyPlanToFileSystem(
 
   // 2. Pre-flight verification: re-read every target file and verify hashes match plan
   const backupEntries: BackupFileEntry[] = [];
+  const createdFiles: string[] = [];
   for (const change of plan.proposed_changes) {
     if (change.operation === "update") {
       let handle: FileSystemFileHandle;
@@ -309,6 +346,20 @@ export async function applyPlanToFileSystem(
         content: currentText,
         sha256: currentHash,
       });
+    } else if (change.operation === "create") {
+      try {
+        await resolveFileHandle(directoryHandle, change.file_path, false);
+        throw new Error(
+          `Cannot create '${change.file_path}': a file already exists at that path on disk. ` +
+            `Application aborted to prevent overwriting existing files.`,
+        );
+      } catch (err) {
+        if ((err as Error).message.startsWith("Cannot create '")) {
+          throw err;
+        }
+        // Expected: file does not exist on disk
+      }
+      createdFiles.push(change.file_path);
     }
   }
 
@@ -317,6 +368,7 @@ export async function applyPlanToFileSystem(
     plan_id: plan.plan_id,
     timestamp: new Date().toISOString(),
     files: backupEntries,
+    createdFiles,
   });
 
   // 4. Sequentially write modified and created files
@@ -389,7 +441,7 @@ export async function applyPlanToFileSystem(
 
     return { success: true, modifiedFiles };
   } catch (err) {
-    // 5. Rollback on failure: restore modified files from backup
+    // 5. Rollback on failure: restore modified files from backup and remove created files
     let rollbackSuccess = true;
     for (const entry of backupEntries) {
       if (modifiedFiles.includes(entry.path)) {
@@ -408,8 +460,18 @@ export async function applyPlanToFileSystem(
       }
     }
 
+    for (const createdPath of createdFiles) {
+      if (modifiedFiles.includes(createdPath)) {
+        try {
+          await removeFileHandle(directoryHandle, createdPath);
+        } catch {
+          rollbackSuccess = false;
+        }
+      }
+    }
+
     const rollbackMsg = rollbackSuccess
-      ? "All modified files were successfully restored to their original state."
+      ? "All modified and created files were successfully restored to their original state."
       : "CRITICAL: Some files could not be restored automatically. Review local backups in IndexedDB.";
 
     throw new Error(
@@ -459,6 +521,29 @@ export async function undoPlanFromFileSystem(
             `Aborting undo to prevent overwriting your latest manual edits.`,
         );
       }
+    } else if (change.operation === "create") {
+      try {
+        const handle = await resolveFileHandle(
+          directoryHandle,
+          change.file_path,
+          false,
+        );
+        const file = await handle.getFile();
+        const text = await file.text();
+        const currentHash = await computeBrowserSHA256(text);
+
+        if (currentHash !== change.proposed_sha256) {
+          throw new Error(
+            `Cannot safely undo: Created file '${change.file_path}' has been modified since Guardian applied changes. ` +
+              `Aborting undo to prevent overwriting your latest manual edits.`,
+          );
+        }
+      } catch (err) {
+        if ((err as Error).message.startsWith("Cannot safely undo:")) {
+          throw err;
+        }
+        // Expected if file was already removed
+      }
     }
   }
 
@@ -478,6 +563,27 @@ export async function undoPlanFromFileSystem(
     }
 
     restoredFiles.push(entry.path);
+  }
+
+  // Remove newly created files
+  const createdPaths =
+    backup.createdFiles && backup.createdFiles.length > 0
+      ? backup.createdFiles
+      : plan.proposed_changes
+          .filter((c) => c.operation === "create")
+          .map((c) => c.file_path);
+
+  for (const createdPath of createdPaths) {
+    try {
+      const removed = await removeFileHandle(directoryHandle, createdPath);
+      if (removed) {
+        restoredFiles.push(createdPath);
+      }
+    } catch (err) {
+      throw new Error(
+        `Failed to remove created file '${createdPath}' during undo: ${(err as Error).message}`,
+      );
+    }
   }
 
   return { success: true, restoredFiles };

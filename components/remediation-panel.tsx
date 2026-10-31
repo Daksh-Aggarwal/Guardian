@@ -283,25 +283,35 @@ export default function RemediationPanel({
       setError((err as Error).message);
       setConfirmApply(false);
       if (plan && previousStatus === "reverted") {
-        // Ensure plan is not left in an applied or approved state on reapplication failure
-        await api<RemediationPlan>(
-          `/remediation/plans/${plan.plan_id}/revert`,
-          { method: "POST" },
-        ).catch(() => {});
+        // Ensure plan is safely returned to reverted state on reapplication failure
+        try {
+          const revertedPlan = await api<RemediationPlan>(
+            `/remediation/plans/${plan.plan_id}/revert`,
+            { method: "POST" },
+          );
+          setPlan(revertedPlan);
+        } catch (revertErr) {
+          console.error("Failed to reset plan status to reverted:", revertErr);
+        }
       } else if (plan) {
-        await api<RemediationPlan>(
-          `/remediation/plans/${plan.plan_id}/applied`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              applied_at: new Date().toISOString(),
-              modified_files: [],
-              success: false,
-              error: (err as Error).message,
-            }),
-          },
-        ).catch(() => {});
+        try {
+          const failedPlan = await api<RemediationPlan>(
+            `/remediation/plans/${plan.plan_id}/applied`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                applied_at: new Date().toISOString(),
+                modified_files: [],
+                success: false,
+                error: (err as Error).message,
+              }),
+            },
+          );
+          setPlan(failedPlan);
+        } catch (failErr) {
+          console.error("Failed to record plan failure:", failErr);
+        }
       }
     } finally {
       setLoading(false);

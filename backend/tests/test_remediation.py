@@ -1000,4 +1000,72 @@ def test_failed_undo_and_failed_reapplication_handling():
     assert res.json()["status"] == "failed"
     assert res.json()["status"] != "applied"
 
+def test_reapplication_failure_safely_reverts_approved_plan():
+    """
+    Verifies the specific reapplication failure edge case:
+    1. Reapplication starts while the plan is 'reverted'.
+    2. /approve transitions backend status to 'approved'.
+    3. Filesystem application fails (e.g. hash mismatch or permission denied).
+    4. Frontend attempts /revert to return the plan to 'reverted'.
+    5. The backend safely permits 'approved' -> 'reverted', preserving the correct lifecycle.
+    """
+    scan_id = "test_reapply_failure_scan"
+    report = Report(
+        id=scan_id, name="prj", version="1.0.0", created_at="2026-10-31T00:00:00Z",
+        source="local", risk="Low", rationale="ok", findings=[],
+        dependencies=[], files_analyzed=1, coverage=[], intelligence="checked", duration_ms=5
+    )
+    storage.save(report)
+
+    plan = RemediationPlan(
+        plan_id="plan_reapply_fail_test",
+        scan_id=scan_id,
+        title="Reapplication Failure Test Plan",
+        summary="Test edge case",
+        priority="medium",
+        expected_outcome="Reverted state maintained",
+        findings_addressed=[],
+        proposed_changes=[],
+        tradeoffs=[],
+        potential_risks=[],
+        assumptions=[],
+        manual_steps=[],
+        recommended_verification=[],
+        limitations=[],
+        status="reverted",
+        created_at="2026-10-31T00:00:00Z"
+    )
+    storage.save_plan(plan)
+
+    # 1. Plan starts as reverted
+    assert storage.get_plan("plan_reapply_fail_test").status == "reverted"
+
+    # 2. Reapplication begins: /approve called
+    res_appr = client.post("/api/remediation/plans/plan_reapply_fail_test/approve")
+    assert res_appr.status_code == 200
+    assert res_appr.json()["status"] == "approved"
+    assert storage.get_plan("plan_reapply_fail_test").status == "approved"
+
+    # 3. Filesystem application fails in the frontend -> calls /revert
+    res_rev = client.post("/api/remediation/plans/plan_reapply_fail_test/revert")
+    assert res_rev.status_code == 200
+    assert res_rev.json()["status"] == "reverted"
+
+    # 4. Verify backend state is safely reverted, NOT stuck in approved
+    persisted = storage.get_plan("plan_reapply_fail_test")
+    assert persisted.status == "reverted"
+
+    # 5. Verify the reverted plan can be approved and applied again
+    res_reappr = client.post("/api/remediation/plans/plan_reapply_fail_test/approve")
+    assert res_reappr.status_code == 200
+    assert res_reappr.json()["status"] == "approved"
+    res_apply = client.post("/api/remediation/plans/plan_reapply_fail_test/applied", json={
+        "applied_at": "now",
+        "modified_files": ["package.json"],
+        "success": True
+    })
+    assert res_apply.status_code == 200
+    assert res_apply.json()["status"] == "applied"
+
+
 
