@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowDownToLine,
@@ -77,6 +77,25 @@ export default function ReportView({
   onHandoffScan?: () => void;
 }) {
   const [advanced, setAdvanced] = useState(false);
+  const tabsRef = useRef<HTMLDivElement>(null);
+
+  const navigateToTab = (
+    targetTab: "Findings" | "Dependencies" | "Coverage" | "Evidence",
+    options?: { domain?: string; severity?: string },
+  ) => {
+    setTab(targetTab);
+    if (options?.domain !== undefined) {
+      setFilterDomain(options.domain);
+    }
+    if (options?.severity !== undefined) {
+      setFilterSeverity(options.severity);
+    }
+    setTimeout(() => {
+      if (tabsRef.current) {
+        tabsRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }, 60);
+  };
   const [tab, setTab] = useState<
     "Findings" | "Dependencies" | "Coverage" | "Evidence"
   >("Findings");
@@ -493,8 +512,7 @@ export default function ReportView({
               type="button"
               className="summary-jump-btn"
               onClick={() => {
-                setTab("Findings");
-                setFilterSeverity("all");
+                navigateToTab("Findings", { severity: "all" });
               }}
             >
               <span>View findings</span>
@@ -549,8 +567,7 @@ export default function ReportView({
             metricLabel="behavioral findings"
             icon={<FileCode2 size={18} />}
             onClick={() => {
-              setTab("Findings");
-              setFilterDomain("behavioral");
+              navigateToTab("Findings", { domain: "behavioral" });
             }}
           />
 
@@ -586,8 +603,7 @@ export default function ReportView({
             metricLabel="upstream advisories"
             icon={<Network size={18} />}
             onClick={() => {
-              setTab("Findings");
-              setFilterDomain("vulnerabilities");
+              navigateToTab("Findings", { domain: "vulnerabilities" });
             }}
           />
 
@@ -624,7 +640,7 @@ export default function ReportView({
             metric={report.root_integrity?.status || "Local"}
             metricLabel="registry digest status"
             icon={<ShieldCheck size={18} />}
-            onClick={() => setTab("Dependencies")}
+            onClick={() => navigateToTab("Dependencies")}
           />
 
           {/* 4. Source Inspection Coverage */}
@@ -664,7 +680,7 @@ export default function ReportView({
                 : "files analyzed"
             }
             icon={<Package size={18} />}
-            onClick={() => setTab("Coverage")}
+            onClick={() => navigateToTab("Coverage")}
           />
         </div>
       </section>
@@ -673,7 +689,7 @@ export default function ReportView({
       <div className="report-body-layout">
         <div className="report-main-col">
           {/* Navigation Tabs */}
-          <div className="report-tab-nav" role="tablist">
+          <div ref={tabsRef} className="report-tab-nav" role="tablist" id="report-tabs">
             <button
               type="button"
               role="tab"

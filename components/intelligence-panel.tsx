@@ -299,6 +299,29 @@ export default function IntelligencePanel({
     }
   }, [messages.length, busy]);
 
+  // Lock background scroll and pause Lenis when drawer is open
+  useEffect(() => {
+    if (isOpen) {
+      const prevBodyOverflow = document.body.style.overflow;
+      const prevHtmlOverflow = document.documentElement.style.overflow;
+      document.body.style.overflow = "hidden";
+      document.documentElement.style.overflow = "hidden";
+
+      const lenis = (window as any).__lenis;
+      if (lenis && typeof lenis.stop === "function") {
+        lenis.stop();
+      }
+
+      return () => {
+        document.body.style.overflow = prevBodyOverflow;
+        document.documentElement.style.overflow = prevHtmlOverflow;
+        if (lenis && typeof lenis.start === "function") {
+          lenis.start();
+        }
+      };
+    }
+  }, [isOpen]);
+
   // Focus input when opened
   useEffect(() => {
     if (isOpen) {
@@ -470,6 +493,7 @@ export default function IntelligencePanel({
           {/* Overlay for smaller screens */}
           <motion.div
             className="copilot-backdrop"
+            data-lenis-prevent="true"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -478,6 +502,8 @@ export default function IntelligencePanel({
 
           <motion.aside
             className="copilot-panel"
+            data-lenis-prevent="true"
+            onWheel={(e) => e.stopPropagation()}
             initial={{ x: "100%", opacity: 0.5 }}
             animate={{ x: 0, opacity: 1 }}
             exit={{ x: "100%", opacity: 0 }}
@@ -487,66 +513,63 @@ export default function IntelligencePanel({
             {/* Header */}
             <div className="copilot-header">
               <div className="copilot-brand">
-                <div className="copilot-icon-wrap">
+                <motion.div
+                  className="copilot-icon-wrap"
+                  whileHover={{ scale: 1.08, rotate: 6 }}
+                  transition={{ type: "spring", stiffness: 400, damping: 15 }}
+                >
                   <SparklesIcon size={16} className="copilot-spark-icon inline-flex items-center justify-center" />
                   <span className="copilot-pulse" />
-                </div>
+                </motion.div>
                 <div>
                   <h3 className="copilot-title">Guardian Intelligence</h3>
                   <div className="copilot-meta">
-                    <span className={`status-pill pill-${activeProvider}`}>
-                      {activeProvider === "gemini"
-                        ? activeModel
-                        : "Deterministic Engine"}
-                    </span>
-                    <button
+                    <motion.button
                       type="button"
-                      className="privacy-toggle-btn"
+                      className={`status-pill pill-${activeProvider} interactive-pill`}
                       onClick={() => setShowPrivacyBanner((p) => !p)}
-                      title="Privacy & AI consent settings"
+                      whileHover={{ scale: 1.03 }}
+                      whileTap={{ scale: 0.97 }}
+                      title="Click to toggle AI Privacy & Consent settings"
                     >
                       {consent ? (
-                        <ShieldCheck size={12} className="text-emerald" />
+                        <ShieldCheck size={11} className="text-emerald inline-icon" />
                       ) : (
-                        <Shield size={12} />
+                        <Shield size={11} className="inline-icon" />
                       )}
-                      <span>{consent ? "AI Enabled" : "Privacy / Local"}</span>
-                    </button>
+                      <span>
+                        {activeProvider === "gemini" ? activeModel : "Deterministic Engine"}
+                      </span>
+                    </motion.button>
                   </div>
                 </div>
               </div>
 
               <div className="copilot-header-actions">
                 {messages.length > 0 && (
-                  <>
-                    <button
-                      type="button"
-                      className="copilot-tool-btn"
-                      onClick={handleNewConversation}
-                      disabled={busy}
-                      title="Start fresh conversation"
-                    >
-                      <PlusCircle size={15} />
-                    </button>
-                    <button
-                      type="button"
-                      className="copilot-tool-btn"
-                      onClick={handleClearConversation}
-                      disabled={busy}
-                      title="Clear messages"
-                    >
-                      <RotateCcw size={15} />
-                    </button>
-                  </>
+                  <motion.button
+                    type="button"
+                    className="copilot-tool-btn"
+                    onClick={handleNewConversation}
+                    disabled={busy}
+                    whileHover={{ scale: 1.08 }}
+                    whileTap={{ scale: 0.92 }}
+                    title="Start fresh conversation"
+                    aria-label="Start fresh conversation"
+                  >
+                    <RotateCcw size={14} />
+                  </motion.button>
                 )}
-                <button
+                <motion.button
                   type="button"
                   className="copilot-close-btn"
                   onClick={onClose}
+                  whileHover={{ scale: 1.08 }}
+                  whileTap={{ scale: 0.92 }}
                   aria-label="Close Intelligence panel"
                 >
-                  <X size={18} />
-                </button>
+                  <X size={17} />
+                </motion.button>
               </div>
             </div>
 
@@ -592,43 +615,66 @@ export default function IntelligencePanel({
             </AnimatePresence>
 
             {/* Active Context Banner */}
-            {selectedFinding ? (
-              <div className="copilot-context-banner active">
-                <div className="context-banner-content">
-                  <span className="context-tag">Active Context</span>
-                  <div className="context-title-row">
-                    <strong
-                      className="context-title"
-                      title={selectedFinding.title}
-                    >
-                      {selectedFinding.title}
-                    </strong>
-                    <Badge severity={selectedFinding.severity} size="sm" />
+            <AnimatePresence mode="wait">
+              {selectedFinding ? (
+                <motion.div
+                  key={`finding-${selectedFinding.id}`}
+                  initial={{ opacity: 0, y: -4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -4 }}
+                  transition={{ duration: 0.15 }}
+                  className="copilot-context-banner active"
+                >
+                  <div className="context-banner-content">
+                    <span className="context-tag">Active Context</span>
+                    <div className="context-title-row">
+                      <strong
+                        className="context-title"
+                        title={selectedFinding.title}
+                      >
+                        {selectedFinding.title}
+                      </strong>
+                      <Badge severity={selectedFinding.severity} size="sm" />
+                    </div>
                   </div>
-                </div>
-                {onClearSelectedFinding && (
-                  <button
-                    type="button"
-                    className="clear-context-btn"
-                    onClick={onClearSelectedFinding}
-                    title="Clear finding context and ask about entire report"
-                  >
-                    <X size={13} />
-                  </button>
-                )}
-              </div>
-            ) : (
-              <div className="copilot-context-banner report-scope">
-                <span className="context-tag">Scope</span>
-                <span className="context-title">
-                  Entire Report: <strong>{report.name}</strong> (
-                  {report.version})
-                </span>
-              </div>
-            )}
+                  {onClearSelectedFinding && (
+                    <motion.button
+                      type="button"
+                      className="clear-context-btn"
+                      onClick={onClearSelectedFinding}
+                      whileHover={{ scale: 1.1 }}
+                      whileTap={{ scale: 0.9 }}
+                      title="Clear finding context and ask about entire report"
+                    >
+                      <X size={13} />
+                    </motion.button>
+                  )}
+                </motion.div>
+              ) : (
+                <motion.div
+                  key="report-scope"
+                  initial={{ opacity: 0, y: -4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -4 }}
+                  transition={{ duration: 0.15 }}
+                  className="copilot-context-banner report-scope"
+                >
+                  <span className="context-tag">Scope</span>
+                  <span className="context-title">
+                    Entire Report: <strong>{report.name}</strong> (
+                    {report.version})
+                  </span>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
             {/* Conversation Feed */}
-            <div className="copilot-feed" ref={feedRef}>
+            <div
+              className="copilot-feed"
+              ref={feedRef}
+              data-lenis-prevent="true"
+              onWheel={(e) => e.stopPropagation()}
+            >
               {messages.length === 0 ? (
                 <div className="copilot-empty">
                   <div className="copilot-empty-icon">

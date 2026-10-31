@@ -125,6 +125,27 @@ export default function RemediationPanel({
   }
 
   // Initialize consent from localStorage
+  // Lock background scroll and pause Lenis when drawer is open
+  useEffect(() => {
+    const prevBodyOverflow = document.body.style.overflow;
+    const prevHtmlOverflow = document.documentElement.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
+
+    const lenis = (window as any).__lenis;
+    if (lenis && typeof lenis.stop === "function") {
+      lenis.stop();
+    }
+
+    return () => {
+      document.body.style.overflow = prevBodyOverflow;
+      document.documentElement.style.overflow = prevHtmlOverflow;
+      if (lenis && typeof lenis.start === "function") {
+        lenis.start();
+      }
+    };
+  }, []);
+
   useEffect(() => {
     try {
       const stored = localStorage.getItem("guardian_remediation_consent");
@@ -532,6 +553,8 @@ export default function RemediationPanel({
   return (
     <div
       className="remediation-panel-overlay"
+      data-lenis-prevent="true"
+      onWheel={(e) => e.stopPropagation()}
       style={{
         position: "fixed",
         inset: 0,

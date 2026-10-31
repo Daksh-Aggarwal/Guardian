@@ -260,9 +260,11 @@ export default function Home() {
           setJob(null);
           setIsAnalyzing(false);
         } else if (state.status === "cancelled") {
-          setError(state.stage || "Scan was cancelled.");
           setJob(null);
           setIsAnalyzing(false);
+          setTimeout(() => {
+            document.getElementById("new-scan")?.scrollIntoView({ behavior: "smooth", block: "center" });
+          }, 40);
         } else {
           timer = setTimeout(poll, 650);
         }

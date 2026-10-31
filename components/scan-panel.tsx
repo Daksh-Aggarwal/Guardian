@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import {
   UploadCloud,
   FileArchive,
@@ -57,6 +57,43 @@ export default function ScanPanel({
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const STAGES_LIST = [
+    { label: "Ingest", name: "Inspecting input" },
+    { label: "Syntax AST", name: "Analyzing source & dependencies" },
+    { label: "Dependencies", name: "Inspecting dependency sources" },
+    { label: "OSV Intel", name: "Checking vulnerability intelligence" },
+    { label: "Report", name: "Building evidence-backed report" },
+  ];
+
+  const [activeStep, setActiveStep] = useState(0);
+
+  useEffect(() => {
+    if (!busy) {
+      setActiveStep(0);
+      return;
+    }
+
+    // Always start strictly at Step 0, advancing step-by-step without skipping
+    setActiveStep(0);
+    const t1 = setTimeout(() => setActiveStep(1), 600);
+    const t2 = setTimeout(() => setActiveStep(2), 1400);
+    const t3 = setTimeout(() => setActiveStep(3), 2300);
+    const t4 = setTimeout(() => setActiveStep(4), 3300);
+
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(t3);
+      clearTimeout(t4);
+    };
+  }, [busy]);
+
+  useEffect(() => {
+    if (!busy || !job) {
+      setCancelling(false);
+    }
+  }, [busy, job]);
+
   const disabled = busy || sending;
 
   async function submit() {
@@ -300,7 +337,11 @@ export default function ScanPanel({
           <div className="progress-top-row">
             <div className="progress-status-indicator">
               <Loader2 size={16} className="spin text-accent" />
-              <strong>{job.stage}</strong>
+              <strong>
+                {cancelling || job.status === "cancelling"
+                  ? "Cancelling…"
+                  : STAGES_LIST[activeStep]?.name || job.stage}
+              </strong>
             </div>
             <button
               type="button"
@@ -325,50 +366,27 @@ export default function ScanPanel({
           <div className="progress-bar-track">
             <motion.div
               className="progress-bar-fill"
-              initial={{ width: "10%" }}
-              animate={{ width: "95%" }}
-              transition={{ duration: 12, ease: "linear" }}
+              initial={{ width: "6%" }}
+              animate={{ width: `${[6, 25, 50, 75, 100][activeStep]}%` }}
+              transition={{ duration: 0.55, ease: "easeInOut" }}
             />
           </div>
 
           <div className="stages-timeline">
-            {[
-              "Inspecting input",
-              "Analyzing source & dependencies",
-              "Inspecting dependency sources",
-              "Checking vulnerability intelligence",
-              "Building evidence-backed report",
-            ].map((s, i) => {
-              const stagesOrder = [
-                "Queued",
-                "Inspecting input",
-                "Analyzing source & dependencies",
-                "Inspecting dependency sources",
-                "Checking vulnerability intelligence",
-                "Building evidence-backed report",
-              ];
-              const activeIndex = stagesOrder.indexOf(job.stage);
-              const isPast = i < activeIndex;
-              const isCurrent = i === activeIndex - 1;
+            {STAGES_LIST.map((stageItem, i) => {
+              const isPast = i < activeStep;
+              const isCurrent = i === activeStep;
 
               return (
                 <div
-                  key={s}
+                  key={stageItem.label}
                   className={`stage-step ${isPast ? "done" : ""} ${isCurrent ? "active" : ""}`}
                 >
                   <span className="step-circle">
                     {isPast ? <Check size={11} /> : i + 1}
                   </span>
                   <span className="step-label">
-                    {
-                      [
-                        "Ingest",
-                        "Syntax AST",
-                        "Dependencies",
-                        "OSV Intel",
-                        "Report",
-                      ][i]
-                    }
+                    {stageItem.label}
                   </span>
                 </div>
               );
