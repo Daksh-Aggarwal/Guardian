@@ -84,7 +84,7 @@
 Requires Node.js 20.9+ (tested on 26), Python 3.9+ (tested on 3.9.6), and npm. No Docker, database service, account or LLM key required.
 
 ```sh
-cd /Users/daksh/Desktop/Guardian
+cd Guardian
 npm ci --ignore-scripts
 python3 -m venv .venv
 .venv/bin/pip install -r backend/requirements.txt
