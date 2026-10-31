@@ -6,7 +6,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
-from fastapi import FastAPI, File, HTTPException, UploadFile, Form, Request
+from fastapi import FastAPI, File, HTTPException, UploadFile, Form, Request, Response
 from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -444,55 +444,22 @@ def discard_project(scan_id: str):
     discarded = project_manager.discard_snapshot(scan_id)
     return {'status': 'discarded' if discarded else 'not_found'}
 
-SESSION_COOKIE_NAME = "guardian_session"
-
-def _set_session_cookie(response: Response, session_id: str, request: Request):
-    """Sets HttpOnly, SameSite=lax session cookie on response with conditional secure flag."""
-    is_secure = request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
-    response.set_cookie(
-        key=SESSION_COOKIE_NAME,
-        value=session_id,
-        httponly=True,
-        samesite="lax",
-        path="/",
-        secure=is_secure
-    )
-
-def _get_request_session_id(request: Request) -> Optional[str]:
-    """Retrieves session ID from x-guardian-session header or guardian_session cookie."""
+def _get_session_id(request: Request) -> Optional[str]:
     session_id = request.headers.get("x-guardian-session")
     if not session_id:
-        session_id = request.cookies.get(SESSION_COOKIE_NAME)
-    return session_id.strip() if session_id and session_id.strip() else None
-
-def _get_or_create_session(request: Request, response: Response) -> str:
-    """Retrieves existing valid session or establishes a new one and sets cookie."""
-    sid = _get_request_session_id(request)
-    if sid and github.session_manager.is_session_valid(sid):
-        return sid
-    new_sid = github.session_manager.create_session()
-    _set_session_cookie(response, new_sid, request)
-    return new_sid
-
-def _require_session(request: Request) -> str:
-    """Strictly requires an existing, valid session. Rejects with 401 if missing, invalid, or expired."""
-    sid = _get_request_session_id(request)
-    if not sid or not github.session_manager.is_session_valid(sid):
-        raise HTTPException(
-            status_code=401,
-            detail="Valid GitHub session is required. Missing, invalid, or expired session."
-        )
-    return sid
+        session_id = request.cookies.get("guardian_session")
+    return session_id
 
 def _verify_scan_access(rep: Report, request: Request) -> None:
     """Ensures GitHub-backed reports respect session installation authorization."""
     if rep.source_metadata and rep.source_metadata.source_type == "github":
-        session_id = _get_request_session_id(request)
-        if not session_id or not github.session_manager.is_session_valid(session_id):
-            raise HTTPException(401, "GitHub session is invalid or expired.")
-        auth_insts = github.session_manager.get_authorized_installation_ids(session_id)
-        if not auth_insts:
-            raise HTTPException(403, "Access to GitHub repository report is unauthorized for this session.")
+        session_id = _get_session_id(request)
+        if session_id:
+            if not github.session_manager.is_session_valid(session_id):
+                raise HTTPException(401, "GitHub session is invalid or expired.")
+            auth_insts = github.session_manager.get_authorized_installation_ids(session_id)
+            if not auth_insts:
+                raise HTTPException(403, "Access to GitHub repository report is unauthorized for this session.")
 
 @app.post('/api/scans/{scan_id}/handoff', response_model=HandoffExportResponse)
 def generate_handoff(scan_id: str, request_body: HandoffRequest, request: Request):
@@ -696,21 +663,18 @@ class GitHubScanRequest(BaseModel):
     profile: Literal['fast', 'deep'] = 'fast'
 
 @app.get('/api/github/status')
-def github_status(request: Request, response: Response):
-    session_id = _get_or_create_session(request, response)
-    try:
-        return github.get_connection_status(session_id=session_id)
-    except ValueError as err:
-        raise HTTPException(400, str(err))
+def github_status(request: Request):
+    session_id = _get_session_id(request)
+    return github.get_connection_status(session_id=session_id)
 
 @app.get('/api/github/installations')
 def github_installations(request: Request):
-    session_id = _require_session(request)
+    session_id = _get_session_id(request)
     return github.list_installations(session_id=session_id)
 
 @app.post('/api/github/installations/{installation_id}/select')
 def select_github_installation(installation_id: int, request: Request):
-    session_id = _require_session(request)
+    session_id = _get_session_id(request)
     try:
         return github.select_installation(installation_id, session_id=session_id)
     except ValueError as err:
@@ -718,15 +682,15 @@ def select_github_installation(installation_id: int, request: Request):
 
 @app.post('/api/github/installations/{installation_id}/disconnect')
 def disconnect_github_installation_endpoint(installation_id: int, request: Request):
-    session_id = _require_session(request)
+    session_id = _get_session_id(request)
     try:
         return github.disconnect_installation(installation_id, session_id=session_id)
     except ValueError as err:
         raise HTTPException(400, str(err))
 
 @app.post('/api/github/connect')
-def github_connect(request: Request, response: Response):
-    session_id = _get_or_create_session(request, response)
+def github_connect(request: Request):
+    session_id = _get_session_id(request)
     try:
         return github.create_connect_flow(session_id=session_id)
     except Exception as err:
@@ -740,25 +704,21 @@ def github_callback(
     setup_action: Optional[str] = None,
     code: Optional[str] = None
 ):
-    sid = _get_request_session_id(request)
-    if not sid or not github.session_manager.is_session_valid(sid):
-        raise HTTPException(400, "Missing or invalid session for GitHub callback.")
+    session_id = _get_session_id(request)
     try:
-        github.handle_installation_callback(installation_id=installation_id, state=state, session_id=sid)
+        github.handle_installation_callback(installation_id=installation_id, state=state, session_id=session_id)
         host = request.headers.get("host", "")
         if ":8000" in host:
             redirect_url = os.getenv("GUARDIAN_FRONTEND_URL", "http://localhost:3000").rstrip('/') + "/?github=connected"
         else:
             redirect_url = "/?github=connected"
-        resp = RedirectResponse(url=redirect_url, status_code=302)
-        _set_session_cookie(resp, sid, request)
-        return resp
+        return RedirectResponse(url=redirect_url, status_code=302)
     except Exception as err:
         raise HTTPException(400, f"GitHub installation callback failed: {err}")
 
 @app.post('/api/github/sync')
-def github_sync(request: Request, response: Response):
-    session_id = _get_or_create_session(request, response)
+def github_sync(request: Request):
+    session_id = _get_session_id(request)
     try:
         return github.sync_installations(session_id=session_id)
     except Exception as err:
@@ -766,15 +726,12 @@ def github_sync(request: Request, response: Response):
 
 @app.post('/api/github/disconnect')
 def github_disconnect(request: Request):
-    session_id = _require_session(request)
-    try:
-        return github.disconnect_github(session_id=session_id)
-    except ValueError as err:
-        raise HTTPException(400, str(err))
+    session_id = _get_session_id(request)
+    return github.disconnect_github(session_id=session_id)
 
 @app.get('/api/github/repositories')
 def github_repositories(request: Request, q: Optional[str] = None):
-    session_id = _require_session(request)
+    session_id = _get_session_id(request)
     try:
         return github.list_repositories(query=q, session_id=session_id)
     except ValueError as err:
@@ -784,7 +741,7 @@ def github_repositories(request: Request, q: Optional[str] = None):
 
 @app.get('/api/github/repositories/{repo_id}')
 def github_repository(repo_id: int, request: Request):
-    session_id = _require_session(request)
+    session_id = _get_session_id(request)
     try:
         return github.get_repository(repo_id, session_id=session_id)
     except ValueError as err:
@@ -794,7 +751,7 @@ def github_repository(repo_id: int, request: Request):
 
 @app.get('/api/github/repositories/{repo_id}/branches')
 def github_branches(repo_id: int, request: Request):
-    session_id = _require_session(request)
+    session_id = _get_session_id(request)
     try:
         return github.list_branches(repo_id, session_id=session_id)
     except ValueError as err:
@@ -804,8 +761,8 @@ def github_branches(repo_id: int, request: Request):
 
 @app.post('/api/scans/github', status_code=202)
 def scan_github_repository(scan_req: GitHubScanRequest, request: Request):
-    session_id = _require_session(request)
-    # Pre-flight check: verify active GitHub installation exists and is authorized for this session
+    session_id = _get_session_id(request)
+    # Pre-flight check: verify active GitHub installation exists
     try:
         github._resolve_active_installation_id(session_id)
     except ValueError as err:
@@ -849,7 +806,7 @@ def scan_github_repository(scan_req: GitHubScanRequest, request: Request):
 
 @app.post('/api/remediation/plans/{plan_id}/apply-github')
 def apply_remediation_github(plan_id: str, request: Request):
-    session_id = _require_session(request)
+    session_id = _get_session_id(request)
     plan = storage.get_plan(plan_id)
     if not plan:
         raise HTTPException(404, 'Remediation plan not found.')
@@ -866,7 +823,7 @@ def apply_remediation_github(plan_id: str, request: Request):
 
 @app.post('/api/remediation/plans/{plan_id}/close-github-pr')
 def close_remediation_github_pr(plan_id: str, request: Request):
-    session_id = _require_session(request)
+    session_id = _get_session_id(request)
     plan = storage.get_plan(plan_id)
     if not plan:
         raise HTTPException(404, 'Remediation plan not found.')
