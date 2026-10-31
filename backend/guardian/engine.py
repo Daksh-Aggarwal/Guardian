@@ -29,7 +29,7 @@ def typo(name):
     return next((p for p in POPULAR if len(p) >= 4 and (distance(name, p) == 1 or normalized == p)), None)
 
 def analyze(files, limits=None, timeout=20):
-    findings, dependencies, coverage = [], [], []
+    findings, dependencies, coverage, count = [], [], [], 0
     name, version = 'Uploaded project', 'unversioned'
     manifests = sorted((p for p in files if Path(p).name in {'package.json', 'package-lock.json'}), key=lambda p: (len(Path(p).parts), Path(p).name != 'package.json', p))
     for index, path in enumerate(manifests):
@@ -73,12 +73,27 @@ def analyze(files, limits=None, timeout=20):
                     dependencies.append(Dependency(name=dep, version=str(package['version']), direct=dep in direct_names, source=path))
         except (ValueError, TypeError, AttributeError) as error:
             raise ValueError(f'Invalid manifest {path}: {error}')
-    if not manifests:
+    py_manifests = sorted(
+        (p for p in files if Path(p).name in {'requirements.txt', 'pyproject.toml', 'poetry.lock', 'Pipfile', 'Pipfile.lock'}),
+        key=lambda p: (len(Path(p).parts), p)
+    )
+    if py_manifests:
+        from .py_dependencies import parse_python_manifests
+        p_name, p_ver, p_deps, p_findings, p_coverage = parse_python_manifests(files, py_manifests)
+        if name == 'Uploaded project' and p_name:
+            name, version = p_name, p_ver
+        dependencies.extend(p_deps)
+        findings.extend(p_findings)
+        coverage.extend(p_coverage)
+    if not manifests and not py_manifests:
         coverage.append('No npm manifest was found; package identity and dependencies are unknown.')
-    unique = {(d.name, d.version): d for d in dependencies}
+    unique = {(d.name, d.version, getattr(d, 'ecosystem', 'npm')): d for d in dependencies}
     dependencies = list(unique.values())
-    for dep, path in [(name, manifests[0] if manifests else 'project')] + [(d.name, d.source) for d in dependencies]:
+    from .py_engine import typo_pypi
+    for dep, path in [(name, manifests[0] if manifests else (py_manifests[0] if py_manifests else 'project'))] + [(d.name, d.source) for d in dependencies]:
         similar = typo(dep)
+        if not similar:
+            similar = typo_pypi(dep)
         if similar and not any(f.rule == 'TYPO' and f.observed == dep for f in findings):
             findings.append(finding('TYPO', f'Name resembles {similar}', 'Package identity', 'medium', 'low', dep, f'“{dep}” is very close to the name of the popular package “{similar}”. This can also be a coincidence.', 'A mistyped name could install a different author’s package. Similarity alone is not evidence of malicious intent.', 'Confirm the intended package name, publisher, and repository before installation.', [Evidence(file=path, snippet=dep, detail=f'Curated-name comparison with {similar}; edit distance {distance(dep, similar)}')]))
     sources = {p: c for p, c in files.items() if Path(p).suffix in {'.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx'}}
@@ -91,7 +106,15 @@ def analyze(files, limits=None, timeout=20):
             parsed = json.loads(result.stdout)
         except (OSError, ValueError, subprocess.TimeoutExpired):
             coverage.append('JavaScript parser unavailable or resource limit reached. Source behavior analysis is incomplete.')
-    else:
+    py_sources = {p: c for p, c in files.items() if Path(p).suffix in {'.py', '.pyw'}}
+    if py_sources:
+        from .py_engine import analyze_python
+        py_findings, py_coverage, py_count = analyze_python(py_sources, timeout=timeout)
+        findings.extend(py_findings)
+        coverage.extend(py_coverage)
+        count += py_count
+
+    if not sources and not py_sources:
         coverage.append('Manifest-only scan: package source behavior has not been inspected.')
     rules = {
         'credential': ('CREDENTIAL_ACCESS', 'Reads environment or credential information', 'Data access', 'info', 'The source accesses environment variables or references a sensitive file.', 'Applications often use this for configuration. It becomes more concerning if private information is sent elsewhere.', 'Check which values are read and whether the package needs them.'),
@@ -103,7 +126,6 @@ def analyze(files, limits=None, timeout=20):
         'remote': ('REMOTE_PAYLOAD', 'Downloads a payload through a shell', 'Execution', 'medium', 'A child-process command uses curl or wget with a remote URL.', 'The remote content may change and could contain executable code.', 'Verify and pin the remote content; inspect whether it is subsequently executed.'),
         'filesystem': ('FILESYSTEM', 'Reads or writes local files', 'Data access', 'info', 'The source uses a file-system API.', 'File access is ordinary but can expose or modify sensitive files depending on the path.', 'Check the paths and whether access is necessary.'),
     }
-    count = 0
     for item in parsed:
         if item['error']:
             coverage.append(f"Could not parse {item['file']}: {item['error']}")

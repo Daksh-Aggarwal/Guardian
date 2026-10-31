@@ -86,8 +86,9 @@ def run(job_id, loader, source, profile, classification='real', project_id=None,
         stage(job_id, 'Checking vulnerability intelligence')
         query_deps = list(deps)
         if version != 'unversioned':
-            query_deps.append(Dependency(name=name, version=version, source='package.json'))
-        query_deps += [Dependency(name=n.name, version=n.version, direct=n.direct, source=n.location) for n in inspections]
+            eco = 'pypi' if (source == 'pypi registry' or (root_result and root_result.metadata.get('ecosystem') == 'pypi')) else 'npm'
+            query_deps.append(Dependency(name=name, version=version, source='pypi' if eco == 'pypi' else 'package.json', ecosystem=eco))
+        query_deps += [Dependency(name=n.name, version=n.version, direct=n.direct, source=n.location, ecosystem=getattr(n, 'ecosystem', 'npm')) for n in inspections]
         known, intelligence, intel_warnings = check_osv(query_deps)
         if cancel.is_set(): return
         findings += known
@@ -249,11 +250,32 @@ async def upload(files: list[UploadFile] = File(...), profile: Literal["fast", "
 
 @app.post('/api/scans/package', status_code=202)
 def package(request: PackageRequest):
+    if getattr(request, 'ecosystem', 'npm') == 'pypi':
+        from .pypi import PyPISession
+        return submit(
+            lambda: PyPISession(Budget.from_env(request.profile)).retrieve(request.name, request.version),
+            'pypi registry',
+            request.profile,
+            classification='real',
+            project_id=f"pypi:{request.name}"
+        )
     return submit(lambda: RegistrySession(Budget.from_env(request.profile)).retrieve(request.name, request.version), 'npm registry', request.profile, classification='real', project_id=f"pkg:{request.name}")
 
 @app.get('/api/examples')
 def examples():
-    return [{'id':p.name,'name':json.loads((p/'package.json').read_text())['name']} for p in sorted(FIXTURES.iterdir()) if p.is_dir() and (p/'package.json').exists()]
+    result = []
+    for p in sorted(FIXTURES.iterdir()):
+        if not p.is_dir():
+            continue
+        if (p / 'package.json').exists():
+            try:
+                name = json.loads((p / 'package.json').read_text(encoding='utf-8'))['name']
+                result.append({'id': p.name, 'name': name})
+            except Exception:
+                pass
+        elif (p / 'pyproject.toml').exists() or (p / 'requirements.txt').exists():
+            result.append({'id': p.name, 'name': f'{p.name} (PyPI)'})
+    return result
 
 @app.post('/api/scans/example/{example}', status_code=202)
 def example(example: str):

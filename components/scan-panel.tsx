@@ -35,6 +35,7 @@ export default function ScanPanel({
   onConnectFolder?: () => void;
 }) {
   const [tab, setTab] = useState<"upload" | "package" | "github">("upload");
+  const [ecosystem, setEcosystem] = useState<"npm" | "pypi">("npm");
   const [name, setName] = useState("");
   const [version, setVersion] = useState("latest");
   const [profile, setProfile] = useState<"fast" | "deep">("fast");
@@ -55,7 +56,7 @@ export default function ScanPanel({
       if (tab === "upload") {
         if (!files.length) {
           throw new Error(
-            "Choose a project ZIP or npm manifest (package.json / package-lock.json) to inspect.",
+            "Choose a project ZIP or manifest (package.json, requirements.txt, pyproject.toml, poetry.lock) to inspect.",
           );
         }
         const data = new FormData();
@@ -63,7 +64,7 @@ export default function ScanPanel({
         files.forEach((f) => data.append("files", f));
         result = await api("/scans/upload", { method: "POST", body: data });
       } else {
-        if (!name.trim()) throw new Error("Enter an npm package name.");
+        if (!name.trim()) throw new Error(`Enter ${ecosystem === "pypi" ? "a PyPI" : "an npm"} package name.`);
         result = await api("/scans/package", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -71,6 +72,7 @@ export default function ScanPanel({
             name: name.trim(),
             version: version.trim() || "latest",
             profile,
+            ecosystem,
           }),
         });
       }
@@ -107,7 +109,7 @@ export default function ScanPanel({
             execution.
           </p>
         </div>
-        <span className="launchpad-tag">NPM ECOSYSTEM</span>
+        <span className="launchpad-tag">NPM &amp; PYPI ECOSYSTEMS</span>
       </div>
 
       {/* Mode Tabs */}
@@ -251,11 +253,55 @@ export default function ScanPanel({
         </div>
       ) : tab === "package" ? (
         <div className="launchpad-package-area">
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "14px" }}>
+            <span style={{ fontSize: "11px", fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase", color: "var(--muted)" }}>
+              Target Ecosystem:
+            </span>
+            <button
+              type="button"
+              className={`quick-pkg-chip ${ecosystem === "npm" ? "active" : ""}`}
+              style={{
+                cursor: "pointer",
+                padding: "3px 10px",
+                borderRadius: "14px",
+                border: "1px solid " + (ecosystem === "npm" ? "var(--primary)" : "var(--border)"),
+                background: ecosystem === "npm" ? "var(--primary)" : "var(--surface)",
+                color: ecosystem === "npm" ? "#ffffff" : "var(--foreground)",
+                fontWeight: ecosystem === "npm" ? 600 : 400
+              }}
+              onClick={() => {
+                setEcosystem("npm");
+                setName("");
+              }}
+            >
+              npm
+            </button>
+            <button
+              type="button"
+              className={`quick-pkg-chip ${ecosystem === "pypi" ? "active" : ""}`}
+              style={{
+                cursor: "pointer",
+                padding: "3px 10px",
+                borderRadius: "14px",
+                border: "1px solid " + (ecosystem === "pypi" ? "var(--primary)" : "var(--border)"),
+                background: ecosystem === "pypi" ? "var(--primary)" : "var(--surface)",
+                color: ecosystem === "pypi" ? "#ffffff" : "var(--foreground)",
+                fontWeight: ecosystem === "pypi" ? 600 : 400
+              }}
+              onClick={() => {
+                setEcosystem("pypi");
+                setName("");
+              }}
+            >
+              PyPI (Python)
+            </button>
+          </div>
+
           <div className="package-input-grid">
             <div className="package-name-field">
               <label htmlFor="pkg-name-input">
                 Package Name
-                <span className="label-sub">(from npm registry)</span>
+                <span className="label-sub">(from {ecosystem === "pypi" ? "PyPI" : "npm"} registry)</span>
               </label>
               <div className="input-with-icon">
                 <Package size={17} />
@@ -263,7 +309,7 @@ export default function ScanPanel({
                   id="pkg-name-input"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. express, lodash, @babel/core"
+                  placeholder={ecosystem === "pypi" ? "e.g. requests, urllib3, flask, django" : "e.g. express, lodash, @babel/core"}
                   disabled={disabled}
                 />
               </div>
@@ -283,7 +329,7 @@ export default function ScanPanel({
 
           <div className="quick-suggestions-row">
             <span className="suggestions-label">Try:</span>
-            {["express", "lodash", "axios", "cors"].map((pkg) => (
+            {(ecosystem === "pypi" ? ["requests", "urllib3", "flask", "django"] : ["express", "lodash", "axios", "cors"]).map((pkg) => (
               <button
                 key={pkg}
                 type="button"
@@ -300,8 +346,8 @@ export default function ScanPanel({
           </div>
 
           <Note>
-            Guardian fetches and extracts the official published tarball
-            directly from registry.npmjs.org into bounded memory. No lifecycle
+            Guardian fetches and extracts the official published distribution
+            directly from {ecosystem === "pypi" ? "pypi.org / files.pythonhosted.org" : "registry.npmjs.org"} into bounded memory. No lifecycle or setup
             scripts are run.
           </Note>
         </div>

@@ -1013,6 +1013,33 @@ export default function Home() {
                         <span>Suspicious installer</span>
                         <ArrowUpRight size={14} />
                       </button>
+                      <button
+                        type="button"
+                        disabled={!!busy}
+                        onClick={() => runExample("pypi-demo")}
+                        title="Scan Python PyPI project with requirements.txt, pyproject.toml, and Python AST data-flow"
+                      >
+                        <span>PyPI Python</span>
+                        <ArrowUpRight size={14} />
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!!busy}
+                        onClick={() => runExample("pnpm-demo")}
+                        title="Scan project with pnpm-lock.yaml manifest and dependency resolution"
+                      >
+                        <span>pnpm project</span>
+                        <ArrowUpRight size={14} />
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!!busy}
+                        onClick={() => runExample("yarn-demo")}
+                        title="Scan project with modern Yarn Berry yarn.lock manifest"
+                      >
+                        <span>Yarn project</span>
+                        <ArrowUpRight size={14} />
+                      </button>
                     </div>
                   </section>
                 </>

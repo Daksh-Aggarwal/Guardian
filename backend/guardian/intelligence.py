@@ -37,7 +37,7 @@ def check_osv(dependencies):
     try:
         response = httpx.post(
             'https://api.osv.dev/v1/querybatch',
-            json={'queries': [{'package': {'name': d.name, 'ecosystem': 'npm'}, 'version': d.version} for d in submitted]},
+            json={'queries': [{'package': {'name': d.name, 'ecosystem': 'PyPI' if getattr(d, 'ecosystem', '').lower() == 'pypi' else 'npm'}, 'version': d.version} for d in submitted]},
             timeout=12,
             follow_redirects=False
         )
