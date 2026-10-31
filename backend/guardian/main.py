@@ -17,6 +17,7 @@ from .remediation_models import (
     PlanGenerationRequest,
     PlanApprovalRequest,
     PlanAppliedRecord,
+    PlanRevertedRecord,
     VerificationResult,
     VerificationRequest,
     RemediationPlan,
@@ -27,7 +28,7 @@ from .remediation import remediation_planner
 from .limits import RequestSizeLimit
 from .dependencies import RegistrySession, Retrieved, inspect_dependencies
 from .config import Budget
-from typing import Literal
+from typing import Literal, Optional
 
 app = FastAPI(title='Guardian', version='0.1.0')
 app.add_middleware(RequestSizeLimit)
@@ -438,24 +439,48 @@ def get_remediation_plan(plan_id: str):
 
 @app.post('/api/remediation/plans/{plan_id}/approve')
 def approve_remediation_plan(plan_id: str):
-    plan = storage.update_plan_status(plan_id, 'approved')
+    plan = storage.get_plan(plan_id)
     if not plan:
         raise HTTPException(404, 'Remediation plan not found')
+    try:
+        plan = storage.update_plan_status(plan_id, 'approved')
+    except ValueError as err:
+        raise HTTPException(400, str(err))
     return plan
 
 @app.post('/api/remediation/plans/{plan_id}/reject')
 def reject_remediation_plan(plan_id: str):
-    plan = storage.update_plan_status(plan_id, 'rejected')
+    plan = storage.get_plan(plan_id)
     if not plan:
         raise HTTPException(404, 'Remediation plan not found')
+    try:
+        plan = storage.update_plan_status(plan_id, 'rejected')
+    except ValueError as err:
+        raise HTTPException(400, str(err))
     return plan
 
 @app.post('/api/remediation/plans/{plan_id}/applied')
 def mark_plan_applied(plan_id: str, record: PlanAppliedRecord):
-    status = 'applied' if record.success else 'failed'
-    plan = storage.update_plan_status(plan_id, status)
+    plan = storage.get_plan(plan_id)
     if not plan:
         raise HTTPException(404, 'Remediation plan not found')
+    status = 'applied' if record.success else 'failed'
+    try:
+        plan = storage.update_plan_status(plan_id, status)
+    except ValueError as err:
+        raise HTTPException(400, str(err))
+    return plan
+
+@app.post('/api/remediation/plans/{plan_id}/revert')
+@app.post('/api/remediation/plans/{plan_id}/reverted')
+def mark_plan_reverted(plan_id: str, record: Optional[PlanRevertedRecord] = None):
+    plan = storage.get_plan(plan_id)
+    if not plan:
+        raise HTTPException(404, 'Remediation plan not found')
+    try:
+        plan = storage.update_plan_status(plan_id, 'reverted')
+    except ValueError as err:
+        raise HTTPException(400, str(err))
     return plan
 
 @app.post('/api/remediation/plans/{plan_id}/verification')
@@ -470,8 +495,12 @@ def verify_remediation_plan(plan_id: str, req: VerificationRequest):
     if not rescanned_rep:
         raise HTTPException(404, 'Rescanned report not found')
 
+    try:
+        storage.update_plan_status(plan_id, 'verified')
+    except ValueError as err:
+        raise HTTPException(400, str(err))
+
     verification = remediation_planner.verify_plan(plan, orig_rep, rescanned_rep)
-    storage.update_plan_status(plan_id, 'verified')
     storage.save_verification(verification)
     return verification
 

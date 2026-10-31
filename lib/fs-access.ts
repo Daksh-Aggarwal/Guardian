@@ -3,11 +3,11 @@
  * SHA-256 pre-write validation, partial-write rollback, and local undo.
  */
 
-import { RemediationPlan, ProposedFileChange } from "./types";
+import type { RemediationPlan, ProposedFileChange } from "./types";
 import {
   saveRemediationBackup,
   getRemediationBackup,
-  BackupFileEntry,
+  type BackupFileEntry,
 } from "./indexeddb-backup";
 
 export const MAX_PROJECT_FILES = 250;
@@ -481,6 +481,70 @@ export async function undoPlanFromFileSystem(
   }
 
   return { success: true, restoredFiles };
+}
+
+/**
+ * Revalidates all target files against their pre-remediation SHA-256 hashes before reapplication.
+ * Throws a descriptive error explaining which files are stale if any have changed or cannot be read.
+ */
+export async function validatePlanFilesForReapplication(
+  directoryHandle: FileSystemDirectoryHandle,
+  plan: RemediationPlan,
+): Promise<{ valid: boolean; staleFiles: string[] }> {
+  const staleFiles: string[] = [];
+
+  for (const change of plan.proposed_changes) {
+    if (change.operation === "update") {
+      let handle: FileSystemFileHandle;
+      try {
+        handle = await resolveFileHandle(
+          directoryHandle,
+          change.file_path,
+          false,
+        );
+      } catch {
+        staleFiles.push(
+          `'${change.file_path}' (target file not found on disk)`,
+        );
+        continue;
+      }
+
+      try {
+        const file = await handle.getFile();
+        const currentText = await file.text();
+        const currentHash = await computeBrowserSHA256(currentText);
+
+        if (currentHash !== change.original_sha256) {
+          staleFiles.push(
+            `'${change.file_path}' (expected original SHA-256 ${change.original_sha256.substring(0, 10)}..., found ${currentHash.substring(0, 10)}...)`,
+          );
+        }
+      } catch (err) {
+        staleFiles.push(
+          `'${change.file_path}' (could not read file: ${(err as Error).message})`,
+        );
+      }
+    } else if (change.operation === "create") {
+      try {
+        await resolveFileHandle(directoryHandle, change.file_path, false);
+        staleFiles.push(
+          `'${change.file_path}' (file already exists on disk for create operation)`,
+        );
+      } catch {
+        // Expected: file does not exist
+      }
+    }
+  }
+
+  if (staleFiles.length > 0) {
+    throw new Error(
+      `Reapplication refused: ${staleFiles.length} file(s) have changed on disk since the plan was undone:\n` +
+        staleFiles.map((f) => `• ${f}`).join("\n") +
+        `\nAborting reapplication to protect local edits. Please generate a fresh plan.`,
+    );
+  }
+
+  return { valid: true, staleFiles: [] };
 }
 
 /**

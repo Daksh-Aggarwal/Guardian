@@ -3,7 +3,7 @@ import os
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Dict, Set
 from uuid import uuid4
 from .models import Report, ConversationMessage, ConversationSession, FindingCitation
 from .remediation_models import RemediationPlan, VerificationResult
@@ -212,10 +212,30 @@ def get_plans_for_scan(scan_id: str) -> List[RemediationPlan]:
         rows = db.execute('SELECT plan_json FROM remediation_plans WHERE scan_id = ? ORDER BY created_at DESC', (scan_id,)).fetchall()
     return [RemediationPlan.model_validate_json(r[0]) for r in rows]
 
+VALID_STATUS_TRANSITIONS: Dict[str, Set[str]] = {
+    'proposed': {'approved', 'rejected', 'applying', 'applied', 'failed', 'verified'},
+    'approved': {'applying', 'applied', 'failed', 'rejected'},
+    'applying': {'applied', 'failed'},
+    'applied': {'reverted', 'verified', 'failed'},
+    'reverted': {'approved', 'applying', 'applied', 'failed', 'rejected'},
+    'verified': set(),
+    'rejected': set(),
+    'failed': {'approved', 'applying', 'applied'},
+    'stale': set(),
+}
+
+def validate_plan_transition(current_status: str, target_status: str) -> None:
+    allowed = VALID_STATUS_TRANSITIONS.get(current_status, set())
+    if target_status not in allowed:
+        raise ValueError(
+            f"Invalid remediation plan lifecycle transition from '{current_status}' to '{target_status}'."
+        )
+
 def update_plan_status(plan_id: str, status: str) -> Optional[RemediationPlan]:
     plan = get_plan(plan_id)
     if not plan:
         return None
+    validate_plan_transition(plan.status, status)
     plan.status = status
     save_plan(plan)
     return plan

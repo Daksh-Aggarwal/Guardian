@@ -31,9 +31,11 @@ import RemediationPlanView from "./remediation-plan";
 import {
   applyPlanToFileSystem,
   undoPlanFromFileSystem,
+  validatePlanFilesForReapplication,
   downloadPatchFile,
   isFileSystemAccessSupported,
 } from "@/lib/fs-access";
+import { getRemediationBackup } from "@/lib/indexeddb-backup";
 
 export default function RemediationPanel({
   report,
@@ -69,6 +71,20 @@ export default function RemediationPanel({
   );
   const [canUndo, setCanUndo] = useState(false);
   const [confirmApply, setConfirmApply] = useState(false);
+
+  useEffect(() => {
+    if (plan && plan.status === "applied") {
+      getRemediationBackup(plan.plan_id)
+        .then((b) => {
+          if (b && b.files && b.files.length > 0) {
+            setCanUndo(true);
+          }
+        })
+        .catch(() => {});
+    } else {
+      setCanUndo(false);
+    }
+  }, [plan]);
 
   useEffect(() => {
     if (initialDirectoryHandle) {
@@ -213,17 +229,31 @@ export default function RemediationPanel({
     setLoading(true);
     setError(null);
     setActionSuccess(null);
-    setStage("Verifying target file hashes on disk...");
+    setStage("Verifying write permission and target file hashes on disk...");
+
+    const previousStatus = plan.status;
 
     try {
+      if (!handle) {
+        throw new Error("No folder handle available for file application.");
+      }
+
+      // Check / request write permission first
+      if (typeof (handle as any).requestPermission === "function") {
+        const permStatus = await (handle as any).requestPermission({
+          mode: "readwrite",
+        });
+        if (permStatus !== "granted") {
+          throw new Error(
+            "Write permission was denied by the user. Proposed changes were not written to disk.",
+          );
+        }
+      }
+
       // 1. Mark status 'approved' in backend
       await api<RemediationPlan>(`/remediation/plans/${plan.plan_id}/approve`, {
         method: "POST",
       });
-
-      if (!handle) {
-        throw new Error("No folder handle available for file application.");
-      }
 
       // 2. Apply changes through browser handles with pre-check and IndexedDB backup
       setStage("Applying approved modifications & updating local files...");
@@ -251,7 +281,14 @@ export default function RemediationPanel({
       );
     } catch (err) {
       setError((err as Error).message);
-      if (plan) {
+      setConfirmApply(false);
+      if (plan && previousStatus === "reverted") {
+        // Ensure plan is not left in an applied or approved state on reapplication failure
+        await api<RemediationPlan>(
+          `/remediation/plans/${plan.plan_id}/revert`,
+          { method: "POST" },
+        ).catch(() => {});
+      } else if (plan) {
         await api<RemediationPlan>(
           `/remediation/plans/${plan.plan_id}/applied`,
           {
@@ -287,9 +324,55 @@ export default function RemediationPanel({
 
     try {
       const result = await undoPlanFromFileSystem(handle, plan);
+      // ONLY after successful undo on filesystem, update backend plan status
+      const updatedPlan = await api<RemediationPlan>(
+        `/remediation/plans/${plan.plan_id}/revert`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            reverted_at: new Date().toISOString(),
+            restored_files: result.restoredFiles,
+          }),
+        },
+      );
+      setPlan(updatedPlan);
       setCanUndo(false);
+      setConfirmApply(false);
       setActionSuccess(
-        `Successfully restored ${result.restoredFiles.length} file(s) to original state.`,
+        `Successfully restored ${result.restoredFiles.length} file(s) to original state. You can reapply this plan at any time.`,
+      );
+    } catch (err) {
+      // Failed Undo does not mark the plan as reverted
+      setError((err as Error).message);
+    } finally {
+      setLoading(false);
+      setStage("");
+    }
+  }
+
+  // Revalidate target files and initiate reapplication flow
+  async function initiateReapply() {
+    if (!plan) return;
+    let handle = directoryHandle;
+    if (!handle) {
+      handle = await connectFolder();
+      if (!handle) return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setActionSuccess(null);
+    setStage("Revalidating target files against pre-remediation hashes...");
+
+    try {
+      // 1. Revalidate all affected files against the original pre-remediation SHA256 hashes
+      await validatePlanFilesForReapplication(handle, plan);
+
+      // 2. Validation passed! Present the existing diff for review and require explicit approval again
+      setConfirmApply(true);
+      setActionSuccess(
+        "Target files validated on disk. Please review the diff and confirm reapplication.",
       );
     } catch (err) {
       setError((err as Error).message);
@@ -968,7 +1051,9 @@ export default function RemediationPanel({
                         borderColor: "var(--accent-green, #10b981)",
                       }}
                     >
-                      Confirm and apply modifications
+                      {plan.status === "reverted"
+                        ? "Confirm and reapply modifications"
+                        : "Confirm and apply modifications"}
                     </button>
                     <button
                       onClick={() => setConfirmApply(false)}
@@ -1018,21 +1103,34 @@ export default function RemediationPanel({
                 </button>
               </>
             )}
-            {canUndo && directoryHandle && (
+            {plan && plan.status === "reverted" && !confirmApply && (
               <button
-                onClick={undoChanges}
+                onClick={generatePlan}
                 disabled={loading}
                 className="button secondary compact"
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "6px",
-                }}
               >
-                <RotateCcw size={14} />
-                Undo latest changes
+                <RefreshCw size={14} />
+                Regenerate fresh plan
               </button>
             )}
+            {canUndo &&
+              directoryHandle &&
+              plan &&
+              plan.status === "applied" && (
+                <button
+                  onClick={undoChanges}
+                  disabled={loading}
+                  className="button secondary compact"
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                  }}
+                >
+                  <RotateCcw size={14} />
+                  Undo latest changes
+                </button>
+              )}
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
@@ -1049,6 +1147,22 @@ export default function RemediationPanel({
               >
                 <CheckCircle2 size={16} />
                 Approve and apply
+              </button>
+            )}
+
+            {plan && plan.status === "reverted" && !confirmApply && (
+              <button
+                onClick={initiateReapply}
+                disabled={loading}
+                className="button primary"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                }}
+              >
+                <CheckCircle2 size={16} />
+                Reapply existing plan
               </button>
             )}
 

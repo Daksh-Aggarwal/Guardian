@@ -55,6 +55,11 @@ export default function RemediationPlanView({
       bg: "rgba(16, 185, 129, 0.2)",
       color: "#10b981",
     },
+    reverted: {
+      label: "Reverted (Undone)",
+      bg: "rgba(249, 115, 22, 0.15)",
+      color: "#f97316",
+    },
     verified: {
       label: "Verified by Rescan",
       bg: "rgba(16, 185, 129, 0.25)",

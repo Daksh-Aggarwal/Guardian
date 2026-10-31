@@ -243,6 +243,7 @@ export type RemediationPlan = {
     | "rejected"
     | "applying"
     | "applied"
+    | "reverted"
     | "verified"
     | "failed"
     | "stale";
@@ -260,6 +261,11 @@ export type PlanAppliedRecord = {
   modified_files: string[];
   success: boolean;
   error?: string | null;
+};
+
+export type PlanRevertedRecord = {
+  reverted_at?: string;
+  restored_files: string[];
 };
 
 export type VerificationResult = {

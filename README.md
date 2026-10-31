@@ -4,6 +4,10 @@
 
 ## What works
 
+- **Guardian 3.0 Experience Overhaul**:
+  - **Security Command Centre Dashboard**: Workspace overview with real historical metrics (projects inspected, scans requiring attention, dependencies inventoried, critical advisory matches), decoupled 4-dimension posture breakdown, prioritized evidence-grounded next steps, and modernized scan launchpad with file dropzone and multi-stage progress tracking.
+  - **Major Report Redesign**: Adaptive assessment summary that dynamically leads with primary security concerns (vulnerabilities, behavioral signals, or coverage boundaries), 4 independent assessment dimension cards, tabbed report navigation (Findings, Dependencies, Coverage, Evidence & Data Flows), meaningful advisory titles (replacing repetitive generic titles), package-grouped finding exploration without concealing underlying findings, and practical filters.
+  - **Contextual AI Copilot (Guardian Intelligence Drawer)**: Persistent, collapsible right-side drawer sliding in smoothly alongside the report, context-aware of selected findings and reports, dynamic suggested prompts, rich markdown rendering, and clickable citations that highlight and jump to findings in the report.
 - Next.js/React/TypeScript interface with self-hosted Inter, Tailwind CSS, Lucide icons, Framer Motion, responsive layouts and persistent dark-mode preference.
 - Independent security assessments & three-dimensional coverage (Intelligence Engine 2.1.1):
   - Behavioral findings & source coverage (files analyzed, parser boundaries, explicit disclaimers on partial code coverage).

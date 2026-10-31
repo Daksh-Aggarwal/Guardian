@@ -22,6 +22,9 @@ Make software trust decisions understandable and evidence-based. Guardian is an 
 8. Ask contextual questions and receive evidence-grounded answers citing specific findings, using the integrated Guardian Intelligence advisor (Gemini 3.8 Flash or local deterministic engine) with multi-turn continuity and secret redaction.
 9. Run labeled synthetic examples demonstrating benign patterns, sensitive exfiltration, and installer risks.
 10. Connect an existing local project folder via the browser File System Access API, analyze project context (frameworks, runtime, manifests, test runners), generate structured remediation plans with trade-offs and potential risks, inspect interactive unified diffs, approve and apply modifications with automatic IndexedDB rollback backups, safely undo changes, and rescan to deterministically verify finding resolution.
+11. Review the Security Command Centre dashboard to monitor workspace-wide security posture across 4 decoupled dimensions, inspect real historical metrics, and act on evidence-grounded next steps with 1-click report navigation.
+12. Explore redesigned reports with adaptive summaries, package-grouped finding hierarchies, meaningful advisory titles, fixed-version callouts, and dedicated Evidence & Data Flows tabs.
+13. Interact with the collapsible Guardian Intelligence Copilot drawer, asking contextual questions about specific selected findings, with responses citing verified findings that deep-link to report evidence.
 
 ## Core report contract
 

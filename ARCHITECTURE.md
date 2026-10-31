@@ -2,12 +2,13 @@
 
 ## Modules
 
-- `app/`: Next.js App Router page, metadata, typography, theme and responsive styling.
-- `components/scan-panel.tsx`: uploads, package lookups, profile selector (`fast`/`deep`), scan progress track, and safe scan cancellation.
-- `components/report.tsx`: Simple/Advanced mode toggle, independent behavioral verdict, findings, dependencies, coverage, and JSON export.
+- `app/`: Next.js App Router page, metadata, typography, theme, and responsive styling.
+- `components/scan-panel.tsx`: modernized security launchpad, drag-and-drop file chips, package lookup, budget depth selectors, and active multi-stage scan progress.
+- `components/report.tsx`: redesigned report view with adaptive contextual summary, 4D assessment dimension cards, package-grouped finding presentation, evidence tabs, and contextual copilot integration.
+- `components/intelligence-panel.tsx`: persistent, collapsible right-side drawer for Guardian Intelligence with finding context awareness, dynamic prompt suggestions, markdown renderer, and interactive evidence citation links.
 - `components/intelligence.tsx`: independent assessment cards, dependency inspection tree, SRI integrity details, source-to-sink data-flow visualization, and advisory details.
 - `components/explainer.tsx`: contextual question UI and finding citations.
-- `components/ui.tsx`: small shared visual primitives.
+- `components/ui.tsx`: design system primitives (`MetricCard`, `SecurityDimensionCard`, `RecommendedActionCard`, `StatusChip`, `Badge`, `Brand`, `Empty`, `Note`, `SectionHeader`).
 - `lib/types.ts`: typed frontend report and job contracts, HTTP error handling, and API client.
 - `backend/guardian/models.py`: authoritative Pydantic models for findings, evidence, data flows, integrity results, inspections (`InspectionSummary` with reconciled status counts), advisories, reports, and API requests.
 - `backend/guardian/dependencies.py`: modern lockfile graph traversal (`lock_graph`), nearest `node_modules` resolution, bounded `RegistrySession` retrieval, and reconciled dependency accounting across direct/transitive and six mutually exclusive statuses.

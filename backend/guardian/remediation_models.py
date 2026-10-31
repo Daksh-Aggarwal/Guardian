@@ -9,6 +9,7 @@ PlanStatus = Literal[
     'rejected',
     'applying',
     'applied',
+    'reverted',
     'verified',
     'failed',
     'stale'
@@ -62,6 +63,10 @@ class PlanAppliedRecord(BaseModel):
     modified_files: List[str] = Field(default_factory=list)
     success: bool
     error: Optional[str] = None
+
+class PlanRevertedRecord(BaseModel):
+    reverted_at: Optional[str] = None
+    restored_files: List[str] = Field(default_factory=list)
 
 class VerificationResult(BaseModel):
     plan_id: str

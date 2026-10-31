@@ -38,6 +38,9 @@
 - [x] Explicit user approval workflow with Git branch advisories.
 - [x] Browser-side `readwrite` file application with SHA-256 pre-flight checks, automatic IndexedDB rollback backups, partial-write recovery, and safe undo verification.
 - [x] Deterministic rescan & outcome verification comparing pre-remediation and post-remediation security findings.
+- [x] Guardian 3.0 Security Command Centre: Meaningful metrics derived from historical report data, 4D decoupled security posture breakdown, evidence-grounded recommended actions, and modernized security launchpad.
+- [x] Redesigned Report Experience: Adaptive contextual summaries, 4 independent dimension cards, tabbed report navigation (Findings, Dependencies, Coverage, Evidence & Data Flows), meaningful advisory titles, package-grouped finding presentation, and practical multi-dimensional filters.
+- [x] Contextual AI Copilot Drawer (Guardian Intelligence): Collapsible right-side drawer, finding selection context awareness, dynamic prompt suggestions, clickable evidence citations, and seamless markdown rendering.
 
 ## Next priorities
 

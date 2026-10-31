@@ -1,6 +1,7 @@
 "use client";
-import { useState } from "react";
-import { motion } from "framer-motion";
+
+import React, { useState, useMemo } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowLeft,
   ArrowDownToLine,
@@ -14,16 +15,46 @@ import {
   Info,
   Network,
   Wrench,
+  Search,
+  Filter,
+  Sparkles,
+  Layers,
+  GitBranch,
+  ShieldAlert,
+  HelpCircle,
+  Clock,
+  FileText,
+  ExternalLink,
+  SlidersHorizontal,
+  FolderOpen,
 } from "lucide-react";
-import { Report, Finding, Severity } from "@/lib/types";
-import { Badge, Eyebrow, Note, External, Empty } from "./ui";
-import Explainer from "./explainer";
+import {
+  Report,
+  Finding,
+  Severity,
+  Evidence,
+  DataFlow,
+  Advisory,
+} from "@/lib/types";
+import {
+  Badge,
+  Eyebrow,
+  Note,
+  External,
+  Empty,
+  StatusChip,
+  SecurityDimensionCard,
+  SectionHeader,
+} from "./ui";
+import IntelligencePanel from "./intelligence-panel";
 import {
   IntelligenceOverview,
   DependencyInspection,
   FlowEvidence,
   AdvisoryDetails,
+  IntegrityDetails,
 } from "./intelligence";
+
 export default function ReportView({
   report,
   onBack,
@@ -33,62 +64,147 @@ export default function ReportView({
   onBack: () => void;
   onPrepareFix?: (finding: Finding) => void;
 }) {
-  const [advanced, setAdvanced] = useState(false),
-    [tab, setTab] = useState("Findings"),
-    [selected, setSelected] = useState<string | null>(
-      report.findings.find((f) => f.severity !== "info")?.id || null,
-    ),
-    [filter, setFilter] = useState("all");
-  const elevated = report.findings.filter((f) => f.severity !== "info"),
-    behavioralElevated = report.findings.filter(
-      (f) =>
-        (!f.domain || f.domain === "behavior") &&
-        f.rule !== "OSV" &&
-        f.severity !== "info",
-    ),
-    isV2 = report.engine_version === "2",
-    displayElevated = isV2 ? behavioralElevated : elevated,
-    high = report.findings
-      .filter((f) => (!f.domain || f.domain === "behavior") && f.rule !== "OSV")
-      .some((f) => ["high", "critical"].includes(f.severity));
-  const behavioralHeadline =
-    report.assessments?.behavior?.headline ||
-    (displayElevated.length
-      ? report.risk
-      : report.files_analyzed === 0 ||
-          report.assessments?.behavior?.coverage_status === "manifest_only"
-        ? "Behavioral assessment unavailable."
-        : report.assessments?.behavior?.coverage_status === "incomplete"
-          ? "No elevated signals in inspected content."
-          : "No elevated behavioral signals.");
-  const isBehaviorUnavailable =
-    !displayElevated.length &&
-    (behavioralHeadline.includes("unavailable") ||
-      report.files_analyzed === 0 ||
-      report.assessments?.behavior?.coverage_status === "manifest_only");
-  const verdictClass = high
-    ? "concern"
-    : displayElevated.length
-      ? "review"
-      : isBehaviorUnavailable
-        ? "unavailable"
-        : "calm";
-  const visible = report.findings.filter(
-    (f) => filter === "all" || f.severity === filter,
+  const [advanced, setAdvanced] = useState(false);
+  const [tab, setTab] = useState<
+    "Findings" | "Dependencies" | "Coverage" | "Evidence"
+  >("Findings");
+  const [selectedFindingId, setSelectedFindingId] = useState<string | null>(
+    report.findings.find((f) => f.severity !== "info")?.id ||
+      report.findings[0]?.id ||
+      null,
   );
-  function focus(id: string) {
+  const [filterSeverity, setFilterSeverity] = useState<string>("all");
+  const [filterDomain, setFilterDomain] = useState<string>("all");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [groupByPackage, setGroupByPackage] = useState(true);
+  const [copilotOpen, setCopilotOpen] = useState(false);
+  const [copilotFindingId, setCopilotFindingId] = useState<string | null>(null);
+
+  // Findings breakdown
+  const elevatedFindings = report.findings.filter((f) => f.severity !== "info");
+  const criticalFindings = report.findings.filter(
+    (f) => f.severity === "critical",
+  );
+  const highFindings = report.findings.filter((f) => f.severity === "high");
+  const behavioralFindings = report.findings.filter(
+    (f) => (!f.domain || f.domain === "behavior") && f.rule !== "OSV",
+  );
+  const elevatedBehavioral = behavioralFindings.filter(
+    (f) => f.severity !== "info",
+  );
+  const osvFindings = report.findings.filter(
+    (f) => f.rule === "OSV" || f.domain === "vulnerability" || !!f.advisory,
+  );
+  const integrityFindings = report.findings.filter(
+    (f) => f.domain === "integrity",
+  );
+  const dataFlowFindings = report.findings.filter(
+    (f) => f.data_flows && f.data_flows.length > 0,
+  );
+
+  // Adaptive Summary Logic (Evidence-grounded)
+  const summaryMode = useMemo(() => {
+    if (
+      osvFindings.some((f) => ["critical", "high"].includes(f.severity)) &&
+      elevatedBehavioral.length === 0
+    ) {
+      return "vulnerabilities_primary";
+    }
+    if (elevatedBehavioral.length > 0) {
+      return "behavioral_primary";
+    }
+    if (
+      report.files_analyzed === 0 ||
+      report.assessments?.behavior?.coverage_status === "manifest_only"
+    ) {
+      return "manifest_only";
+    }
+    if (
+      report.coverage.some(
+        (c) => c.includes("skipped") || c.includes("incomplete"),
+      )
+    ) {
+      return "coverage_limited";
+    }
+    if (elevatedFindings.length > 0) {
+      return "mixed_elevated";
+    }
+    return "clean";
+  }, [osvFindings, elevatedBehavioral, report]);
+
+  // Selected finding object
+  const activeFinding = useMemo(
+    () => report.findings.find((f) => f.id === selectedFindingId) || null,
+    [report.findings, selectedFindingId],
+  );
+
+  const copilotActiveFinding = useMemo(
+    () => report.findings.find((f) => f.id === copilotFindingId) || null,
+    [report.findings, copilotFindingId],
+  );
+
+  // Filtered findings
+  const visibleFindings = useMemo(() => {
+    return report.findings.filter((f) => {
+      if (filterSeverity !== "all" && f.severity !== filterSeverity)
+        return false;
+      if (
+        filterDomain === "behavioral" &&
+        (f.rule === "OSV" || f.domain === "integrity")
+      )
+        return false;
+      if (filterDomain === "vulnerabilities" && f.rule !== "OSV" && !f.advisory)
+        return false;
+      if (filterDomain === "integrity" && f.domain !== "integrity")
+        return false;
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const displayTitle = f.advisory?.summary || f.title;
+        const matchTitle = displayTitle.toLowerCase().includes(q);
+        const matchRule = f.rule.toLowerCase().includes(q);
+        const matchPkg = (f.package || "").toLowerCase().includes(q);
+        const matchAdv = (f.advisory?.id || "").toLowerCase().includes(q);
+        const matchExp = f.explanation.toLowerCase().includes(q);
+        if (!matchTitle && !matchRule && !matchPkg && !matchAdv && !matchExp)
+          return false;
+      }
+      return true;
+    });
+  }, [report.findings, filterSeverity, filterDomain, searchQuery]);
+
+  // Group findings by package
+  const groupedFindings = useMemo(() => {
+    const groups: Record<string, Finding[]> = {};
+    for (const f of visibleFindings) {
+      const pkgKey =
+        f.package ||
+        (f.rule === "OSV" && f.advisory
+          ? "Dependencies (OSV)"
+          : "Root Project Source");
+      if (!groups[pkgKey]) groups[pkgKey] = [];
+      groups[pkgKey].push(f);
+    }
+    return groups;
+  }, [visibleFindings]);
+
+  function focusFinding(id: string) {
     setTab("Findings");
-    setSelected(id);
-    setFilter("all");
-    setTimeout(
-      () =>
-        document
-          .getElementById("finding-" + id)
-          ?.scrollIntoView({ behavior: "smooth", block: "center" }),
-      100,
-    );
+    setSelectedFindingId(id);
+    setTimeout(() => {
+      document.getElementById("finding-" + id)?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    }, 100);
   }
-  function download() {
+
+  function openCopilotForFinding(finding: Finding) {
+    setSelectedFindingId(finding.id);
+    setCopilotFindingId(finding.id);
+    setCopilotOpen(true);
+  }
+
+  function downloadReport() {
     const url = URL.createObjectURL(
       new Blob([JSON.stringify(report, null, 2)], { type: "application/json" }),
     );
@@ -98,570 +214,1127 @@ export default function ReportView({
     a.click();
     URL.revokeObjectURL(url);
   }
+
   return (
-    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
-      <div className="report-top">
-        <button className="back-button" onClick={onBack}>
-          <ArrowLeft size={15} />
-          All scans
-        </button>
-        <button className="button secondary compact" onClick={download}>
-          <ArrowDownToLine size={15} />
-          Export JSON
-        </button>
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.25 }}
+      className="report-view-container"
+    >
+      {/* Top action bar */}
+      <div className="report-action-bar">
+        <div className="report-action-left">
+          <button
+            type="button"
+            className="btn-secondary-subtle"
+            onClick={onBack}
+          >
+            <ArrowLeft size={15} />
+            <span>All scans</span>
+          </button>
+          <span className="breadcrumb-divider">/</span>
+          <span className="report-package-tag">{report.name}</span>
+          <span className="report-version-badge">v{report.version}</span>
+        </div>
+
+        <div className="report-action-right">
+          <button
+            type="button"
+            className="copilot-toggle-btn"
+            onClick={() => {
+              setCopilotFindingId(selectedFindingId);
+              setCopilotOpen((prev) => !prev);
+            }}
+          >
+            <Sparkles size={15} className="copilot-spark" />
+            <span>Guardian Intelligence</span>
+            <span className="ai-status-pulse" />
+          </button>
+
+          <button
+            type="button"
+            className="btn-secondary-subtle"
+            onClick={downloadReport}
+            title="Export raw JSON report"
+          >
+            <ArrowDownToLine size={14} />
+            <span>Export JSON</span>
+          </button>
+
+          {/* Simple vs Advanced mode selector */}
+          <div
+            className="mode-toggle-pill"
+            role="group"
+            aria-label="Report detail level"
+          >
+            <button
+              type="button"
+              className={!advanced ? "active" : ""}
+              onClick={() => setAdvanced(false)}
+            >
+              Simple
+            </button>
+            <button
+              type="button"
+              className={advanced ? "active" : ""}
+              onClick={() => setAdvanced(true)}
+            >
+              Advanced
+            </button>
+          </div>
+        </div>
       </div>
-      <div className="page-heading">
-        <div>
-          <Eyebrow>PACKAGE INTELLIGENCE / SCAN REPORT</Eyebrow>
-          <h1>
+
+      {/* Main Report Header */}
+      <header className="report-main-header">
+        <div className="report-title-area">
+          <Eyebrow>SECURITY ASSESSMENT REPORT</Eyebrow>
+          <h1 className="report-title">
             {report.name}
-            <span className="version">{report.version}</span>
+            <span className="version-chip">{report.version}</span>
           </h1>
-          <p>
-            {new Date(report.created_at).toLocaleString()}
-            <span className="separator">/</span>
-            {report.source}
-            <span className="separator">/</span>
-            {(report.duration_ms / 1000).toFixed(1)}s
-          </p>
+          <div className="report-meta-strip">
+            <span className="meta-item">
+              <Clock size={13} />
+              {new Date(report.created_at).toLocaleString()}
+            </span>
+            <span className="meta-separator">·</span>
+            <span className="meta-item">
+              <Package size={13} />
+              {report.source}
+            </span>
+            <span className="meta-separator">·</span>
+            <span className="meta-item">
+              <FileCode2 size={13} />
+              {report.files_analyzed} source{" "}
+              {report.files_analyzed === 1 ? "file" : "files"}
+            </span>
+            <span className="meta-separator">·</span>
+            <span className="meta-item">
+              <Network size={13} />
+              {report.dependencies.length}{" "}
+              {report.dependencies.length === 1 ? "dependency" : "dependencies"}
+            </span>
+            <span className="meta-separator">·</span>
+            <span className="meta-item duration">
+              {(report.duration_ms / 1000).toFixed(1)}s elapsed
+            </span>
+          </div>
         </div>
-        <div className="mode-switch" aria-label="Report mode">
-          <button
-            aria-pressed={!advanced}
-            className={!advanced ? "active" : ""}
-            onClick={() => setAdvanced(false)}
-          >
-            Simple
-          </button>
-          <button
-            aria-pressed={advanced}
-            className={advanced ? "active" : ""}
-            onClick={() => setAdvanced(true)}
-          >
-            Advanced
-          </button>
-        </div>
-      </div>
-      <section className={`verdict ${verdictClass}`}>
-        <div className="verdict-symbol">
-          {displayElevated.length ? (
-            <AlertTriangle size={29} />
-          ) : isBehaviorUnavailable ? (
-            <Info size={29} />
+      </header>
+
+      {/* Adaptive Assessment Summary Banner */}
+      <section className={`adaptive-summary-banner banner-${summaryMode}`}>
+        <div className="summary-symbol-wrap">
+          {summaryMode === "clean" ? (
+            <ShieldCheck size={32} strokeWidth={1.75} />
+          ) : summaryMode === "manifest_only" ? (
+            <Info size={32} strokeWidth={1.75} />
           ) : (
-            <ShieldCheck size={29} />
+            <AlertTriangle size={32} strokeWidth={1.75} />
           )}
         </div>
-        <div>
-          <Eyebrow>
-            {isV2 ? "BEHAVIORAL ASSESSMENT" : "OVERALL ASSESSMENT"}
-          </Eyebrow>
-          <h2>{isV2 ? behavioralHeadline : report.risk}</h2>
-          <p>{report.rationale}</p>
-        </div>
-        <div className="verdict-count">
-          <strong>{displayElevated.length}</strong>
-          <span>
-            {isV2
-              ? displayElevated.length === 1
-                ? "behavioral signal"
-                : "behavioral signals"
-              : displayElevated.length === 1
-                ? "signal to review"
-                : "signals to review"}
+
+        <div className="summary-content">
+          <span className="summary-kicker">
+            {summaryMode === "vulnerabilities_primary"
+              ? "ADVISORY MATCHES IN DEPENDENCIES"
+              : summaryMode === "behavioral_primary"
+                ? "BEHAVIORAL SIGNALS DETECTED"
+                : summaryMode === "manifest_only"
+                  ? "MANIFEST INSPECTION ONLY"
+                  : summaryMode === "coverage_limited"
+                    ? "INSPECTION BOUNDARIES IDENTIFIED"
+                    : "VERIFIED SCAN ASSESSMENT"}
           </span>
+
+          <h2 className="summary-headline">
+            {summaryMode === "vulnerabilities_primary"
+              ? `${osvFindings.length} Known ${osvFindings.length === 1 ? "Vulnerability" : "Vulnerabilities"} in Resolved Dependencies`
+              : summaryMode === "behavioral_primary"
+                ? report.risk ||
+                  "Elevated Behavioral Signals Require Investigation"
+                : summaryMode === "manifest_only"
+                  ? "Package Source Uninspected · Manifest & OSV Intelligence Checked"
+                  : summaryMode === "coverage_limited"
+                    ? "Partial Source Coverage · Review Inspection Limitations"
+                    : "No Elevated Signals Identified in Inspected Content"}
+          </h2>
+
+          <p className="summary-rationale">
+            {summaryMode === "vulnerabilities_primary"
+              ? `Guardian cross-referenced declared packages against the OSV vulnerability database. ${criticalFindings.length > 0 ? `${criticalFindings.length} critical and ` : ""}${highFindings.length > 0 ? `${highFindings.length} high priority ` : ""}advisories apply to resolved versions. Inspected source code showed no separate behavioral exfiltration patterns.`
+              : summaryMode === "behavioral_primary"
+                ? report.rationale ||
+                  "Static syntax inspection observed code patterns that warrant review before this package is executed or deployed in production."
+                : summaryMode === "manifest_only"
+                  ? "No source code files were included or analyzed in this input. Manifest dependencies were inventoried and checked against OSV intelligence, but internal runtime behavior cannot be assessed."
+                  : summaryMode === "coverage_limited"
+                    ? report.rationale ||
+                      "Certain dependencies or source files were skipped or could not be retrieved. Review the coverage section to understand what was inspected versus uninspected."
+                    : "Guardian inspected all included files and dependency manifests with bounded AST static analysis. No known malicious exfiltration signatures, suspicious child processes, or advisory matches were identified."}
+          </p>
+
+          <div className="summary-disclaimer">
+            <Info size={13} />
+            <span>
+              {summaryMode === "clean"
+                ? "Static analysis assesses available evidence; no automated security tool can certify software as absolutely safe."
+                : "Findings reflect static observations and advisory records. Inspect the evidence trail before deciding to install or deploy."}
+            </span>
+          </div>
+        </div>
+
+        <div className="summary-stats-box">
+          <div className="summary-stat-count">
+            <strong>{elevatedFindings.length}</strong>
+            <span>
+              {elevatedFindings.length === 1
+                ? "Finding to review"
+                : "Findings to review"}
+            </span>
+          </div>
+          {elevatedFindings.length > 0 && (
+            <button
+              type="button"
+              className="summary-jump-btn"
+              onClick={() => {
+                setTab("Findings");
+                setFilterSeverity("all");
+              }}
+            >
+              <span>View findings</span>
+              <ChevronRight size={13} />
+            </button>
+          )}
         </div>
       </section>
-      <IntelligenceOverview report={report} />
-      <div className="report-stats">
-        <div>
-          <FileCode2 size={19} />
-          <span>
-            <strong>{report.files_analyzed}</strong> source files inspected
-          </span>
+
+      {/* 4 Independent Assessment Dimension Cards */}
+      <section className="dimensions-section">
+        <div className="dimension-grid">
+          {/* 1. Behavioral Assessment */}
+          <SecurityDimensionCard
+            title="Behavioral Assessment"
+            domain="CODE BEHAVIOR"
+            status={
+              elevatedBehavioral.length > 0
+                ? "Signals detected"
+                : report.files_analyzed === 0
+                  ? "Unavailable"
+                  : "Clean"
+            }
+            statusTone={
+              elevatedBehavioral.some((f) =>
+                ["critical", "high"].includes(f.severity),
+              )
+                ? "danger"
+                : elevatedBehavioral.length > 0
+                  ? "warning"
+                  : report.files_analyzed === 0
+                    ? "purple"
+                    : "success"
+            }
+            headline={
+              elevatedBehavioral.length > 0
+                ? `${elevatedBehavioral.length} behavioral ${elevatedBehavioral.length === 1 ? "signal" : "signals"}`
+                : report.files_analyzed === 0
+                  ? "Source code uninspected"
+                  : "No suspicious behaviors"
+            }
+            description={
+              report.files_analyzed === 0
+                ? "Manifest-only scan: no JavaScript/TypeScript syntax trees analyzed."
+                : advanced
+                  ? `Analyzed ${report.files_analyzed} files under Babel AST for process execution, network sinks, and credential reads.`
+                  : elevatedBehavioral.length > 0
+                    ? "Suspicious runtime patterns like sensitive data access or shell commands detected."
+                    : "Direct AST inspection found no credential exfiltration, shell spawning, or dynamic code execution."
+            }
+            metric={elevatedBehavioral.length}
+            metricLabel="behavioral findings"
+            icon={<FileCode2 size={18} />}
+            onClick={() => {
+              setTab("Findings");
+              setFilterDomain("behavioral");
+            }}
+          />
+
+          {/* 2. Known Vulnerabilities (OSV) */}
+          <SecurityDimensionCard
+            title="Known Vulnerabilities"
+            domain="OSV DATABASE"
+            status={
+              osvFindings.length > 0
+                ? "Advisories present"
+                : report.intelligence === "checked"
+                  ? "Checked"
+                  : report.intelligence
+            }
+            statusTone={
+              osvFindings.some((f) => ["critical", "high"].includes(f.severity))
+                ? "danger"
+                : osvFindings.length > 0
+                  ? "warning"
+                  : "success"
+            }
+            headline={
+              osvFindings.length > 0
+                ? `${osvFindings.length} advisory ${osvFindings.length === 1 ? "match" : "matches"}`
+                : "No known vulnerabilities"
+            }
+            description={
+              osvFindings.length > 0
+                ? `${osvFindings.filter((f) => f.severity === "critical").length} critical, ${osvFindings.filter((f) => f.severity === "high").length} high priority vulnerabilities found in resolved dependency versions.`
+                : `Queried the OSV advisory database against ${report.dependencies.length} declared dependency versions.`
+            }
+            metric={osvFindings.length}
+            metricLabel="upstream advisories"
+            icon={<Network size={18} />}
+            onClick={() => {
+              setTab("Findings");
+              setFilterDomain("vulnerabilities");
+            }}
+          />
+
+          {/* 3. Package Integrity */}
+          <SecurityDimensionCard
+            title="Package Integrity"
+            domain="CHECKSUM VERIFICATION"
+            status={
+              integrityFindings.length > 0
+                ? "Integrity concern"
+                : report.root_integrity?.status === "verified"
+                  ? "Verified"
+                  : report.root_integrity?.status || "Not applicable"
+            }
+            statusTone={
+              integrityFindings.length > 0
+                ? "danger"
+                : report.root_integrity?.status === "verified"
+                  ? "success"
+                  : "neutral"
+            }
+            headline={
+              integrityFindings.length > 0
+                ? `${integrityFindings.length} checksum mismatches`
+                : report.root_integrity?.status === "verified"
+                  ? "Registry checksum verified"
+                  : "Integrity verified or local"
+            }
+            description={
+              report.root_integrity
+                ? `Published SHA-512 / SHA-256 digest matches registry metadata. (Notice: Checksums establish byte consistency, never software safety.)`
+                : "No remote npm tarballs downloaded; project files evaluated in bounded local memory."
+            }
+            metric={report.root_integrity?.status || "Local"}
+            metricLabel="registry digest status"
+            icon={<ShieldCheck size={18} />}
+            onClick={() => setTab("Dependencies")}
+          />
+
+          {/* 4. Source Inspection Coverage */}
+          <SecurityDimensionCard
+            title="Inspection Coverage"
+            domain="ANALYSIS BOUNDARIES"
+            status={
+              report.assessments?.inspection?.status ||
+              (report.files_analyzed > 0 ? "Complete" : "Manifest only")
+            }
+            statusTone={
+              report.assessments?.inspection?.status === "incomplete" ||
+              report.coverage.some((c) => c.includes("skipped"))
+                ? "warning"
+                : report.files_analyzed === 0
+                  ? "purple"
+                  : "success"
+            }
+            headline={
+              report.inspection_summary
+                ? `${report.inspection_summary.inspected} / ${report.inspection_summary.total} dependencies inspected`
+                : `${report.files_analyzed} source files inspected`
+            }
+            description={
+              report.inspection_summary
+                ? `${report.inspection_summary.skipped || 0} skipped by budget profile, ${report.inspection_summary.unavailable || 0} unavailable.`
+                : "Deep syntax analysis executed under bounded recursion without executing untrusted code."
+            }
+            metric={
+              report.inspection_summary
+                ? `${report.inspection_summary.inspected}/${report.inspection_summary.total}`
+                : `${report.files_analyzed}`
+            }
+            metricLabel={
+              report.inspection_summary
+                ? "inspected dependencies"
+                : "files analyzed"
+            }
+            icon={<Package size={18} />}
+            onClick={() => setTab("Coverage")}
+          />
         </div>
-        <div>
-          <Package size={19} />
-          <span>
-            <strong>{report.dependencies.length}</strong> dependency versions
-          </span>
-        </div>
-        <div>
-          <Network size={19} />
-          <span>
-            OSV intelligence <strong>{report.intelligence}</strong>
-          </span>
-        </div>
-      </div>
-      <div className="report-layout">
-        <div>
-          <div className="report-tabs">
-            {["Findings", "Dependencies", "Coverage"].map((t) => (
+      </section>
+
+      {/* Main Content Area: Tabs + Aside */}
+      <div className="report-body-layout">
+        <div className="report-main-col">
+          {/* Navigation Tabs */}
+          <div className="report-tab-nav" role="tablist">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === "Findings"}
+              className={`report-tab-btn ${tab === "Findings" ? "active" : ""}`}
+              onClick={() => setTab("Findings")}
+            >
+              <span>Findings</span>
+              <span className="tab-badge">{report.findings.length}</span>
+            </button>
+
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === "Dependencies"}
+              className={`report-tab-btn ${tab === "Dependencies" ? "active" : ""}`}
+              onClick={() => setTab("Dependencies")}
+            >
+              <span>Dependencies</span>
+              <span className="tab-badge">{report.dependencies.length}</span>
+            </button>
+
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === "Coverage"}
+              className={`report-tab-btn ${tab === "Coverage" ? "active" : ""}`}
+              onClick={() => setTab("Coverage")}
+            >
+              <span>Inspection Coverage</span>
+              <span className="tab-badge">{report.coverage.length}</span>
+            </button>
+
+            {dataFlowFindings.length > 0 && (
               <button
-                className={tab === t ? "active" : ""}
-                key={t}
-                onClick={() => setTab(t)}
+                type="button"
+                role="tab"
+                aria-selected={tab === "Evidence"}
+                className={`report-tab-btn ${tab === "Evidence" ? "active" : ""}`}
+                onClick={() => setTab("Evidence")}
               >
-                {t}
-                <span>
-                  {t === "Findings"
-                    ? report.findings.length
-                    : t === "Dependencies"
-                      ? report.dependencies.length
-                      : report.coverage.length}
+                <span>Evidence & Data Flows</span>
+                <span className="tab-badge special">
+                  {dataFlowFindings.length}
                 </span>
               </button>
-            ))}
+            )}
           </div>
+
+          {/* TAB 1: FINDINGS */}
           {tab === "Findings" && (
-            <>
-              <div className="filter-row">
-                <span>
-                  {advanced
-                    ? "Technical evidence & detection rules"
-                    : "What Guardian found"}
-                </span>
-                <select
-                  aria-label="Filter by severity"
-                  value={filter}
-                  onChange={(e) => setFilter(e.target.value)}
-                >
-                  <option value="all">All severities</option>
-                  {["critical", "high", "medium", "low", "info"].map((s) => (
-                    <option key={s} value={s}>
-                      {s === "info" ? "Observations" : s}
+            <div className="tab-findings-content">
+              {/* Filter and search bar */}
+              <div className="findings-toolbar">
+                <div className="findings-search-wrap">
+                  <Search size={14} className="search-icon" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Filter by title, package, advisory ID, or rule…"
+                    aria-label="Filter findings"
+                    className="findings-search-input"
+                  />
+                  {searchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setSearchQuery("")}
+                      className="search-clear-btn"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+
+                <div className="findings-filter-controls">
+                  <select
+                    value={filterSeverity}
+                    onChange={(e) => setFilterSeverity(e.target.value)}
+                    aria-label="Filter by severity"
+                    className="filter-select"
+                  >
+                    <option value="all">All Severities</option>
+                    <option value="critical">Critical</option>
+                    <option value="high">High</option>
+                    <option value="medium">Medium</option>
+                    <option value="low">Low</option>
+                    <option value="info">Observations</option>
+                  </select>
+
+                  <select
+                    value={filterDomain}
+                    onChange={(e) => setFilterDomain(e.target.value)}
+                    aria-label="Filter by domain"
+                    className="filter-select"
+                  >
+                    <option value="all">All Categories</option>
+                    <option value="behavioral">Behavioral Signals</option>
+                    <option value="vulnerabilities">
+                      Known Advisories (OSV)
                     </option>
-                  ))}
-                </select>
+                    <option value="integrity">Package Integrity</option>
+                  </select>
+
+                  <button
+                    type="button"
+                    className={`group-toggle-btn ${groupByPackage ? "active" : ""}`}
+                    onClick={() => setGroupByPackage((prev) => !prev)}
+                    title="Group related findings by package"
+                  >
+                    <Layers size={14} />
+                    <span>Group by package</span>
+                  </button>
+                </div>
               </div>
-              {!visible.length ? (
-                <Empty title="No findings in this view">
-                  Review scan coverage before making a trust decision.
+
+              {/* Findings Count Summary */}
+              <div className="findings-results-meta">
+                <span>
+                  Showing <strong>{visibleFindings.length}</strong> of{" "}
+                  <strong>{report.findings.length}</strong> recorded findings
+                </span>
+                {(filterSeverity !== "all" ||
+                  filterDomain !== "all" ||
+                  searchQuery) && (
+                  <button
+                    type="button"
+                    className="reset-filters-btn"
+                    onClick={() => {
+                      setFilterSeverity("all");
+                      setFilterDomain("all");
+                      setSearchQuery("");
+                    }}
+                  >
+                    Reset filters
+                  </button>
+                )}
+              </div>
+
+              {visibleFindings.length === 0 ? (
+                <Empty title="No matching findings in this view">
+                  Try adjusting the severity or category filter, or check scan
+                  coverage.
                 </Empty>
+              ) : groupByPackage ? (
+                /* Grouped by Package View */
+                <div className="findings-grouped-container">
+                  {Object.entries(groupedFindings).map(
+                    ([pkgName, pkgFindings]) => (
+                      <PackageFindingsGroup
+                        key={pkgName}
+                        packageName={pkgName}
+                        findings={pkgFindings}
+                        selectedId={selectedFindingId}
+                        onSelectFinding={setSelectedFindingId}
+                        onAskCopilot={openCopilotForFinding}
+                        onPrepareFix={onPrepareFix}
+                        advanced={advanced}
+                      />
+                    ),
+                  )}
+                </div>
               ) : (
-                <div className="finding-list">
-                  {visible.map((f) => (
-                    <FindingRow
+                /* Flat List View */
+                <div className="findings-flat-list">
+                  {visibleFindings.map((f) => (
+                    <FindingItemCard
                       key={f.id}
                       finding={f}
-                      advanced={advanced}
-                      open={selected === f.id}
+                      isOpen={selectedFindingId === f.id}
                       onToggle={() =>
-                        setSelected(selected === f.id ? null : f.id)
+                        setSelectedFindingId(
+                          selectedFindingId === f.id ? null : f.id,
+                        )
                       }
+                      onAskCopilot={() => openCopilotForFinding(f)}
                       onPrepareFix={onPrepareFix}
+                      advanced={advanced}
                     />
                   ))}
                 </div>
               )}
-            </>
+            </div>
           )}
-          {tab === "Dependencies" && report.engine_version === "2" && (
-            <DependencyInspection report={report} advanced={advanced} />
-          )}
-          {tab === "Dependencies" && report.engine_version !== "2" && (
-            <div className="card dependency-card">
-              <h3>Dependency inventory</h3>
-              <p>
-                Declared ranges and resolved versions from included manifests.
-              </p>
-              {!report.dependencies.length ? (
-                <Empty title="No dependencies found">
-                  This input does not declare dependency versions.
-                </Empty>
+
+          {/* TAB 2: DEPENDENCIES */}
+          {tab === "Dependencies" && (
+            <div className="tab-dependencies-content">
+              {report.engine_version === "2" ? (
+                <DependencyInspection report={report} advanced={advanced} />
               ) : (
-                <div className="dependency-table">
-                  {report.dependencies.map((d, i) => (
-                    <div key={d.name + d.version + i}>
-                      <Package size={16} />
-                      <strong>{d.name}</strong>
-                      <code>{d.version}</code>
-                      <span>
-                        {d.direct ? "Direct" : "Transitive / lockfile"}
-                      </span>
+                <div className="card dependency-card">
+                  <SectionHeader
+                    title="Dependency Inventory"
+                    description="Declared ranges and resolved versions from included manifests."
+                  />
+                  {!report.dependencies.length ? (
+                    <Empty title="No dependencies found">
+                      This input does not declare external dependency versions.
+                    </Empty>
+                  ) : (
+                    <div className="dependency-table">
+                      {report.dependencies.map((d, i) => (
+                        <div
+                          key={d.name + d.version + i}
+                          className="dependency-row"
+                        >
+                          <Package size={16} />
+                          <strong>{d.name}</strong>
+                          <code>{d.version}</code>
+                          <span className="status-chip neutral">
+                            {d.direct ? "Direct" : "Transitive / lockfile"}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <Note>
+                    Dependency source is not fetched recursively.
+                    Known-vulnerability checks require exact versions.
+                  </Note>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* TAB 3: COVERAGE */}
+          {tab === "Coverage" && (
+            <div className="tab-coverage-content">
+              <div className="card coverage-main-card">
+                <SectionHeader
+                  eyebrow="TRANSPARENCY BY DESIGN"
+                  title="What This Scan Can & Cannot Prove"
+                  description="Explicit inspection boundaries and coverage guarantees are integral to the assessment, never hidden fine print."
+                />
+
+                <div className="coverage-dimensions-stack">
+                  <div className="coverage-box">
+                    <div className="coverage-box-header">
+                      <div className="coverage-box-title">
+                        <FileCode2 size={16} />
+                        <strong>Source & Behavioral Inspection</strong>
+                      </div>
+                      <StatusChip
+                        status={
+                          report.assessments?.behavior?.coverage_status ||
+                          "complete"
+                        }
+                      />
+                    </div>
+                    <p>
+                      {advanced
+                        ? `${report.files_analyzed} source files inspected via Node.js Babel AST with maximum call depth 8 and module limit 100. Status: ${report.assessments?.behavior?.coverage_status || "complete"}.`
+                        : report.files_analyzed > 0
+                          ? `Guardian directly parsed ${report.files_analyzed} source files for behavioral indicators like private token access, child process execution, and outbound network sinks.`
+                          : "Manifest-only scan: no package source code was analyzed."}
+                    </p>
+                  </div>
+
+                  <div className="coverage-box">
+                    <div className="coverage-box-header">
+                      <div className="coverage-box-title">
+                        <Package size={16} />
+                        <strong>
+                          Dependency Resolution & Source Retrieval
+                        </strong>
+                      </div>
+                      <StatusChip
+                        status={
+                          report.assessments?.inspection?.status || "complete"
+                        }
+                      />
+                    </div>
+                    <p>
+                      {advanced
+                        ? `${report.inspection_summary?.inspected || 0}/${report.inspection_summary?.total || 0} packages inspected (${report.inspection_summary?.skipped || 0} skipped, ${report.inspection_summary?.unavailable || 0} unavailable, ${report.inspection_summary?.unresolved || 0} unresolved, ${report.inspection_summary?.integrity_failed || 0} integrity failed).`
+                        : report.inspection_summary &&
+                            report.inspection_summary.total > 0
+                          ? `${report.inspection_summary.inspected} of ${report.inspection_summary.total} dependency locations inspected under the ${report.inspection_summary.profile || "fast"} budget profile.`
+                          : "No external dependencies declared or attempted."}
+                    </p>
+                  </div>
+
+                  <div className="coverage-box">
+                    <div className="coverage-box-header">
+                      <div className="coverage-box-title">
+                        <Network size={16} />
+                        <strong>Vulnerability Intelligence (OSV)</strong>
+                      </div>
+                      <StatusChip
+                        status={
+                          report.assessments?.vulnerabilities?.status ||
+                          report.intelligence
+                        }
+                      />
+                    </div>
+                    <p>
+                      {advanced
+                        ? `Exact-version queries evaluated against OSV database. Intelligence status: ${report.assessments?.vulnerabilities?.status || report.intelligence}. Matches: ${report.assessments?.vulnerabilities?.count ?? osvFindings.length}.`
+                        : (report.assessments?.vulnerabilities?.status ||
+                              report.intelligence) === "checked"
+                          ? "OSV vulnerability database was queried successfully for all declared exact package versions."
+                          : "Vulnerability intelligence was unavailable or partially evaluated during this scan."}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="coverage-notices-area">
+                  <Eyebrow>SPECIFIC SCAN NOTICES & LIMITATIONS</Eyebrow>
+                  {report.coverage.map((c, i) => (
+                    <div className="coverage-notice-item" key={i}>
+                      <Info size={15} />
+                      <p>{c}</p>
                     </div>
                   ))}
                 </div>
-              )}
-              <Note>
-                Dependency source is not fetched recursively.
-                Known-vulnerability checks require exact versions.
-              </Note>
-            </div>
-          )}
-          {tab === "Coverage" && (
-            <div className="card coverage-card">
-              <Eyebrow>TRANSPARENCY BY DESIGN</Eyebrow>
-              <h2>What this scan can tell you.</h2>
-              <p>
-                These boundaries are part of the assessment, not fine print.
-              </p>
-
-              <div
-                className="coverage-dimensions"
-                style={{
-                  marginTop: "20px",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "14px",
-                }}
-              >
-                <div
-                  className="card"
-                  style={{
-                    padding: "16px",
-                    background: "var(--surface-muted, rgba(255,255,255,0.02))",
-                  }}
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      marginBottom: "8px",
-                    }}
-                  >
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "8px",
-                      }}
-                    >
-                      <FileCode2 size={16} />
-                      <strong style={{ fontSize: "12px" }}>
-                        Source & Behavioral Inspection
-                      </strong>
-                    </div>
-                    <span className="status-chip">
-                      {report.assessments?.behavior?.coverage_status ||
-                        "complete"}
-                    </span>
-                  </div>
-                  <p
-                    style={{
-                      fontSize: "11px",
-                      color: "var(--muted)",
-                      margin: "0",
-                      lineHeight: "1.6",
-                    }}
-                  >
-                    {advanced
-                      ? `${report.files_analyzed} source files analyzed under Node.js Babel AST inspection with bounded call depth (8) and module limit (100). Status: ${report.assessments?.behavior?.coverage_status || "complete"}.`
-                      : report.files_analyzed > 0
-                        ? `Guardian inspected ${report.files_analyzed} source files directly for behavioral signals like credential access and sensitive data flow.`
-                        : "Manifest-only scan: no package source code was analyzed."}
-                  </p>
-                </div>
-
-                <div
-                  className="card"
-                  style={{
-                    padding: "16px",
-                    background: "var(--surface-muted, rgba(255,255,255,0.02))",
-                  }}
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      marginBottom: "8px",
-                    }}
-                  >
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "8px",
-                      }}
-                    >
-                      <Package size={16} />
-                      <strong style={{ fontSize: "12px" }}>
-                        Dependency Graph Resolution
-                      </strong>
-                    </div>
-                    <span className="status-chip">
-                      {report.assessments?.inspection?.status || "complete"}
-                    </span>
-                  </div>
-                  <p
-                    style={{
-                      fontSize: "11px",
-                      color: "var(--muted)",
-                      margin: "0",
-                      lineHeight: "1.6",
-                    }}
-                  >
-                    {advanced
-                      ? `${report.inspection_summary?.inspected || 0}/${report.inspection_summary?.total || 0} packages inspected (${report.inspection_summary?.skipped || 0} skipped, ${report.inspection_summary?.unavailable || 0} unavailable, ${report.inspection_summary?.unresolved || 0} unresolved, ${report.inspection_summary?.integrity_failed || 0} integrity failed, ${report.inspection_summary?.not_attempted || 0} not attempted).`
-                      : report.inspection_summary &&
-                          report.inspection_summary.total > 0
-                        ? `${report.inspection_summary.inspected} of ${report.inspection_summary.total} dependency locations inspected under the ${report.inspection_summary.profile || "fast"} budget profile.`
-                        : "No external dependencies declared."}
-                  </p>
-                </div>
-
-                <div
-                  className="card"
-                  style={{
-                    padding: "16px",
-                    background: "var(--surface-muted, rgba(255,255,255,0.02))",
-                  }}
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      marginBottom: "8px",
-                    }}
-                  >
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "8px",
-                      }}
-                    >
-                      <Network size={16} />
-                      <strong style={{ fontSize: "12px" }}>
-                        Vulnerability Intelligence (OSV)
-                      </strong>
-                    </div>
-                    <span className="status-chip">
-                      {report.assessments?.vulnerabilities?.status ||
-                        report.intelligence}
-                    </span>
-                  </div>
-                  <p
-                    style={{
-                      fontSize: "11px",
-                      color: "var(--muted)",
-                      margin: "0",
-                      lineHeight: "1.6",
-                    }}
-                  >
-                    {advanced
-                      ? `Exact-version queries evaluated against OSV database. Intelligence status: ${report.assessments?.vulnerabilities?.status || report.intelligence}. Matches: ${report.assessments?.vulnerabilities?.count ?? report.findings.filter((f) => f.rule === "OSV").length}.`
-                      : (report.assessments?.vulnerabilities?.status ||
-                            report.intelligence) === "checked"
-                        ? "OSV vulnerability database was queried for exact package versions."
-                        : (report.assessments?.vulnerabilities?.status ||
-                              report.intelligence) === "partial"
-                          ? "Vulnerability intelligence is partial; some dependencies or advisories could not be completely resolved."
-                          : "Vulnerability intelligence was unavailable during this scan."}
-                  </p>
-                </div>
-              </div>
-
-              <div style={{ marginTop: "24px" }}>
-                <Eyebrow>ANALYSIS LIMITATIONS & NOTICES</Eyebrow>
-                {report.coverage.map((c, i) => (
-                  <div className="coverage-item" key={i}>
-                    <Info size={17} />
-                    <p>{c}</p>
-                  </div>
-                ))}
               </div>
             </div>
           )}
-          <Explainer
-            key={report.id}
-            report={report}
-            onFinding={focus}
-            advanced={advanced}
-          />
+
+          {/* TAB 4: EVIDENCE & DATA FLOWS */}
+          {tab === "Evidence" && (
+            <div className="tab-evidence-content">
+              <div className="card evidence-overview-card">
+                <SectionHeader
+                  eyebrow="STATIC DATA-FLOW TRACING"
+                  title="Observed Information Propagation Paths"
+                  description="Traces sensitive information from source (e.g. process.env API keys) to sink (e.g. outbound network requests) across syntax trees."
+                />
+
+                <div className="data-flows-list">
+                  {dataFlowFindings.map((f) => (
+                    <div key={f.id} className="finding-flow-block">
+                      <div className="flow-block-header">
+                        <div>
+                          <Badge severity={f.severity} size="sm" />
+                          <strong className="flow-finding-title">
+                            {f.title}
+                          </strong>
+                        </div>
+                        <button
+                          type="button"
+                          className="btn-secondary-subtle compact"
+                          onClick={() => focusFinding(f.id)}
+                        >
+                          View in findings
+                        </button>
+                      </div>
+                      <FlowEvidence finding={f} advanced={advanced} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
-        <aside className="report-aside">
-          <div className="card">
-            <Eyebrow>YOUR NEXT STEPS</Eyebrow>
-            <h3>Make an informed decision.</h3>
-            {(elevated.length
-              ? elevated.slice(0, 3)
-              : report.findings.slice(0, 2)
-            ).map((f, i) => (
-              <button
-                className="next-step"
-                key={f.id}
-                onClick={() => focus(f.id)}
-              >
-                <span>{String(i + 1).padStart(2, "0")}</span>
-                <p>{f.recommendation}</p>
-                <ChevronRight size={14} />
-              </button>
-            ))}
-            {!report.findings.length && (
-              <p>
-                Verify the package publisher and review the scan’s coverage
-                limits before use.
-              </p>
-            )}
+
+        {/* Sidebar: Recommended Next Steps & Finding Breakdown */}
+        <aside className="report-sidebar-col">
+          <div className="card report-next-steps-card">
+            <Eyebrow>RECOMMENDED NEXT STEPS</Eyebrow>
+            <h3>Make an informed decision</h3>
+
+            <div className="next-steps-list">
+              {(elevatedFindings.length > 0
+                ? elevatedFindings.slice(0, 3)
+                : report.findings.slice(0, 2)
+              ).map((f, i) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  className="next-step-btn"
+                  onClick={() => focusFinding(f.id)}
+                >
+                  <span className="step-num">
+                    {String(i + 1).padStart(2, "0")}
+                  </span>
+                  <div className="step-text">
+                    <strong>{f.advisory?.summary || f.title}</strong>
+                    <p>{f.recommendation}</p>
+                  </div>
+                  <ChevronRight size={14} className="step-chevron" />
+                </button>
+              ))}
+
+              {!report.findings.length && (
+                <p className="no-findings-hint">
+                  Verify the package publisher and review scan coverage limits
+                  before use.
+                </p>
+              )}
+            </div>
           </div>
-          <div className="trust-note">
-            <ShieldCheck size={20} />
-            <h4>Evidence, not a black box.</h4>
+
+          {/* Copilot Quick Launch Banner */}
+          <div className="card copilot-callout-card">
+            <div className="copilot-callout-top">
+              <Sparkles size={18} className="copilot-icon" />
+              <h4>Have questions about this report?</h4>
+            </div>
             <p>
-              Severity describes potential impact. Confidence describes the
-              strength of the detection. Neither proves malicious intent.
+              Guardian Intelligence can explain finding severity, attack
+              mechanisms, and verify if vulnerabilities affect your environment.
             </p>
-            <button className="text-link" onClick={() => setTab("Coverage")}>
-              Understand scan coverage
+            <button
+              type="button"
+              className="copilot-callout-btn"
+              onClick={() => {
+                setCopilotFindingId(selectedFindingId);
+                setCopilotOpen(true);
+              }}
+            >
+              <span>Ask Guardian Intelligence</span>
               <ChevronRight size={14} />
             </button>
           </div>
-          <div className="severity-summary">
+
+          {/* Finding Breakdown by Severity */}
+          <div className="card severity-breakdown-card">
             <Eyebrow>FINDING BREAKDOWN</Eyebrow>
-            {(["critical", "high", "medium", "low", "info"] as Severity[]).map(
-              (s) => (
-                <div key={s}>
-                  <Badge severity={s} />
-                  <span>
-                    {report.findings.filter((f) => f.severity === s).length}
-                  </span>
-                </div>
-              ),
-            )}
+            <div className="severity-rows-list">
+              {(
+                ["critical", "high", "medium", "low", "info"] as Severity[]
+              ).map((s) => {
+                const count = report.findings.filter(
+                  (f) => f.severity === s,
+                ).length;
+                return (
+                  <button
+                    key={s}
+                    type="button"
+                    className={`severity-breakdown-row ${filterSeverity === s ? "active" : ""}`}
+                    onClick={() => {
+                      setTab("Findings");
+                      setFilterSeverity(filterSeverity === s ? "all" : s);
+                    }}
+                  >
+                    <Badge severity={s} size="sm" />
+                    <span className="severity-count">{count}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </aside>
       </div>
+
+      {/* Persistent Collapsible Right-Side Guardian Intelligence Panel */}
+      <IntelligencePanel
+        report={report}
+        isOpen={copilotOpen}
+        onClose={() => setCopilotOpen(false)}
+        selectedFinding={copilotActiveFinding}
+        onClearSelectedFinding={() => setCopilotFindingId(null)}
+        onFocusFinding={(fid) => {
+          focusFinding(fid);
+          setCopilotFindingId(fid);
+        }}
+        advanced={advanced}
+      />
     </motion.div>
   );
 }
-function FindingRow({
-  finding: f,
-  advanced,
-  open,
-  onToggle,
+
+// Grouped Package Card Component
+function PackageFindingsGroup({
+  packageName,
+  findings,
+  selectedId,
+  onSelectFinding,
+  onAskCopilot,
   onPrepareFix,
+  advanced,
+}: {
+  packageName: string;
+  findings: Finding[];
+  selectedId: string | null;
+  onSelectFinding: (id: string) => void;
+  onAskCopilot: (f: Finding) => void;
+  onPrepareFix?: (f: Finding) => void;
+  advanced: boolean;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+
+  const highestSeverity = useMemo(() => {
+    const severities: Severity[] = [
+      "critical",
+      "high",
+      "medium",
+      "low",
+      "info",
+    ];
+    for (const s of severities) {
+      if (findings.some((f) => f.severity === s)) return s;
+    }
+    return "info";
+  }, [findings]);
+
+  return (
+    <div className={`package-group-card ${collapsed ? "collapsed" : ""}`}>
+      <button
+        type="button"
+        className="package-group-header"
+        onClick={() => setCollapsed((p) => !p)}
+        aria-expanded={!collapsed}
+      >
+        <div className="pkg-header-left">
+          <Package size={17} className="pkg-icon" />
+          <div className="pkg-info">
+            <strong className="pkg-name">{packageName}</strong>
+            <span className="pkg-count">
+              {findings.length}{" "}
+              {findings.length === 1 ? "recorded finding" : "recorded findings"}
+            </span>
+          </div>
+        </div>
+
+        <div className="pkg-header-right">
+          <Badge severity={highestSeverity} size="sm" />
+          <ChevronDown
+            size={16}
+            className={`pkg-chevron ${collapsed ? "rotate-up" : ""}`}
+          />
+        </div>
+      </button>
+
+      {!collapsed && (
+        <div className="package-group-findings-list">
+          {findings.map((f) => (
+            <FindingItemCard
+              key={f.id}
+              finding={f}
+              isOpen={selectedId === f.id}
+              onToggle={() => onSelectFinding(selectedId === f.id ? "" : f.id)}
+              onAskCopilot={() => onAskCopilot(f)}
+              onPrepareFix={onPrepareFix}
+              advanced={advanced}
+              isGrouped
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Individual Finding Item Card
+function FindingItemCard({
+  finding: f,
+  isOpen,
+  onToggle,
+  onAskCopilot,
+  onPrepareFix,
+  advanced,
+  isGrouped = false,
 }: {
   finding: Finding;
-  advanced: boolean;
-  open: boolean;
+  isOpen: boolean;
   onToggle: () => void;
-  onPrepareFix?: (finding: Finding) => void;
+  onAskCopilot: () => void;
+  onPrepareFix?: (f: Finding) => void;
+  advanced: boolean;
+  isGrouped?: boolean;
 }) {
+  // Meaningful Title Logic
+  const displayTitle = useMemo(() => {
+    if (f.advisory?.summary) return f.advisory.summary;
+    if (f.rule === "OSV" && f.advisory?.id) {
+      return `${f.package || "Dependency"}: ${f.advisory.id}`;
+    }
+    return f.title;
+  }, [f]);
+
   return (
     <article
       id={"finding-" + f.id}
-      className={`finding ${open ? "expanded" : ""}`}
+      className={`finding-card ${isOpen ? "expanded" : ""} ${isGrouped ? "grouped-item" : ""}`}
     >
       <button
-        className="finding-heading"
+        type="button"
+        className="finding-card-header"
         onClick={onToggle}
-        aria-expanded={open}
+        aria-expanded={isOpen}
       >
-        <span className={`finding-icon ${f.severity}`}>
+        <span className={`finding-severity-icon ${f.severity}`}>
           {f.severity === "info" ? (
-            <Info size={18} />
+            <Info size={16} />
+          ) : f.severity === "critical" || f.severity === "high" ? (
+            <AlertTriangle size={16} />
           ) : (
-            <AlertTriangle size={18} />
+            <AlertTriangle size={16} />
           )}
         </span>
-        <span className="finding-title">
-          <strong>{f.title}</strong>
-          <span>
-            {f.category}
-            <i /> {f.confidence} confidence
-          </span>
-        </span>
-        <Badge severity={f.severity} />
-        <ChevronDown size={16} className={open ? "rotate" : ""} />
+
+        <div className="finding-header-content">
+          <strong className="finding-main-title">{displayTitle}</strong>
+          <div className="finding-subtext">
+            {f.advisory?.id && (
+              <span className="advisory-id-tag">{f.advisory.id}</span>
+            )}
+            <span className="finding-category">{f.category}</span>
+            <span className="bullet-sep">·</span>
+            <span className="finding-confidence">
+              {f.confidence} confidence
+            </span>
+            {f.package && (
+              <span className="finding-pkg-tag">pkg: {f.package}</span>
+            )}
+          </div>
+        </div>
+
+        <div className="finding-header-badges">
+          {f.advisory?.fixed_versions &&
+            f.advisory.fixed_versions.length > 0 && (
+              <span
+                className="fixed-version-pill"
+                title={`Fixed in: ${f.advisory.fixed_versions.join(", ")}`}
+              >
+                Fixed: {f.advisory.fixed_versions[0]}
+              </span>
+            )}
+          <Badge severity={f.severity} size="sm" />
+          <ChevronDown
+            size={16}
+            className={`finding-chevron ${isOpen ? "rotate" : ""}`}
+          />
+        </div>
       </button>
-      {open && (
+
+      {isOpen && (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          className="finding-body"
+          transition={{ duration: 0.15 }}
+          className="finding-card-body"
         >
-          <div className="explanation-block">
-            <h4>{advanced ? "Observed behavior" : "What was found"}</h4>
+          {/* Explanation block */}
+          <div className="finding-info-block">
+            <h4>
+              {advanced ? "Observed Syntax Behavior" : "What Was Discovered"}
+            </h4>
             <p>{advanced ? f.observed : f.explanation}</p>
           </div>
-          <div className="explanation-block">
-            <h4>Why it matters</h4>
+
+          {/* Implication block */}
+          <div className="finding-info-block">
+            <h4>Why It Matters (Impact & Threat Vector)</h4>
             <p>{f.implication}</p>
           </div>
-          <FlowEvidence finding={f} advanced={advanced} />
-          <AdvisoryDetails finding={f} advanced={advanced} />
-          {f.package && (
-            <p className="package-attribution">Package: {f.package}</p>
+
+          {/* Interactive Data Flows */}
+          {f.data_flows && f.data_flows.length > 0 && (
+            <FlowEvidence finding={f} advanced={advanced} />
           )}
-          <div className="evidence-heading">
-            <h4>{advanced ? "Source evidence" : "Where we found it"}</h4>
-            {advanced && <code>{f.rule}</code>}
-          </div>
-          {f.evidence.map((e, i) => (
-            <div className="source-evidence" key={i}>
-              <div>
-                <FileCode2 size={14} />
-                <span>
-                  {e.file}:{e.line}
-                  {advanced ? `:${e.column}` : ""}
-                </span>
-              </div>
-              {advanced ? (
-                <pre>
-                  <code>{e.snippet}</code>
-                </pre>
-              ) : (
-                <p>{e.detail}</p>
-              )}
+
+          {/* Advisory Details */}
+          {f.advisory && <AdvisoryDetails finding={f} advanced={advanced} />}
+
+          {/* Source Evidence */}
+          <div className="evidence-section">
+            <div className="evidence-section-header">
+              <h4>
+                {advanced
+                  ? "Source Evidence & Syntax AST"
+                  : "Evidence Location"}
+              </h4>
+              {advanced && <code className="rule-badge">{f.rule}</code>}
             </div>
-          ))}
-          <div className="recommendation">
-            <Check size={17} />
-            <div>
-              <h4>Recommended action</h4>
+
+            {f.evidence.map((e, idx) => (
+              <div className="evidence-code-block" key={idx}>
+                <div className="evidence-file-line">
+                  <FileCode2 size={13} />
+                  <span>
+                    {e.file}:{e.line}
+                    {advanced ? `:${e.column}` : ""}
+                  </span>
+                </div>
+
+                {advanced ? (
+                  <pre className="evidence-snippet">
+                    <code>{e.snippet}</code>
+                  </pre>
+                ) : (
+                  <p className="evidence-detail">{e.detail}</p>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* Recommendation */}
+          <div className="recommendation-callout">
+            <Check size={16} className="recommendation-icon" />
+            <div className="recommendation-text">
+              <h4>Recommended Action</h4>
               <p>{f.recommendation}</p>
             </div>
           </div>
-          {onPrepareFix && (
-            <div
-              style={{
-                marginTop: "12px",
-                display: "flex",
-                justifyContent: "flex-end",
-              }}
-            >
+
+          {/* Action Footer: Ask Copilot & Prepare Fix */}
+          <div className="finding-action-footer">
+            <div className="finding-action-left">
+              {f.references.map((r) => {
+                let label = "Read Advisory";
+                try {
+                  const host = new URL(r).hostname.replace(/^www\./, "");
+                  label = `Advisory (${host})`;
+                } catch {}
+                return (
+                  <External href={r} key={r}>
+                    {label}
+                  </External>
+                );
+              })}
+            </div>
+
+            <div className="finding-action-right">
               <button
-                className="button primary compact"
+                type="button"
+                className="btn-copilot-ask"
                 onClick={(e) => {
                   e.stopPropagation();
-                  onPrepareFix(f);
-                }}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "6px",
-                  fontSize: "12px",
+                  onAskCopilot();
                 }}
               >
-                <Wrench size={14} />
-                Prepare a fix with Guardian
+                <Sparkles size={13} />
+                <span>Ask Copilot about this</span>
               </button>
+
+              {onPrepareFix && (
+                <button
+                  type="button"
+                  className="btn-prepare-fix"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onPrepareFix(f);
+                  }}
+                >
+                  <Wrench size={13} />
+                  <span>Prepare fix with Guardian</span>
+                </button>
+              )}
             </div>
-          )}
+          </div>
+
+          {/* Limitations */}
           {!!f.limitations?.length && (
-            <div className="finding-limitations">
-              <h4>What remains uncertain</h4>
+            <div className="finding-uncertainties">
+              <h4>What Remains Uncertain</h4>
               {f.limitations.map((text, i) => (
                 <p key={i}>{text}</p>
               ))}
             </div>
           )}
-          {f.references.map((r) => {
-            let label = "Read vulnerability advisory";
-            try {
-              const host = new URL(r).hostname.replace(/^www\./, "");
-              label = `Advisory reference (${host})`;
-            } catch {}
-            return (
-              <External href={r} key={r}>
-                {label}
-              </External>
-            );
-          })}
         </motion.div>
       )}
     </article>

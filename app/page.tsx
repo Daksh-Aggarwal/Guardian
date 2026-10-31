@@ -1,6 +1,7 @@
 "use client";
-import { useEffect, useState, useCallback } from "react";
-import { motion } from "framer-motion";
+
+import { useEffect, useState, useCallback, useMemo } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   LayoutDashboard,
   History,
@@ -21,34 +22,60 @@ import {
   AlertCircle,
   FolderOpen,
   Wrench,
+  AlertTriangle,
+  FileCode2,
+  Network,
+  Clock,
+  Layers,
+  Sparkles,
+  Menu,
 } from "lucide-react";
 import { api, Report, ScanJob, Finding } from "@/lib/types";
-import { Brand, Eyebrow, Empty, Note } from "@/components/ui";
+import {
+  Brand,
+  Eyebrow,
+  Empty,
+  Note,
+  MetricCard,
+  SecurityDimensionCard,
+  RecommendedActionCard,
+  Badge,
+  StatusChip,
+} from "@/components/ui";
 import ScanPanel from "@/components/scan-panel";
 import ReportView from "@/components/report";
 import ProjectWorkspace from "@/components/project-workspace";
 import RemediationPanel from "@/components/remediation-panel";
+
 export default function Home() {
-  const [reports, setReports] = useState<Report[]>([]),
-    [report, setReport] = useState<Report | null>(null),
-    [page, setPage] = useState("Overview"),
-    [dark, setDark] = useState(false),
-    [job, setJob] = useState<ScanJob | null>(null),
-    [error, setError] = useState(""),
-    [connected, setConnected] = useState(false),
-    [loading, setLoading] = useState(true),
-    [search, setSearch] = useState(""),
-    [remediationOpen, setRemediationOpen] = useState(false),
-    [remediationFinding, setRemediationFinding] = useState<string | null>(null),
-    [connectedDirectoryHandle, setConnectedDirectoryHandle] =
-      useState<FileSystemDirectoryHandle | null>(null);
+  const [reports, setReports] = useState<Report[]>([]);
+  const [report, setReport] = useState<Report | null>(null);
+  const [page, setPage] = useState<
+    "Overview" | "Project workspace" | "Scan history" | "How it works"
+  >("Overview");
+  const [dark, setDark] = useState(false);
+  const [job, setJob] = useState<ScanJob | null>(null);
+  const [error, setError] = useState("");
+  const [connected, setConnected] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [remediationOpen, setRemediationOpen] = useState(false);
+  const [remediationFinding, setRemediationFinding] = useState<string | null>(
+    null,
+  );
+  const [connectedDirectoryHandle, setConnectedDirectoryHandle] =
+    useState<FileSystemDirectoryHandle | null>(null);
+
   const busy =
     job?.status === "running" ||
     job?.status === "queued" ||
     job?.status === "cancelling";
+
   const refresh = useCallback(async () => {
     try {
-      setReports(await api<Report[]>("/scans"));
+      const data = await api<Report[]>("/scans");
+      setReports(data);
       setConnected(true);
     } catch (e) {
       setError((e as Error).message);
@@ -57,35 +84,49 @@ export default function Home() {
       setLoading(false);
     }
   }, []);
+
   useEffect(() => {
     refresh();
-    setDark(localStorage.getItem("guardian-theme") === "dark");
+    const storedTheme = localStorage.getItem("guardian-theme");
+    const isDark =
+      storedTheme === "dark" ||
+      (!storedTheme &&
+        window.matchMedia("(prefers-color-scheme: dark)").matches);
+    setDark(isDark);
+
     const id = new URLSearchParams(window.location.search).get("scan");
-    if (id)
+    if (id) {
       api<Report>(`/scans/${id}`)
         .then(setReport)
         .catch((e) => setError(e.message));
+    }
   }, [refresh]);
+
   useEffect(() => {
     document.documentElement.dataset.theme = dark ? "dark" : "light";
     localStorage.setItem("guardian-theme", dark ? "dark" : "light");
   }, [dark]);
-  const open = useCallback((r: Report) => {
+
+  const openReport = useCallback((r: Report) => {
     setReport(r);
     window.history.replaceState(null, "", `?scan=${r.id}`);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, []);
+
+  // Job Polling
   useEffect(() => {
     if (!busy || !job) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
+
     const poll = async () => {
       try {
         const state = await api<ScanJob>(`/jobs/${job.id}`);
         if (cancelled) return;
         setJob(state);
         if (state.status === "complete") {
-          open(await api<Report>(`/scans/${job.id}`));
+          const finishedReport = await api<Report>(`/scans/${job.id}`);
+          openReport(finishedReport);
           refresh();
         } else if (state.status === "failed") {
           setError(state.error || "Scan failed.");
@@ -103,19 +144,25 @@ export default function Home() {
         }
       }
     };
+
     poll();
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [job?.id, busy, open, refresh]);
-  function navigate(p: string) {
+  }, [job?.id, busy, openReport, refresh]);
+
+  function navigate(
+    p: "Overview" | "Project workspace" | "Scan history" | "How it works",
+  ) {
     setPage(p);
     setReport(null);
     window.history.replaceState(null, "", "/");
     setSearch("");
+    setMobileMenuOpen(false);
   }
-  function start(id: string) {
+
+  function startScan(id: string) {
     setError("");
     navigate("Overview");
     setJob({ id, status: "queued", stage: "Queued" });
@@ -123,34 +170,155 @@ export default function Home() {
       .getElementById("new-scan")
       ?.scrollIntoView({ behavior: "smooth", block: "center" });
   }
-  async function example(id: string) {
+
+  async function runExample(id: string) {
     try {
-      start(
-        (await api<{ id: string }>(`/scans/example/${id}`, { method: "POST" }))
-          .id,
-      );
+      const res = await api<{ id: string }>(`/scans/example/${id}`, {
+        method: "POST",
+      });
+      startScan(res.id);
     } catch (e) {
       setError((e as Error).message);
     }
   }
-  const elevated = reports.filter((r) =>
-      r.findings.some((f) => f.severity !== "info"),
-    ).length,
-    dependencies = new Set(
+
+  // Meaningful Calculated Metrics from Actual History
+  const metrics = useMemo(() => {
+    const totalProjects = reports.length;
+    const elevatedProjects = reports.filter((r) =>
+      r.findings.some((f) =>
+        ["critical", "high", "medium"].includes(f.severity),
+      ),
+    ).length;
+
+    const uniqueDependencies = new Set(
       reports.flatMap((r) => r.dependencies.map((d) => d.name)),
     ).size;
+
+    const criticalAdvisoriesCount = reports.reduce(
+      (sum, r) =>
+        sum +
+        r.findings.filter(
+          (f) =>
+            f.severity === "critical" && (f.rule === "OSV" || !!f.advisory),
+        ).length,
+      0,
+    );
+
+    return {
+      totalProjects,
+      elevatedProjects,
+      uniqueDependencies,
+      criticalAdvisoriesCount,
+    };
+  }, [reports]);
+
+  // Evidence-grounded Recommended Next Steps derived from actual reports
+  const recommendedActions = useMemo(() => {
+    const actions: {
+      id: string;
+      priority: "critical" | "high" | "medium" | "low" | "info";
+      project: string;
+      title: string;
+      reason: string;
+      report: Report;
+      findingId?: string;
+    }[] = [];
+
+    for (const r of reports) {
+      // 1. Critical OSV vulnerability
+      const critOsv = r.findings.find(
+        (f) => f.severity === "critical" && (f.rule === "OSV" || !!f.advisory),
+      );
+      if (critOsv && actions.length < 3) {
+        actions.push({
+          id: `act-${r.id}-${critOsv.id}`,
+          priority: "critical",
+          project: `${r.name} (${r.version})`,
+          title: critOsv.advisory?.summary || critOsv.title,
+          reason: `Affects resolved version ${r.version}. Review published advisory and upgrade path.`,
+          report: r,
+          findingId: critOsv.id,
+        });
+      }
+
+      // 2. High behavioral signal
+      const highBehavior = r.findings.find(
+        (f) =>
+          f.severity === "high" &&
+          (!f.domain || f.domain === "behavior") &&
+          f.rule !== "OSV",
+      );
+      if (highBehavior && actions.length < 3) {
+        actions.push({
+          id: `act-${r.id}-${highBehavior.id}`,
+          priority: "high",
+          project: `${r.name} (${r.version})`,
+          title: highBehavior.title,
+          reason:
+            highBehavior.recommendation ||
+            "Suspicious runtime behavior identified in source.",
+          report: r,
+          findingId: highBehavior.id,
+        });
+      }
+
+      // 3. Incomplete coverage notice
+      if (
+        r.coverage.some(
+          (c) => c.includes("skipped") || c.includes("manifest_only"),
+        ) &&
+        actions.length < 3
+      ) {
+        actions.push({
+          id: `act-cov-${r.id}`,
+          priority: "medium",
+          project: `${r.name} (${r.version})`,
+          title: "Incomplete Source Inspection Coverage",
+          reason:
+            "Certain dependencies or source files were skipped. Consider re-scanning with deep budget.",
+          report: r,
+        });
+      }
+    }
+
+    return actions;
+  }, [reports]);
+
   return (
     <div className="app-shell">
-      <aside className="sidebar">
-        <Brand />
-        <div className="workspace-label">
-          <span>G</span>
-          <div>
-            Personal workspace<small>LOCAL EDITION</small>
-          </div>
-          <ChevronRight size={15} />
+      {/* Mobile Menu Backdrop */}
+      {mobileMenuOpen && (
+        <div
+          className="sidebar-backdrop"
+          onClick={() => setMobileMenuOpen(false)}
+        />
+      )}
+
+      {/* Sidebar Navigation */}
+      <aside className={`sidebar ${mobileMenuOpen ? "mobile-open" : ""}`}>
+        <div className="sidebar-brand-row">
+          <Brand />
+          <button
+            type="button"
+            className="mobile-close-btn"
+            onClick={() => setMobileMenuOpen(false)}
+            aria-label="Close menu"
+          >
+            <X size={18} />
+          </button>
         </div>
-        <div className="nav-label">WORKSPACE</div>
+
+        <div className="workspace-label">
+          <span className="workspace-icon">G</span>
+          <div>
+            <span className="workspace-name">Personal Workspace</span>
+            <small>LOCAL EDITION · v3.0</small>
+          </div>
+          <ChevronRight size={14} className="workspace-chevron" />
+        </div>
+
+        <div className="nav-label">COMMAND CENTRE</div>
         <nav>
           {[
             { name: "Overview", icon: LayoutDashboard },
@@ -161,61 +329,120 @@ export default function Home() {
             <button
               key={name}
               className={page === name && !report ? "active" : ""}
-              onClick={() => navigate(name)}
+              onClick={() => navigate(name as any)}
             >
               <Icon size={18} />
-              {name}
-              {name === "Scan history" && <span>{reports.length}</span>}
+              <span>{name}</span>
+              {name === "Scan history" && (
+                <span className="nav-count-badge">{reports.length}</span>
+              )}
             </button>
           ))}
         </nav>
+
+        {/* Sidebar trust banner */}
         <div className="sidebar-note">
           <div className="tiny-shield">
             <ShieldCheck size={20} />
           </div>
-          <h4>Trust is built on evidence.</h4>
-          <p>See what your software does. Understand why it matters.</p>
-          <button onClick={() => navigate("How it works")}>
-            Meet Guardian
-            <ArrowUpRight size={14} />
+          <h4>Evidence Over Assumptions</h4>
+          <p>
+            Static AST inspection. Transparent coverage boundaries. Grounded AI
+            explanations.
+          </p>
+          <button
+            type="button"
+            onClick={() => navigate("How it works")}
+            className="sidebar-note-link"
+          >
+            <span>Methodology</span>
+            <ArrowUpRight size={13} />
           </button>
         </div>
+
+        {/* Sidebar footer */}
         <div className="sidebar-bottom">
           <span className="avatar">Y</span>
           <div>
-            Your workspace<small>No account required</small>
+            <strong className="sidebar-user-name">Local User</strong>
+            <small>Isolated memory · No cloud leakage</small>
           </div>
-          <span className="local-dot" />
+          <span
+            className="local-dot"
+            title="Running in local loopback environment"
+          />
         </div>
       </aside>
+
+      {/* Main Shell */}
       <div className="main-shell">
+        {/* Topbar */}
         <header className="topbar">
-          <div className="breadcrumb">
-            Workspace
-            <ChevronRight size={13} />
-            <strong>{report ? "Scan report" : page}</strong>
+          <div className="topbar-left">
+            <button
+              type="button"
+              className="mobile-menu-btn"
+              onClick={() => setMobileMenuOpen(true)}
+              aria-label="Toggle navigation menu"
+            >
+              <Menu size={20} />
+            </button>
+
+            <div className="breadcrumb">
+              <span>Workspace</span>
+              <ChevronRight size={13} />
+              <strong>{report ? `Report: ${report.name}` : page}</strong>
+            </div>
           </div>
+
           <div className="top-actions">
             <span className={`service-status ${connected ? "online" : ""}`}>
-              <i />
-              {connected ? "Scanner connected" : "Scanner offline"}
+              <i className="status-indicator-dot" />
+              <span>{connected ? "Scanner connected" : "Scanner offline"}</span>
             </span>
+
             <button
-              aria-label={dark ? "Use light mode" : "Use dark mode"}
-              className="icon-button"
+              aria-label={dark ? "Switch to light mode" : "Switch to dark mode"}
+              className="icon-button theme-toggle"
               onClick={() => setDark(!dark)}
+              title={dark ? "Use light theme" : "Use dark theme"}
             >
-              {dark ? <Sun size={18} /> : <Moon size={18} />}
+              {dark ? <Sun size={17} /> : <Moon size={17} />}
             </button>
-            <span className="header-avatar">Y</span>
+
+            <button
+              type="button"
+              className="btn-new-scan-top"
+              onClick={() => {
+                navigate("Overview");
+                setTimeout(
+                  () =>
+                    document
+                      .getElementById("new-scan")
+                      ?.scrollIntoView({ behavior: "smooth", block: "center" }),
+                  50,
+                );
+              }}
+            >
+              <Plus size={15} />
+              <span>New scan</span>
+            </button>
+
+            <span className="header-avatar" title="Local session">
+              Y
+            </span>
           </div>
         </header>
+
+        {/* Main Content Viewport */}
         <main>
           {error && (
             <div className="global-error" role="alert">
               <AlertCircle size={18} />
               <span>{error}</span>
               <button
+                type="button"
+                className="btn-error-retry"
                 onClick={() => {
                   setError("");
                   refresh();
@@ -223,11 +450,18 @@ export default function Home() {
               >
                 Retry
               </button>
-              <button aria-label="Dismiss error" onClick={() => setError("")}>
-                <X size={16} />
+              <button
+                type="button"
+                aria-label="Dismiss error"
+                onClick={() => setError("")}
+                className="btn-error-dismiss"
+              >
+                <X size={15} />
               </button>
             </div>
           )}
+
+          {/* VIEW 1: ACTIVE REPORT VIEW */}
           {report ? (
             <>
               <ReportView
@@ -239,6 +473,7 @@ export default function Home() {
                   setRemediationOpen(true);
                 }}
               />
+
               {remediationOpen && (
                 <RemediationPanel
                   report={report}
@@ -261,6 +496,7 @@ export default function Home() {
               )}
             </>
           ) : page === "Project workspace" ? (
+            /* VIEW 2: PROJECT WORKSPACE */
             <ProjectWorkspace
               onBack={() => navigate("Overview")}
               onReportGenerated={(r) => {
@@ -270,40 +506,38 @@ export default function Home() {
               onDirectoryHandleChange={setConnectedDirectoryHandle}
             />
           ) : page === "How it works" ? (
+            /* VIEW 3: METHODOLOGY */
             <Methodology />
           ) : (
+            /* VIEW 4: COMMAND CENTRE (Overview or Scan History) */
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.2 }}
             >
+              {/* Command Centre Page Header */}
               <div className="page-heading">
                 <div>
-                  <Eyebrow>YOUR SOFTWARE. A CLEARER PICTURE.</Eyebrow>
-                  <h1>
+                  <Eyebrow>SUPPLY-CHAIN SECURITY COMMAND CENTRE</Eyebrow>
+                  <h1 className="heading-title">
                     {page === "Overview"
-                      ? "Know what you trust."
-                      : "Your scan history."}
+                      ? "Security Command Centre"
+                      : "Inspection History"}
                   </h1>
-                  <p>
+                  <p className="heading-subtitle">
                     {page === "Overview"
-                      ? "A closer look at your dependencies. Confidence in your next decision."
-                      : "Every inspection, with its evidence intact."}
+                      ? "Evidence-grounded supply chain security, AST behavioral inspection, and verified advisory tracking."
+                      : "Complete repository of past inspections with full evidence trails preserved."}
                   </p>
                 </div>
-                <div
-                  style={{ display: "flex", gap: "10px", alignItems: "center" }}
-                >
+
+                <div className="page-heading-actions">
                   <button
                     className="button secondary"
                     onClick={() => navigate("Project workspace")}
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "6px",
-                    }}
                   >
                     <FolderOpen size={16} />
-                    Open project folder
+                    <span>Open project folder</span>
                   </button>
                   <button
                     className="button primary"
@@ -311,47 +545,175 @@ export default function Home() {
                       navigate("Overview");
                       setTimeout(
                         () =>
-                          document
-                            .getElementById("new-scan")
-                            ?.scrollIntoView({ behavior: "smooth" }),
+                          document.getElementById("new-scan")?.scrollIntoView({
+                            behavior: "smooth",
+                            block: "center",
+                          }),
                         50,
                       );
                     }}
                   >
-                    <Plus size={17} />
-                    New scan
+                    <Plus size={16} />
+                    <span>New scan</span>
                   </button>
                 </div>
               </div>
+
               {page === "Overview" && (
                 <>
-                  <div className="overview-stats">
-                    <Stat
-                      label="Projects inspected"
-                      value={reports.length}
-                      icon={<Package size={19} />}
-                      detail="Across your recent scans"
+                  {/* Meaningful Security Overview Metrics */}
+                  <div className="metrics-grid">
+                    <MetricCard
+                      label="Projects Inspected"
+                      value={metrics.totalProjects}
+                      icon={<Package size={18} />}
+                      detail="Total repositories and packages analyzed"
+                      status="neutral"
                     />
-                    <Stat
-                      label="Scans to review"
-                      value={elevated}
-                      icon={<Activity size={19} />}
-                      detail="With elevated security signals"
+                    <MetricCard
+                      label="Requiring Attention"
+                      value={metrics.elevatedProjects}
+                      icon={<AlertTriangle size={18} />}
+                      detail="Projects with elevated or critical signals"
+                      status={
+                        metrics.elevatedProjects > 0 ? "warning" : "success"
+                      }
                     />
-                    <Stat
-                      label="Dependencies discovered"
-                      value={dependencies}
-                      icon={<ShieldCheck size={19} />}
-                      detail="Unique names in your manifests"
+                    <MetricCard
+                      label="Dependencies Inventoried"
+                      value={metrics.uniqueDependencies}
+                      icon={<ShieldCheck size={18} />}
+                      detail="Unique third-party packages mapped"
+                      status="neutral"
+                    />
+                    <MetricCard
+                      label="Critical Advisories"
+                      value={metrics.criticalAdvisoriesCount}
+                      icon={<Activity size={18} />}
+                      detail="Upstream OSV vulnerability matches"
+                      status={
+                        metrics.criticalAdvisoriesCount > 0
+                          ? "danger"
+                          : "success"
+                      }
                     />
                   </div>
+
+                  {/* Security Assessment Overview: 4 Independent Assessment Domains */}
+                  <section className="command-domains-section">
+                    <div className="section-title-row">
+                      <div>
+                        <Eyebrow>INDEPENDENT ASSESSMENT DOMAINS</Eyebrow>
+                        <h2>Four-Dimensional Security Posture</h2>
+                        <p>
+                          Guardian keeps detection domains decoupled. No
+                          arbitrary combined score.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="dimension-grid">
+                      <SecurityDimensionCard
+                        title="Behavioral Assessment"
+                        domain="RUNTIME SIGNALS"
+                        status="Static AST Heuristics"
+                        statusTone="info"
+                        headline="Exfiltration & Execution"
+                        description="Inspects AST call chains for child_process spawning, sensitive environment token access, and outbound network sinks without executing code."
+                        metric={`${reports.filter((r) => r.findings.some((f) => (!f.domain || f.domain === "behavior") && f.rule !== "OSV" && f.severity !== "info")).length} scans with signals`}
+                        metricLabel="across history"
+                        icon={<FileCode2 size={18} />}
+                      />
+
+                      <SecurityDimensionCard
+                        title="Known Vulnerabilities"
+                        domain="INTELLIGENCE"
+                        status="OSV Upstream Database"
+                        statusTone="warning"
+                        headline="Exact Version Queries"
+                        description="Cross-references lockfile and manifest versions directly with the Open Source Vulnerabilities database for published CVEs and GHSAs."
+                        metric={`${metrics.criticalAdvisoriesCount} critical matches`}
+                        metricLabel="recorded in history"
+                        icon={<Network size={18} />}
+                      />
+
+                      <SecurityDimensionCard
+                        title="Package Integrity"
+                        domain="PROVENANCE"
+                        status="Digest Verification"
+                        statusTone="success"
+                        headline="Checksum Validation"
+                        description="Calculates SHA-512 and SHA-256 digests on retrieved tarballs against official registry metadata to detect tampered distribution archives."
+                        metric="Active"
+                        metricLabel="verification engine"
+                        icon={<ShieldCheck size={18} />}
+                      />
+
+                      <SecurityDimensionCard
+                        title="Inspection Coverage"
+                        domain="TRANSPARENCY"
+                        status="Decoupled Semantics"
+                        statusTone="purple"
+                        headline="Coverage Boundaries"
+                        description="Explicitly reports skipped packages, recursion limits, and unparsed files. 'No elevated signals' is never presented as an absolute guarantee of safety."
+                        metric="Bounded Depth"
+                        metricLabel="maximum recursion 8"
+                        icon={<Layers size={18} />}
+                      />
+                    </div>
+                  </section>
+
+                  {/* Evidence-Grounded Recommended Actions */}
+                  {recommendedActions.length > 0 && (
+                    <section className="recommended-actions-section">
+                      <div className="section-title-row">
+                        <div>
+                          <Eyebrow>PRIORITIZED NEXT STEPS</Eyebrow>
+                          <h2>Recommended Actions</h2>
+                          <p>
+                            Grounded in actual findings from your recent
+                            security scans.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="actions-grid">
+                        {recommendedActions.map((act) => (
+                          <RecommendedActionCard
+                            key={act.id}
+                            priority={act.priority}
+                            project={act.project}
+                            title={act.title}
+                            reason={act.reason}
+                            onClick={() => {
+                              openReport(act.report);
+                              if (act.findingId) {
+                                setTimeout(() => {
+                                  document
+                                    .getElementById("finding-" + act.findingId)
+                                    ?.scrollIntoView({
+                                      behavior: "smooth",
+                                      block: "center",
+                                    });
+                                }, 250);
+                              }
+                            }}
+                          />
+                        ))}
+                      </div>
+                    </section>
+                  )}
+
+                  {/* Scan Launchpad & Informational Guide */}
                   <div className="home-grid">
                     <ScanPanel
-                      onStart={start}
+                      onStart={startScan}
                       busy={!!busy}
                       job={job}
                       onConnectFolder={() => navigate("Project workspace")}
                     />
+
+                    {/* Security Philosophy Card */}
                     <section className="guide-card">
                       <div className="guide-visual" aria-hidden="true">
                         <div className="orbit orbit-one" />
@@ -360,264 +722,318 @@ export default function Home() {
                           <Package size={17} />
                         </span>
                         <span className="orbit-node node-two">
-                          <FileSymbol />
+                          <FileCode2 size={16} />
                         </span>
                         <span className="orbit-node node-three">
-                          <CheckSymbol />
+                          <ShieldCheck size={17} />
                         </span>
                         <span className="central-shield">
-                          <ShieldCheck size={41} strokeWidth={1.4} />
+                          <ShieldCheck size={42} strokeWidth={1.5} />
                         </span>
                       </div>
-                      <Eyebrow>SECURITY, WITHOUT THE GUESSWORK</Eyebrow>
+                      <Eyebrow>EXPLAINABLE SECURITY ARCHITECTURE</Eyebrow>
                       <h2>
-                        More than a red flag.
+                        More than a verdict.
                         <br />
-                        The reason behind it.
+                        The evidence behind it.
                       </h2>
                       <p>
-                        Guardian connects suspicious behavior to real evidence,
-                        then explains it in language that makes sense.
+                        Guardian connects suspicious code patterns directly to
+                        syntax evidence, explains them without jargon, and
+                        surfaces contextual AI guidance.
                       </p>
                       <button
-                        className="text-link"
+                        type="button"
+                        className="text-link inline-learn-link"
                         onClick={() => navigate("How it works")}
                       >
-                        See how we analyze
-                        <ArrowRight size={15} />
+                        <span>Explore methodology</span>
+                        <ArrowRight size={14} />
                       </button>
                       <div className="guide-tags">
-                        <span>Static analysis</span>
-                        <span>Explainable findings</span>
+                        <span>Local Static AST</span>
+                        <span>OSV Intelligence</span>
+                        <span>Zero Execution</span>
                       </div>
                     </section>
                   </div>
+
+                  {/* Synthetic Demonstrations Strip */}
                   <section className="examples-strip">
-                    <div>
-                      <FlaskConical size={20} />
+                    <div className="examples-left">
+                      <div className="flask-icon-wrap">
+                        <FlaskConical size={20} />
+                      </div>
                       <div>
-                        <h3>Take a closer look.</h3>
-                        <p>Run a real scan on a safe, synthetic example.</p>
+                        <h3>Synthetic Demonstration Benchmarks</h3>
+                        <p>
+                          Execute real scans on safe, inert synthetic test
+                          packages.
+                        </p>
                       </div>
                     </div>
                     <div className="example-actions">
                       <button
+                        type="button"
                         disabled={!!busy}
-                        onClick={() => example("benign")}
+                        onClick={() => runExample("benign")}
+                        title="Scan everyday clean npm package with dependencies"
                       >
-                        Everyday package
+                        <span>Everyday package</span>
                         <ArrowUpRight size={14} />
                       </button>
                       <button
+                        type="button"
                         disabled={!!busy}
-                        onClick={() => example("exfiltration")}
+                        onClick={() => runExample("exfiltration")}
+                        title="Scan AST exfiltration payload tracking sensitive tokens to outbound request"
                       >
-                        Sensitive data flow
+                        <span>Sensitive data flow</span>
                         <ArrowUpRight size={14} />
                       </button>
                       <button
+                        type="button"
                         disabled={!!busy}
-                        onClick={() => example("correlated")}
+                        onClick={() => runExample("correlated")}
+                        title="Scan suspicious lifecycle script downloading remote executable"
                       >
-                        Suspicious installer
+                        <span>Suspicious installer</span>
                         <ArrowUpRight size={14} />
                       </button>
                     </div>
                   </section>
                 </>
               )}
+
+              {/* Recent Scans Explorer / All Scans Table */}
               <section className="recent-section">
                 <div className="section-heading">
                   <div>
                     <h2>
-                      {page === "Overview" ? "Recent scans" : "All scans"}
+                      {page === "Overview"
+                        ? "Recent Security Scans"
+                        : "All Inspections"}
                     </h2>
-                    <p>Your evidence trail, always within reach.</p>
+                    <p>
+                      Evidence trails and report history across all analyzed
+                      packages.
+                    </p>
                   </div>
+
                   {page === "Overview" ? (
                     <button
+                      type="button"
                       className="text-link"
                       onClick={() => navigate("Scan history")}
                     >
-                      View history
-                      <ArrowRight size={15} />
+                      <span>View complete history</span>
+                      <ArrowRight size={14} />
                     </button>
                   ) : (
                     <div className="history-search">
-                      <Search size={16} />
+                      <Search size={15} />
                       <input
                         aria-label="Search scans"
-                        placeholder="Find a package…"
+                        placeholder="Search by package name or version…"
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
                       />
                     </div>
                   )}
                 </div>
+
                 <div className="card scan-table">
                   {loading ? (
-                    <div className="empty">
-                      <Loader2 className="spin" />
-                      Connecting to scanner…
+                    <div className="empty-loading-state">
+                      <Loader2 className="spin" size={24} />
+                      <span>Connecting to scanner engine…</span>
                     </div>
                   ) : !reports.length ? (
-                    <Empty title="Your first insight starts here.">
-                      Upload a project or try an example. Every report here
-                      comes from a real scan.
+                    <Empty
+                      title="No scans in your evidence trail yet"
+                      action={
+                        <button
+                          type="button"
+                          className="button primary"
+                          onClick={() => {
+                            document
+                              .getElementById("new-scan")
+                              ?.scrollIntoView({ behavior: "smooth" });
+                          }}
+                        >
+                          <Plus size={16} />
+                          <span>Run your first scan</span>
+                        </button>
+                      }
+                    >
+                      Upload a project archive or look up an npm package. Every
+                      assessment produces a permanent evidence report.
                     </Empty>
                   ) : (
                     <>
                       <div className="table-header">
                         <span>PACKAGE / PROJECT</span>
-                        <span>ASSESSMENT</span>
+                        <span>BEHAVIORAL POSTURE</span>
                         <span>FINDINGS</span>
-                        <span>SCANNED</span>
+                        <span>SCANNED AT</span>
                         <span />
                       </div>
+
                       {reports
                         .filter((r) =>
                           r.name.toLowerCase().includes(search.toLowerCase()),
                         )
-                        .slice(0, page === "Overview" ? 5 : 50)
-                        .map((r) => (
-                          <button
-                            className="table-row"
-                            key={r.id}
-                            onClick={() => open(r)}
-                          >
-                            <span className="package-cell">
-                              <span className="package-symbol">
-                                <Package size={20} />
+                        .slice(0, page === "Overview" ? 6 : 50)
+                        .map((r) => {
+                          const hasElevated = r.findings.some((f) =>
+                            ["critical", "high"].includes(f.severity),
+                          );
+                          const hasMedium = r.findings.some(
+                            (f) => f.severity === "medium",
+                          );
+                          const elevatedCount = r.findings.filter(
+                            (f) => f.severity !== "info",
+                          ).length;
+
+                          return (
+                            <button
+                              key={r.id}
+                              type="button"
+                              className="table-row"
+                              onClick={() => openReport(r)}
+                            >
+                              <span className="package-cell">
+                                <span className="package-symbol">
+                                  <Package size={18} />
+                                </span>
+                                <span className="package-titles">
+                                  <strong>{r.name}</strong>
+                                  <small>
+                                    v{r.version} · {r.source} ·{" "}
+                                    {r.files_analyzed} files
+                                  </small>
+                                </span>
                               </span>
+
                               <span>
-                                <strong>{r.name}</strong>
+                                <span
+                                  className={`risk-pill ${hasElevated ? "high" : hasMedium ? "medium" : "clear"}`}
+                                >
+                                  <i />
+                                  {r.risk}
+                                </span>
+                              </span>
+
+                              <span className="findings-cell">
+                                <strong>{elevatedCount}</strong>
                                 <small>
-                                  {r.version} <i>·</i> {r.source}
+                                  {" "}
+                                  {elevatedCount === 1
+                                    ? "signal"
+                                    : "signals"}{" "}
+                                  to review
                                 </small>
                               </span>
-                            </span>
-                            <span>
-                              <span
-                                className={`risk-pill ${r.findings.some((f) => ["high", "critical"].includes(f.severity)) ? "high" : r.findings.some((f) => f.severity !== "info") ? "medium" : "clear"}`}
-                              >
-                                <i />
-                                {r.risk}
+
+                              <span className="date-cell">
+                                <strong>
+                                  {new Date(r.created_at).toLocaleDateString(
+                                    undefined,
+                                    {
+                                      month: "short",
+                                      day: "numeric",
+                                    },
+                                  )}
+                                </strong>
+                                <small>
+                                  {new Date(r.created_at).toLocaleTimeString(
+                                    undefined,
+                                    {
+                                      hour: "2-digit",
+                                      minute: "2-digit",
+                                    },
+                                  )}
+                                </small>
                               </span>
-                            </span>
-                            <span className="findings-cell">
-                              {
-                                r.findings.filter((f) => f.severity !== "info")
-                                  .length
-                              }
-                              <small> to review</small>
-                            </span>
-                            <span className="date-cell">
-                              {new Date(r.created_at).toLocaleDateString(
-                                undefined,
-                                { month: "short", day: "numeric" },
-                              )}
-                              <small>
-                                {new Date(r.created_at).toLocaleTimeString(
-                                  undefined,
-                                  { hour: "2-digit", minute: "2-digit" },
-                                )}
-                              </small>
-                            </span>
-                            <ChevronRight size={16} />
-                          </button>
-                        ))}
+
+                              <span className="row-action-arrow">
+                                <ChevronRight size={16} />
+                              </span>
+                            </button>
+                          );
+                        })}
                     </>
                   )}
                 </div>
               </section>
             </motion.div>
           )}
+
+          {/* Footer */}
           <footer>
             <span>
               <ShieldCheck size={14} />
-              Guardian · Know what you trust.
+              Guardian 3.0 · Software Supply-Chain Intelligence
             </span>
-            <span>Static inspection. Human judgment.</span>
+            <span>
+              Static inspection. Transparent coverage. Grounded AI reasoning.
+            </span>
           </footer>
         </main>
       </div>
     </div>
   );
 }
-function Stat({
-  label,
-  value,
-  icon,
-  detail,
-}: {
-  label: string;
-  value: number;
-  icon: React.ReactNode;
-  detail: string;
-}) {
-  return (
-    <div className="stat">
-      <div>
-        <span>{label}</span>
-        {icon}
-      </div>
-      <strong>{String(value).padStart(2, "0")}</strong>
-      <p>{detail}</p>
-    </div>
-  );
-}
-function FileSymbol() {
-  return <span style={{ fontFamily: "monospace", fontSize: 16 }}>{"{ }"}</span>;
-}
-function CheckSymbol() {
-  return <ShieldCheck size={17} />;
-}
+
 function Methodology() {
   return (
-    <div>
+    <div className="methodology-page">
       <div className="page-heading">
         <div>
-          <Eyebrow>BUILT TO BE UNDERSTOOD</Eyebrow>
-          <h1>Evidence before assumptions.</h1>
-          <p>
-            A security assessment should help you decide, not decide for you.
+          <Eyebrow>TRANSPARENCY BY DESIGN</Eyebrow>
+          <h1 className="heading-title">Evidence Before Assumptions.</h1>
+          <p className="heading-subtitle">
+            A security assessment should empower your judgment, not decide in a
+            black box.
           </p>
         </div>
       </div>
+
       <div className="method-grid">
         {[
           {
             n: "01",
             title: "Inspect. Never execute.",
-            text: "Guardian reads your manifests and source files. ZIP and npm tarballs are unpacked in bounded memory, with path, size and link checks. Uploaded scripts are never run.",
+            text: "Guardian unpacks ZIP files and npm tarballs strictly in bounded virtual memory with recursive size and symlink checks. Uploaded lifecycle scripts and untrusted executables are never run.",
           },
           {
             n: "02",
-            title: "Connect the signals.",
-            text: "A JavaScript syntax tree identifies behavior. File-local data tracking connects sensitive information to outbound requests. Individual network or environment accesses remain observations.",
+            title: "Syntax AST data-flow tracking.",
+            text: "A Babel AST parser inspects JavaScript syntax trees. File-local data tracking traces sensitive sources (e.g. process.env credentials) to outbound network sinks with line and column citations.",
           },
           {
             n: "03",
-            title: "Show the reasoning.",
-            text: "Every finding has source evidence, confidence, potential consequences and a next step. Simple and Advanced modes are two views of the same report.",
+            title: "Decoupled 4D assessment.",
+            text: "Behavioral signals, OSV vulnerability intelligence, package integrity checksums, and source inspection coverage remain distinct dimensions. We never fabricate an artificial overall safety score.",
           },
           {
             n: "04",
             title: "Make uncertainty visible.",
-            text: "Unparsed files, missing source and unavailable vulnerability intelligence are shown in coverage. No elevated signals is not a guarantee of safety.",
+            text: "Skipped dependency depths, unparsed files, and unavailable intelligence are prominent in coverage. 'No elevated signals' is never presented as proof of absolute safety.",
           },
         ].map((x) => (
           <section className="card method-card" key={x.n}>
-            <span>{x.n}</span>
+            <span className="method-num">{x.n}</span>
             <h2>{x.title}</h2>
             <p>{x.text}</p>
           </section>
         ))}
       </div>
+
       <Note>
-        Guardian is a local npm-focused prototype. It does not execute code,
-        certify packages, or perform complete cross-file data-flow analysis.
-        Explanation responses are deterministic and grounded in stored findings.
+        Guardian is a local supply-chain defense engine. It performs bounded AST
+        static analysis and exact OSV database cross-referencing. Explanation
+        responses are evidence-grounded in stored scan findings.
       </Note>
     </div>
   );
