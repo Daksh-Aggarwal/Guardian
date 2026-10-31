@@ -455,6 +455,9 @@ nav button span {
 .main-shell {
   margin-left: 238px;
   width: calc(100% - 238px);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
 }
 .topbar {
   height: 74px;
@@ -510,8 +513,12 @@ nav button span {
 }
 main {
   max-width: 1500px;
-  margin: auto;
+  width: 100%;
+  margin: 0 auto;
   padding: 40px 44px 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
 }
 .page-heading {
   display: flex;
@@ -1134,12 +1141,15 @@ main {
 }
 footer {
   border-top: 1px solid var(--line);
-  margin-top: 36px;
+  margin-top: auto;
   padding: 21px 0;
   display: flex;
   justify-content: space-between;
+  align-items: center;
   color: var(--muted);
   font-size: 12px;
+  width: 100%;
+  flex-shrink: 0;
 }
 footer > span:first-child {
   display: flex;
@@ -6428,21 +6438,22 @@ h1,h2,h3,h4,h5,h6 {line-height:1.2 !important;}
 
 /* Overview Single-Page Viewport Constraints (Strictly Non-Scrollable & Spacious) */
 .main-overview {
-  padding: 16px 40px 0 !important;
+  padding: 12px 40px 0 !important;
   overflow: hidden;
-  max-height: calc(100vh - 64px);
+  height: calc(100vh - 74px);
+  max-height: calc(100vh - 74px);
   display: flex;
   flex-direction: column;
 }
 .main-overview .heatmap-hero-card {
   padding: 0 !important;
-  margin: 0 auto 16px auto !important;
+  margin: 0 auto 10px auto !important;
 }
 .main-overview .heatmap-header {
-  margin-bottom: 12px !important;
+  margin-bottom: 8px !important;
 }
 .main-overview .scan-launchpad-section {
-  margin-bottom: 20px !important;
+  margin-bottom: 0 !important;
   display: flex;
   justify-content: center;
   width: 100%;
@@ -6452,7 +6463,7 @@ h1,h2,h3,h4,h5,h6 {line-height:1.2 !important;}
   max-width: 960px !important;
   min-width: min(100%, 640px);
   margin: 0 auto !important;
-  padding: 22px 28px !important;
+  padding: 16px 24px !important;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
 }
 @media (max-width: 768px) {
@@ -6462,7 +6473,7 @@ h1,h2,h3,h4,h5,h6 {line-height:1.2 !important;}
   }
 }
 .main-overview .launchpad-header {
-  margin-bottom: 14px !important;
+  margin-bottom: 10px !important;
   display: flex;
   align-items: center;
 }
@@ -6473,28 +6484,34 @@ h1,h2,h3,h4,h5,h6 {line-height:1.2 !important;}
   letter-spacing: -0.01em;
 }
 .main-overview .launchpad-tabs {
-  margin-bottom: 16px !important;
+  margin-bottom: 10px !important;
 }
 .main-overview .dropzone-box {
-  padding: 44px 24px !important;
-  min-height: 236px !important;
+  padding: 24px 20px !important;
+  min-height: 180px !important;
   display: flex !important;
   flex-direction: column !important;
   justify-content: center !important;
-  margin-bottom: 12px !important;
+  margin-bottom: 8px !important;
 }
 .main-overview .dropzone-icon-wrap {
-  width: 44px !important;
-  height: 44px !important;
+  width: 40px !important;
+  height: 40px !important;
   margin-bottom: 6px !important;
 }
 .main-overview .connect-folder-hint {
-  margin-top: 8px !important;
+  margin-top: 6px !important;
 }
 .main-overview .launchpad-footer {
-  margin-top: 16px !important;
+  margin-top: 10px !important;
 }
 
 .main-overview .launchpad-upload-area [class*="min-h-"] {
-  min-height: 248px !important;
+  min-height: 188px !important;
+}
+
+.main-overview footer {
+  margin-top: auto !important;
+  padding: 10px 0 12px !important;
+  flex-shrink: 0;
 }

@@ -1041,17 +1041,15 @@ export default function Home() {
           )}
 
           {/* Footer */}
-          {page !== "Overview" && (
-            <footer>
-              <span>
-                <ShieldCheck size={14} />
-                Guardian 3.0 · Software Supply-Chain Intelligence
-              </span>
-              <span>
-                Static inspection. Transparent coverage. Grounded AI reasoning.
-              </span>
-            </footer>
-          )}
+          <footer>
+            <span>
+              <ShieldCheck size={14} />
+              Guardian 3.0 · Software Supply-Chain Intelligence
+            </span>
+            <span>
+              Static inspection. Transparent coverage. Grounded AI reasoning.
+            </span>
+          </footer>
         </main>
       </div>
     </div>
