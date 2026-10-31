@@ -1246,24 +1246,24 @@ function FindingItemCard({
 
       {isOpen && (
         <motion.div
-          initial={{ opacity: 0 }}
+          initial={false}
           animate={{ opacity: 1 }}
           transition={{ duration: 0.15 }}
           className="finding-card-body"
         >
-          {/* Explanation block */}
-          <div className="finding-info-block">
-            <h4>
-              {advanced ? "Observed Syntax Behavior" : "What Was Discovered"}
-            </h4>
-            <p>{advanced ? f.observed : f.explanation}</p>
-          </div>
-
-          {/* Implication block */}
-          <div className="finding-info-block">
-            <h4>Why It Matters (Impact & Threat Vector)</h4>
-            <p>{f.implication}</p>
-          </div>
+          <ol className="evidence-trail" aria-label="Finding evidence trail">
+            <li><span className="evidence-index">01</span><div>
+              <h4>What Guardian found</h4>
+              <p>{advanced ? f.observed : f.explanation}</p>
+              <code>{f.id}</code>
+            </div></li>
+            <li><span className="evidence-index">02</span><div>
+              <h4>Why it matters</h4><p>{f.implication}</p>
+            </div></li>
+            <li><span className="evidence-index">03</span><div>
+              <h4>What you can do</h4><p>{f.recommendation}</p>
+            </div></li>
+          </ol>
 
           {/* Interactive Data Flows */}
           {f.data_flows && f.data_flows.length > 0 && (
