@@ -64,6 +64,12 @@ def run(job_id, loader, source, profile, classification='real', project_id=None,
         if root_result:
             files, warnings = root_result.files, root_result.warnings
             root_integrity = root_result.registry_integrity
+        elif isinstance(loaded, tuple) and len(loaded) == 4:
+            files, warnings, dyn_meta, dyn_source = loaded
+            if dyn_meta is not None:
+                source_metadata = dyn_meta
+            if dyn_source:
+                source = dyn_source
         else:
             files, warnings = loaded
         if cancel.is_set(): return
@@ -188,6 +194,7 @@ def run(job_id, loader, source, profile, classification='real', project_id=None,
             storage.save(report)
             JOBS[job_id].update(status='complete', stage='Complete')
     except Exception as error:
+        project_manager.discard_snapshot(job_id)
         # Do not include server paths, credentials, or raw upstream responses.
         message = str(error) if isinstance(error, ValueError) else 'Could not inspect this input. Check the archive, package name, version, and network access.'
         with LOCK:
@@ -196,6 +203,7 @@ def run(job_id, loader, source, profile, classification='real', project_id=None,
     finally:
         with LOCK:
             if CANCELLATIONS.get(job_id) and CANCELLATIONS[job_id].is_set():
+                project_manager.discard_snapshot(job_id)
                 JOBS[job_id].update(status='cancelled', stage='Scan cancelled')
         SLOTS.release()
 
@@ -730,37 +738,43 @@ def github_branches(repo_id: int, request: Request):
 @app.post('/api/scans/github', status_code=202)
 def scan_github_repository(scan_req: GitHubScanRequest, request: Request):
     session_id = _get_session_id(request)
+    # Pre-flight check: verify active GitHub installation exists
     try:
-        repo_full_name, files_dict, gh_meta, warnings = github.retrieve_repository_snapshot(
-            repo_id=scan_req.repository_id,
-            branch=scan_req.branch,
-            session_id=session_id
-        )
+        github._resolve_active_installation_id(session_id)
     except ValueError as err:
         raise HTTPException(400, str(err))
     except Exception as err:
-        raise HTTPException(502, f"GitHub repository retrieval failed: {err}")
+        raise HTTPException(502, f"GitHub connection error: {err}")
 
     job_id = uuid4().hex
-    try:
+    project_id = f"github:{scan_req.repository_id}"
+
+    def github_loader():
+        try:
+            repo_full_name, files_dict, gh_meta, warnings = github.retrieve_repository_snapshot(
+                repo_id=scan_req.repository_id,
+                branch=scan_req.branch,
+                session_id=session_id
+            )
+        except Exception as err:
+            raise ValueError(f"GitHub repository retrieval failed: {err}") from err
+
         snapshot = project_manager.save_snapshot(
             scan_id=job_id,
             name=repo_full_name,
             raw_files=files_dict,
-            project_id=f"github:{scan_req.repository_id}"
+            project_id=project_id
         )
-    except ValueError as err:
-        raise HTTPException(400, str(err))
+        return dict(snapshot.files), warnings, gh_meta, f"github: {repo_full_name}@{gh_meta.branch}"
 
     try:
         return submit(
-            loader=lambda: (dict(snapshot.files), warnings),
-            source=f"github: {repo_full_name}@{gh_meta.branch}",
+            loader=github_loader,
+            source=f"github: {scan_req.repository_id}@{scan_req.branch or 'default'}",
             profile=scan_req.profile,
             job_id=job_id,
             classification='real',
-            project_id=snapshot.project_id,
-            source_metadata=gh_meta
+            project_id=project_id,
         )
     except Exception:
         project_manager.discard_snapshot(job_id)

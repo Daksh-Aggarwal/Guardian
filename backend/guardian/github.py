@@ -8,6 +8,7 @@ import re
 import secrets
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Set
@@ -261,6 +262,26 @@ def _generate_app_jwt() -> str:
     sig = private_key.sign(signing_input, padding.PKCS1v15(), hashes.SHA256())
     return (signing_input + b'.' + b64url(sig)).decode('utf-8')
 
+_http_session: Optional[requests.Session] = None
+_http_session_lock = threading.Lock()
+
+def _get_http_session() -> requests.Session:
+    """Thread-safe persistent requests Session with connection pooling for GitHub API."""
+    global _http_session
+    if _http_session is None:
+        with _http_session_lock:
+            if _http_session is None:
+                s = requests.Session()
+                adapter = requests.adapters.HTTPAdapter(
+                    pool_connections=20,
+                    pool_maxsize=20,
+                    max_retries=1
+                )
+                s.mount("https://", adapter)
+                s.mount("http://", adapter)
+                _http_session = s
+    return _http_session
+
 def _call_app_api(endpoint: str, method: str = "GET", json_data: Any = None) -> Any:
     """Calls GitHub API authenticated with App JWT."""
     jwt_token = _generate_app_jwt()
@@ -273,7 +294,8 @@ def _call_app_api(endpoint: str, method: str = "GET", json_data: Any = None) -> 
     }
 
     try:
-        resp = requests.request(method, url, headers=headers, json=json_data, timeout=15)
+        session = _get_http_session()
+        resp = session.request(method, url, headers=headers, json=json_data, timeout=15)
     except Exception as err:
         logger.error(f"GitHub App API connection failure ({endpoint}): {type(err).__name__}")
         raise RuntimeError(f"Failed to reach GitHub API: {type(err).__name__}")
@@ -351,7 +373,8 @@ def _call_installation_api_raw(
         }
 
         try:
-            resp = requests.request(method, url, headers=headers, json=json_data, timeout=15)
+            session = _get_http_session()
+            resp = session.request(method, url, headers=headers, json=json_data, timeout=15)
         except Exception as err:
             if attempt < max_retries:
                 time.sleep(0.5 * (2 ** attempt))
@@ -994,14 +1017,34 @@ def retrieve_repository_snapshot(
     files_dict: Dict[str, str] = {}
     aggregate_bytes = 0
 
-    for blob_info in eligible_blobs:
-        # Enforce request count budget
-        if requests_count >= MAX_SNAPSHOT_REQUESTS:
-            warnings.append(
-                f"Repository snapshot halted: exceeded request budget of {MAX_SNAPSHOT_REQUESTS} requests. Coverage is partial."
-            )
-            break
+    remaining_budget = MAX_SNAPSHOT_REQUESTS - requests_count
+    if len(eligible_blobs) > remaining_budget:
+        blobs_to_fetch = eligible_blobs[:max(0, remaining_budget)]
+        halted_request_budget = True
+    else:
+        blobs_to_fetch = eligible_blobs
+        halted_request_budget = False
 
+    def _fetch_blob_worker(b_info: Dict[str, Any]) -> Tuple[str, Optional[Dict[str, Any]], Optional[Exception]]:
+        b_path = b_info["path"]
+        b_sha = b_info["sha"]
+        try:
+            data = _call_installation_api(inst_id, f"/repositories/{repo_id}/git/blobs/{b_sha}")
+            return (b_path, data, None)
+        except Exception as err:
+            return (b_path, None, err)
+
+    fetch_results: Dict[str, Tuple[Optional[Dict[str, Any]], Optional[Exception]]] = {}
+    if blobs_to_fetch:
+        max_workers = min(8, len(blobs_to_fetch))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_blob = {executor.submit(_fetch_blob_worker, b): b for b in blobs_to_fetch}
+            for future in future_to_blob:
+                b_path, data, err = future.result()
+                fetch_results[b_path] = (data, err)
+                requests_count += 1
+
+    for blob_info in blobs_to_fetch:
         # Enforce elapsed time budget
         if time.monotonic() - start_time >= MAX_SNAPSHOT_SECONDS:
             warnings.append(
@@ -1010,13 +1053,13 @@ def retrieve_repository_snapshot(
             break
 
         path = blob_info["path"]
-        blob_sha = blob_info["sha"]
+        blob_data, err = fetch_results.get(path, (None, None))
 
-        try:
-            blob_data = _call_installation_api(inst_id, f"/repositories/{repo_id}/git/blobs/{blob_sha}")
-            requests_count += 1
-        except Exception as err:
+        if err is not None:
             warnings.append(f"Failed to fetch blob for '{path}': {err}")
+            continue
+
+        if not blob_data:
             continue
 
         content_b64 = blob_data.get("content", "")
@@ -1049,6 +1092,11 @@ def retrieve_repository_snapshot(
         except UnicodeDecodeError:
             warnings.append(f"Skipped non-UTF-8 source file '{path}'.")
             continue
+
+    if halted_request_budget:
+        warnings.append(
+            f"Repository snapshot halted: exceeded request budget of {MAX_SNAPSHOT_REQUESTS} requests. Coverage is partial."
+        )
 
     if not files_dict:
         raise ValueError("No supported UTF-8 code or manifest files could be retrieved from this repository.")
