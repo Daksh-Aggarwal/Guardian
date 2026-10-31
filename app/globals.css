@@ -6099,3 +6099,105 @@ button.primary,.primary,button.btn-primary {color:var(--on-accent);box-shadow:no
 h1,h2,h3,h4,h5,h6 {line-height:1.2 !important;}
 .table-row button, .table-row .button {background:var(--accent-soft) !important;border-color:var(--accent-border) !important;box-shadow:none !important;}
 .dataset-filter-control button, .launchpad-actions button, .scan-panel button {box-shadow:none;}
+
+
+/* GitHub-style Security Activity & Threat Heatmap Hero */
+.heatmap-hero-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 24px;
+  margin-bottom: 24px;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.heatmap-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.heatmap-header-left {
+  max-width: 600px;
+}
+.heatmap-title {
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.3px;
+  margin: 4px 0 6px;
+  color: var(--text);
+}
+.heatmap-desc {
+  font-size: 13px;
+  color: var(--muted);
+  margin: 0;
+  line-height: 1.5;
+}
+.heatmap-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.heatmap-toggle-pill {
+  display: inline-flex;
+  padding: 3px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  gap: 2px;
+}
+.heatmap-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 0.15s ease-out;
+}
+.heatmap-toggle-btn:hover {
+  color: var(--text);
+}
+.heatmap-toggle-btn.active {
+  background: var(--surface);
+  color: var(--text);
+  border-color: var(--line);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+.heatmap-toggle-btn.active.activity {
+  color: #10b981;
+}
+.heatmap-toggle-btn.active.threats {
+  color: #f43f5e;
+}
+.btn-scan-hero {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  background: var(--accent);
+  color: #ffffff;
+  border: 1px solid var(--accent-border);
+  cursor: pointer;
+  transition: all 0.15s ease-out;
+}
+.btn-scan-hero:hover {
+  background: var(--accent-hover);
+  transform: translateY(-1px);
+}
+.heatmap-body {
+  padding-top: 12px;
+  border-top: 1px solid var(--line-subtle);
+}
