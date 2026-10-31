@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import re
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
@@ -17,6 +18,34 @@ DEFAULT_MODEL = "gemini-3.8-flash"
 DEFAULT_TIMEOUT_SECONDS = 30
 DEFAULT_MAX_TURNS = 30
 
+_dotenv_loaded = False
+
+def load_dotenv():
+    """Loads .env and .env.local from project root once if present and not already in environment."""
+    global _dotenv_loaded
+    if _dotenv_loaded:
+        return
+    _dotenv_loaded = True
+    root = Path(__file__).resolve().parents[2]
+    for fname in [".env", ".env.local"]:
+        p = root / fname
+        if p.is_file():
+            try:
+                for line in p.read_text(encoding="utf-8").splitlines():
+                    line = line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    k, v = line.split("=", 1)
+                    k = k.strip()
+                    v = v.strip().strip("'\"")
+                    if k not in os.environ:
+                        os.environ[k] = v
+            except Exception:
+                pass
+
+# Initialize environment once at module load
+load_dotenv()
+
 class CitationItem(BaseModel):
     finding_id: str = Field(description="Must exactly match an existing finding ID from the report context.")
     title: str = Field(description="Brief title of the cited finding.")
@@ -30,11 +59,14 @@ class GeminiAdvisorOutput(BaseModel):
 
 def get_ai_config() -> Dict[str, Any]:
     """Retrieves validated AI environment configuration without leaking secrets."""
-    enabled_str = os.getenv("GUARDIAN_AI_ENABLED", "").lower()
-    enabled = enabled_str in ("true", "1", "yes")
+    load_dotenv()
+    raw_enabled = os.getenv("GUARDIAN_AI_ENABLED", "").strip().lower()
     provider = os.getenv("GUARDIAN_AI_PROVIDER", "gemini").lower()
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
     model = os.getenv("GEMINI_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL
+
+    explicitly_disabled = raw_enabled in ("false", "0", "no", "disabled", "off")
+    enabled = bool(api_key) and not explicitly_disabled
 
     try:
         timeout = int(os.getenv("GUARDIAN_AI_TIMEOUT_SECONDS", str(DEFAULT_TIMEOUT_SECONDS)))
@@ -47,8 +79,8 @@ def get_ai_config() -> Dict[str, Any]:
         max_turns = DEFAULT_MAX_TURNS
 
     return {
-        "enabled": enabled and bool(api_key),
-        "explicitly_enabled": enabled,
+        "enabled": enabled,
+        "explicitly_enabled": raw_enabled in ("true", "1", "yes"),
         "has_key": bool(api_key),
         "api_key": api_key,
         "provider": provider,
@@ -153,9 +185,10 @@ class GeminiAdvisor:
         )
 
         try:
+            timeout_ms = self.timeout * 1000 if self.timeout < 1000 else self.timeout
             client = genai.Client(
                 api_key=self.api_key,
-                http_options=types.HttpOptions(timeout=self.timeout)
+                http_options=types.HttpOptions(timeout=timeout_ms)
             )
 
             config = types.GenerateContentConfig(

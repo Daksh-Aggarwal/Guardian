@@ -32,25 +32,37 @@ function renderMarkdown(text: string) {
   const elements: React.ReactNode[] = [];
   let inCodeBlock = false;
   let codeBlockContent: string[] = [];
-  let listItems: string[] = [];
+  let bulletItems: string[] = [];
+  let numberedItems: string[] = [];
 
-  function flushList() {
-    if (listItems.length > 0) {
+  function flushLists() {
+    if (bulletItems.length > 0) {
       elements.push(
-        <ul key={`list-${elements.length}`}>
-          {listItems.map((item, idx) => (
+        <ul key={`ul-${elements.length}`}>
+          {bulletItems.map((item, idx) => (
             <li key={idx}>{parseInlineMarkdown(item)}</li>
           ))}
         </ul>,
       );
-      listItems = [];
+      bulletItems = [];
+    }
+    if (numberedItems.length > 0) {
+      elements.push(
+        <ol key={`ol-${elements.length}`}>
+          {numberedItems.map((item, idx) => (
+            <li key={idx}>{parseInlineMarkdown(item)}</li>
+          ))}
+        </ol>,
+      );
+      numberedItems = [];
     }
   }
 
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
+    const rawLine = lines[i];
+    const trimmed = rawLine.trim();
 
-    if (line.startsWith("```")) {
+    if (rawLine.startsWith("```")) {
       if (inCodeBlock) {
         elements.push(
           <pre key={`code-${elements.length}`}>
@@ -60,34 +72,106 @@ function renderMarkdown(text: string) {
         codeBlockContent = [];
         inCodeBlock = false;
       } else {
-        flushList();
+        flushLists();
         inCodeBlock = true;
       }
       continue;
     }
 
     if (inCodeBlock) {
-      codeBlockContent.push(line);
+      codeBlockContent.push(rawLine);
       continue;
     }
 
-    if (line.trim().startsWith("- ") || line.trim().startsWith("* ")) {
-      listItems.push(line.trim().substring(2));
-      continue;
-    } else {
-      flushList();
-    }
-
-    if (!line.trim()) {
+    // Numbered list item: e.g. "1. " or "2. "
+    const numMatch = trimmed.match(/^(\d+)\.\s+(.*)$/);
+    if (numMatch) {
+      if (bulletItems.length > 0) flushLists();
+      numberedItems.push(numMatch[2]);
       continue;
     }
 
+    // Bullet list item: e.g. "- " or "* "
+    if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
+      if (numberedItems.length > 0) flushLists();
+      bulletItems.push(trimmed.substring(2));
+      continue;
+    }
+
+    // Any non-list line flushes open lists
+    flushLists();
+
+    if (!trimmed) {
+      continue;
+    }
+
+    // Markdown Headings: #, ##, ###, ####, #####, ######
+    if (trimmed.startsWith("###### ")) {
+      elements.push(
+        <h6 key={`h6-${elements.length}`}>
+          {parseInlineMarkdown(trimmed.substring(7))}
+        </h6>,
+      );
+      continue;
+    }
+    if (trimmed.startsWith("##### ")) {
+      elements.push(
+        <h5 key={`h5-${elements.length}`}>
+          {parseInlineMarkdown(trimmed.substring(6))}
+        </h5>,
+      );
+      continue;
+    }
+    if (trimmed.startsWith("#### ")) {
+      elements.push(
+        <h4 key={`h4-${elements.length}`}>
+          {parseInlineMarkdown(trimmed.substring(5))}
+        </h4>,
+      );
+      continue;
+    }
+    if (trimmed.startsWith("### ")) {
+      elements.push(
+        <h3 key={`h3-${elements.length}`}>
+          {parseInlineMarkdown(trimmed.substring(4))}
+        </h3>,
+      );
+      continue;
+    }
+    if (trimmed.startsWith("## ")) {
+      elements.push(
+        <h2 key={`h2-${elements.length}`}>
+          {parseInlineMarkdown(trimmed.substring(3))}
+        </h2>,
+      );
+      continue;
+    }
+    if (trimmed.startsWith("# ")) {
+      elements.push(
+        <h1 key={`h1-${elements.length}`}>
+          {parseInlineMarkdown(trimmed.substring(2))}
+        </h1>,
+      );
+      continue;
+    }
+
+    // Blockquote
+    if (trimmed.startsWith("> ")) {
+      elements.push(
+        <blockquote key={`quote-${elements.length}`}>
+          {parseInlineMarkdown(trimmed.substring(2))}
+        </blockquote>,
+      );
+      continue;
+    }
+
+    // Regular paragraph
     elements.push(
-      <p key={`p-${elements.length}`}>{parseInlineMarkdown(line)}</p>,
+      <p key={`p-${elements.length}`}>{parseInlineMarkdown(trimmed)}</p>,
     );
   }
 
-  flushList();
+  flushLists();
   if (inCodeBlock && codeBlockContent.length > 0) {
     elements.push(
       <pre key={`code-${elements.length}`}>
@@ -100,14 +184,39 @@ function renderMarkdown(text: string) {
 }
 
 function parseInlineMarkdown(text: string): React.ReactNode[] {
-  // Simple regex parser for bold **text** and inline `code`
-  const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g);
+  // Regex to split tokens: inline code `...`, bold **...**, italic *...*, or markdown links [...](...)
+  const parts = text.split(
+    /(`[^`]+`|\*\*[^*]+\*\*|(?<!\*)\*[^*]+\*(?!\*)|\[[^\]]+\]\([^)]+\))/g,
+  );
   return parts.map((part, index) => {
-    if (part.startsWith("`") && part.endsWith("`")) {
+    if (!part) return null;
+    if (part.startsWith("`") && part.endsWith("`") && part.length >= 2) {
       return <code key={index}>{part.slice(1, -1)}</code>;
     }
-    if (part.startsWith("**") && part.endsWith("**")) {
+    if (part.startsWith("**") && part.endsWith("**") && part.length >= 4) {
       return <strong key={index}>{part.slice(2, -2)}</strong>;
+    }
+    if (
+      part.startsWith("*") &&
+      part.endsWith("*") &&
+      part.length >= 2 &&
+      !part.startsWith("**")
+    ) {
+      return <em key={index}>{part.slice(1, -1)}</em>;
+    }
+    const linkMatch = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+    if (linkMatch) {
+      return (
+        <a
+          key={index}
+          href={linkMatch[2]}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-link"
+        >
+          {linkMatch[1]}
+        </a>
+      );
     }
     return part;
   });
@@ -134,7 +243,7 @@ export default function Explainer({
     Record<string, boolean>
   >({});
 
-  const chatBottomRef = useRef<HTMLDivElement>(null);
+  const feedRef = useRef<HTMLDivElement>(null);
 
   // Initialize consent from localStorage and fetch AI status
   useEffect(() => {
@@ -166,10 +275,15 @@ export default function Explainer({
     };
   }, [report.id]);
 
-  // Scroll to bottom when messages update
+  // Scroll only the internal conversation-feed container when messages update (never scroll window/page)
   useEffect(() => {
-    chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, busy]);
+    if (feedRef.current && messages.length > 0) {
+      feedRef.current.scrollTo({
+        top: feedRef.current.scrollHeight,
+        behavior: "smooth",
+      });
+    }
+  }, [messages.length, busy]);
 
   function handleConsentChange(value: boolean) {
     setConsent(value);
@@ -423,7 +537,12 @@ export default function Explainer({
       {messages.length === 0 && (
         <div className="suggestions">
           {suggestionsToShow.map((q) => (
-            <button key={q} disabled={busy} onClick={() => sendMessage(q)}>
+            <button
+              type="button"
+              key={q}
+              disabled={busy}
+              onClick={() => sendMessage(q)}
+            >
               {q}
               <ChevronRight size={13} />
             </button>
@@ -433,7 +552,7 @@ export default function Explainer({
 
       {/* Conversation Thread */}
       {messages.length > 0 && (
-        <div className="conversation-feed" aria-live="polite">
+        <div className="conversation-feed" ref={feedRef} aria-live="polite">
           {messages.map((msg, index) => (
             <motion.div
               key={msg.id || index}
@@ -562,8 +681,6 @@ export default function Explainer({
               </div>
             </motion.div>
           )}
-
-          <div ref={chatBottomRef} />
         </div>
       )}
 
