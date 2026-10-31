@@ -14,7 +14,7 @@ MAX_UPLOAD = 10 * 1024 * 1024
 MAX_EXPANDED = 25 * 1024 * 1024
 MAX_FILE = 1024 * 1024
 MAX_FILES = 500
-EXTENSIONS = {'.js', '.cjs', '.mjs', '.jsx', '.ts', '.tsx', '.json'}
+EXTENSIONS = {'.js', '.cjs', '.mjs', '.jsx', '.ts', '.tsx', '.json', '.py', '.pth', '.start', '.toml', '.cfg', '.md'}
 
 def safe_name(name):
     if not name or not isinstance(name, str):

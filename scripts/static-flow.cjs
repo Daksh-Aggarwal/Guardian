@@ -5,8 +5,19 @@
 const { parse } = require("@babel/parser");
 const posix = require("node:path").posix;
 const CREDENTIAL =
-  /\b(?:AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{20,}|npm_[A-Za-z0-9]{20,})\b/;
-const PRIVATE_FILE = /(\.ssh\/|id_rsa|\.npmrc|\.aws\/credentials)/i;
+  /\b(?:AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{20,}|npm_[A-Za-z0-9]{20,}|glpat-[A-Za-z0-9_-]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|pypi-[A-Za-z0-9_-]{32,}|sk-(?:ant-|proj-)?[A-Za-z0-9_-]{20,}|AIza[0-9A-Za-z_-]{35})\b|-----BEGIN (?:RSA |OPENSSH |EC |DSA )?PRIVATE KEY-----/;
+const PRIVATE_FILE =
+  /(\.ssh\/|id_rsa|id_ed25519|\.npmrc|\.pypirc|\.aws\/credentials|\.kube\/config|kubeconfig|\.docker\/config\.json|\.git-credentials|\.netrc|(?:^|[\/\\])\.env(?:\.[a-z0-9_]+)?$|\.bash_history|\.zsh_history|\.config\/gcloud|\.azure\/accessTokens\.json|\.vault-token|discord[\/\\]Local Storage[\/\\]leveldb|Login Data|Local State|key4\.db|logins\.json|\/etc\/shadow)/i;
+const PERSISTENCE_PATH =
+  /(\/etc\/cron|\/var\/spool\/cron|crontab|\/etc\/systemd\/system|\.config\/systemd\/user|LaunchAgents|LaunchDaemons|\.bashrc|\.bash_profile|\.zshrc|\.profile|\.git\/hooks\/(?:pre-commit|post-checkout|post-merge|pre-push)|CurrentVersion\\Run|schtasks)/i;
+const CLOUD_METADATA =
+  /(?:https?:\/\/)?(?:169\.254\.169\.254|metadata\.google\.internal|100\.100\.100\.200)(?:\/|$)/i;
+const MINING_INDICATOR =
+  /\b(?:stratum\+tcp:\/\/|stratum\+ssl:\/\/|xmrig|cryptonight|randomx|coinhive|minergate|nanopool|supportxmr|hashvault)\b/i;
+const SELF_PROPAGATION_CMD =
+  /\b(?:npm\s+publish|twine\s+upload|gh\s+repo\s+create|git\s+push\b.*--force)\b/i;
+const DEFENSE_IMPAIR_CMD =
+  /\b(?:NODE_TLS_REJECT_UNAUTHORIZED\s*=\s*['"]?0|Set-MpPreference\s+-DisableRealtimeMonitoring|ufw\s+disable|iptables\s+-F|setenforce\s+0)\b/i;
 const SENSITIVE_NAME =
   /(?:TOKEN|SECRET|PASSWORD|API_KEY|PRIVATE_KEY|CREDENTIAL|ACCESS_KEY)/i;
 const empty = () => ({ paths: [], props: new Map() });
@@ -96,6 +107,19 @@ function analyzeProject(files, overrides = {}) {
       m,
     );
   }
+  function allHostPaths(v, m, seen = new Set()) {
+    if (!v || seen.has(v)) return [];
+    seen.add(v);
+    return unique(
+      [
+        ...(v.hostPaths || []),
+        ...[...(v.props || new Map()).values()].flatMap((p) =>
+          allHostPaths(p, m, seen),
+        ),
+      ],
+      m,
+    );
+  }
   function merge(values, m, level = 0) {
     values = values.filter(Boolean);
     if (values.length === 1) return values[0];
@@ -105,6 +129,10 @@ function analyzeProject(files, overrides = {}) {
         ...empty(),
         paths: unique(
           values.flatMap((v) => allPaths(v, m)),
+          m,
+        ),
+        hostPaths: unique(
+          values.flatMap((v) => allHostPaths(v, m)),
           m,
         ),
         unknown: true,
@@ -131,6 +159,10 @@ function analyzeProject(files, overrides = {}) {
         values.flatMap((v) => v.paths || []),
         m,
       ),
+      hostPaths: unique(
+        values.flatMap((v) => v.hostPaths || []),
+        m,
+      ),
       props,
       unknown: values.some((v) => v.unknown),
       ref: same("ref"),
@@ -138,6 +170,13 @@ function analyzeProject(files, overrides = {}) {
       ns: same("ns"),
       literal: same("literal"),
       encoded: values.some((v) => v.encoded),
+      hostInfo: values.some((v) => v.hostInfo),
+      remoteData: values.some((v) => v.remoteData),
+      fileRead: values.some((v) => v.fileRead),
+      persistenceTarget: values.some((v) => v.persistenceTarget),
+      socketRef: values.some((v) => v.socketRef),
+      shellProcess: values.some((v) => v.shellProcess),
+      envGate: values.some((v) => v.envGate),
     };
   }
   function trail(v, m, n, kind, detail, binding) {
@@ -149,6 +188,10 @@ function analyzeProject(files, overrides = {}) {
           warn(m, "Trace length limit reached; middle steps omitted.");
           return [...p.slice(0, limits.maxTrace - 2), step];
         }
+        return [...p, step];
+      }),
+      hostPaths: (v.hostPaths || []).map((p) => {
+        if (p.length >= limits.maxTrace) return [...p.slice(0, limits.maxTrace - 2), step];
         return [...p, step];
       }),
     };
@@ -167,6 +210,9 @@ function analyzeProject(files, overrides = {}) {
     emit(m, "credential", n, detail);
     return { ...empty(), paths: [[loc(m, n, "source", detail)]], context };
   }
+  function hostSource(m, n, detail) {
+    return { ...empty(), hostPaths: [[loc(m, n, "source", detail)]], hostInfo: true };
+  }
   function property(v, key, m, n) {
     if (v.ns) {
       const mod = modules.get(v.ns);
@@ -176,6 +222,8 @@ function analyzeProject(files, overrides = {}) {
     if (v.props?.has(key)) return v.props.get(key);
     if (v.ref === "process" && key === "env")
       return { ...empty(), ref: "process.env" };
+    if (v.ref === "process" && ["platform", "arch", "version", "versions", "argv", "execPath", "pid", "ppid"].includes(key))
+      return { ...hostSource(m, n, `Process attribute process.${key}`), ref: `process.${key}`, envGate: true };
     if (v.ref === "process.env")
       return {
         ...source(
@@ -185,9 +233,12 @@ function analyzeProject(files, overrides = {}) {
           SENSITIVE_NAME.test(key) ? "secret" : "configuration",
         ),
         ref: `env-value:${key}`,
+        envGate: /^(CI|GITHUB_ACTIONS|NODE_ENV|USER|USERNAME|LOGNAME|HOSTNAME|COMPUTERNAME|GITLAB_CI|JENKINS_URL)$/i.test(key),
       };
-    if (v.ref) return { ...empty(), ref: v.ref + "." + key };
-    return v.paths?.length ? { ...empty(), paths: v.paths } : empty();
+    if (v.ref) return { ...empty(), ref: v.ref + "." + key, paths: v.paths || [], hostPaths: v.hostPaths || [], hostInfo: v.hostInfo, socketRef: v.socketRef, shellProcess: v.shellProcess, remoteData: v.remoteData, encoded: v.encoded, fileRead: v.fileRead };
+    return v.paths?.length || v.hostPaths?.length
+      ? { ...empty(), paths: v.paths || [], hostPaths: v.hostPaths || [], hostInfo: v.hostInfo, remoteData: v.remoteData, encoded: v.encoded }
+      : empty();
   }
   function names(pattern) {
     if (!pattern) return [];
@@ -314,6 +365,12 @@ function analyzeProject(files, overrides = {}) {
         return;
       }
       // Object references share one abstract heap cell, preserving ordinary aliases.
+      if (
+        (object.ref === "process.env" && key === "NODE_TLS_REJECT_UNAUTHORIZED" && String(value.literal) === "0") ||
+        (key === "rejectUnauthorized" && value.literal === false)
+      ) {
+        emit(m, "defense-impairment", pattern, "TLS certificate verification disabled");
+      }
       object.props.set(
         key,
         trail(value, m, pattern, "property", `Property ${key}`),
@@ -325,7 +382,18 @@ function analyzeProject(files, overrides = {}) {
     warn(m, `Unsupported binding pattern ${pattern.type}.`);
   }
   function resolve(spec, m) {
+    m.imports.add(spec);
     if (!spec.startsWith(".")) {
+      if (
+        [
+          "stratum-client",
+          "coinhive",
+          "node-cryptonight",
+          "cryptonight-hashing",
+        ].includes(spec)
+      ) {
+        return { ref: `mining:${spec}` };
+      }
       if (
         [
           "axios",
@@ -341,13 +409,48 @@ function analyzeProject(files, overrides = {}) {
           "node:fs/promises",
           "child_process",
           "node:child_process",
+          "os",
+          "node:os",
+          "dns",
+          "node:dns",
+          "dns/promises",
+          "node:dns/promises",
+          "net",
+          "node:net",
+          "tls",
+          "node:tls",
+          "dgram",
+          "node:dgram",
+          "crypto",
+          "node:crypto",
+          "zlib",
+          "node:zlib",
+          "vm",
+          "node:vm",
+          "path",
+          "node:path",
+          "querystring",
+          "node:querystring",
+          "url",
+          "node:url",
+          "util",
+          "node:util",
+          "stream",
+          "node:stream",
+          "worker_threads",
+          "node:worker_threads",
+          "node-os-utils",
+          "request",
+          "got",
         ].includes(spec)
       )
         return {
           ref: spec
             .replace(/^node:/, "")
             .replace("fs/promises", "fs.promises")
-            .replace("node-fetch", "fetch"),
+            .replace("dns/promises", "dns")
+            .replace("node-fetch", "fetch")
+            .replace(/^(request|got)$/, "axios"),
         };
       warn(
         m,
@@ -498,7 +601,11 @@ function analyzeProject(files, overrides = {}) {
           return { ...empty(), ref: n.name };
         return empty();
       }
-      case "StringLiteral":
+      case "StringLiteral": {
+        if (MINING_INDICATOR.test(n.value))
+          emit(m, "cryptomining", n, "Cryptomining pool or miner indicator");
+        if (CLOUD_METADATA.test(n.value))
+          emit(m, "cloud-metadata", n, "Cloud instance metadata endpoint reference");
         if (CREDENTIAL.test(n.value) || PRIVATE_FILE.test(n.value))
           return {
             ...source(
@@ -509,8 +616,14 @@ function analyzeProject(files, overrides = {}) {
                 : "Credential-shaped string; validity unknown",
             ),
             literal: n.value,
+            persistenceTarget: PERSISTENCE_PATH.test(n.value),
           };
-        return { ...empty(), literal: n.value };
+        return {
+          ...empty(),
+          literal: n.value,
+          persistenceTarget: PERSISTENCE_PATH.test(n.value),
+        };
+      }
       case "BooleanLiteral":
       case "NumericLiteral":
       case "NullLiteral":
@@ -534,8 +647,19 @@ function analyzeProject(files, overrides = {}) {
                   ? fn(p, scope, m)
                   : evaluate(p.value, scope, m),
               );
-            else warn(m, "Dynamic object keys are unsupported.");
+            else if (p.value) {
+              const val = evaluate(p.value, scope, m);
+              if (
+                typeof val.literal === "string" &&
+                PERSISTENCE_PATH.test(val.literal)
+              )
+                val.persistenceTarget = true;
+              warn(m, "Dynamic object keys are unsupported.");
+            }
           }
+        }
+        if (value.props.get("rejectUnauthorized")?.literal === false) {
+          emit(m, "defense-impairment", n, "TLS certificate verification disabled");
         }
         return value;
       }
@@ -569,16 +693,48 @@ function analyzeProject(files, overrides = {}) {
         return v;
       }
       case "BinaryExpression":
-      case "LogicalExpression":
-        return merge(
-          [evaluate(n.left, scope, m), evaluate(n.right, scope, m)],
-          m,
-        );
-      case "TemplateLiteral":
-        return merge(
-          n.expressions.map((e) => evaluate(e, scope, m)),
-          m,
-        );
+      case "LogicalExpression": {
+        const left = evaluate(n.left, scope, m),
+          right = evaluate(n.right, scope, m),
+          merged = merge([left, right], m);
+        if (
+          n.operator === "+" &&
+          typeof left.literal === "string" &&
+          typeof right.literal === "string"
+        ) {
+          const combined = left.literal + right.literal;
+          merged.literal = combined;
+          if (PRIVATE_FILE.test(combined) && !merged.paths?.length) {
+            const s = source(m, n, "Sensitive credential-file reference");
+            merged.paths = s.paths;
+          }
+          if (PERSISTENCE_PATH.test(combined)) merged.persistenceTarget = true;
+          if (CLOUD_METADATA.test(combined))
+            emit(m, "cloud-metadata", n, "Cloud instance metadata endpoint reference");
+        }
+        if (
+          ["===", "!==", "==", "!=", "<", ">", "<=", ">="].includes(n.operator) &&
+          (left.envGate || right.envGate || left.hostInfo || right.hostInfo)
+        ) {
+          merged.envGate = true;
+        }
+        return merged;
+      }
+      case "TemplateLiteral": {
+        const exprs = n.expressions.map((e) => evaluate(e, scope, m));
+        const merged = merge(exprs, m);
+        const raw = (n.quasis || []).map((q) => q.value?.cooked || q.value?.raw || "").join("/");
+        if (PRIVATE_FILE.test(raw) && !merged.paths?.length) {
+          const s = source(m, n, "Sensitive credential-file reference");
+          merged.paths = s.paths;
+        }
+        if (PERSISTENCE_PATH.test(raw)) merged.persistenceTarget = true;
+        if (CLOUD_METADATA.test(raw))
+          emit(m, "cloud-metadata", n, "Cloud instance metadata endpoint reference");
+        if (MINING_INDICATOR.test(raw))
+          emit(m, "cryptomining", n, "Cryptomining pool or miner indicator");
+        return merged;
+      }
       case "ConditionalExpression":
         warn(
           m,
@@ -620,6 +776,29 @@ function analyzeProject(files, overrides = {}) {
         return empty();
     }
   }
+  function runCallbacks(n, args, scope, m, syntheticArgs = []) {
+    let hasCb = false;
+    for (let i = 0; i < n.arguments.length; i++) {
+      const astArg = n.arguments[i];
+      if (
+        ["ArrowFunctionExpression", "FunctionExpression"].includes(
+          astArg?.type,
+        ) &&
+        args[i]?.fn
+      ) {
+        hasCb = true;
+        const before = snapshot(scope);
+        invoke(args[i], syntheticArgs, n, m);
+        for (const [c, v] of before) c.value = merge([v, c.value], m);
+      }
+    }
+    if (hasCb) {
+      warn(
+        m,
+        "Callback scheduling is unsupported; callback bodies may be uninspected.",
+      );
+    }
+  }
   function call(n, scope, m) {
     if (n.callee.type === "Import") {
       warn(m, "Dynamic import is unsupported.");
@@ -634,6 +813,9 @@ function analyzeProject(files, overrides = {}) {
         return empty();
       }
       const imported = resolve(n.arguments[0].value, m);
+      if (imported.ref?.startsWith("mining:")) {
+        emit(m, "cryptomining", n, `Cryptomining library import: ${n.arguments[0].value}`);
+      }
       if (imported.ns) {
         const mod = modules.get(imported.ns);
         return mod.cjsAssigned ? mod.cjs : imported;
@@ -641,18 +823,67 @@ function analyzeProject(files, overrides = {}) {
       return { ...empty(), ...imported };
     }
     if (callee.fn) return invoke(callee, args, n, m);
+    if (ref.startsWith("mining:")) {
+      emit(m, "cryptomining", n, `Cryptomining client invocation via ${ref}`);
+      runCallbacks(n, args, scope, m);
+      return { ...empty(), ref: "mining-instance" };
+    }
+    if (
+      /^(os\.(homedir|hostname|userInfo|networkInterfaces|platform|arch|release|cpus|type|endianness)|dns\.getServers|process\.cwd)$/.test(
+        ref,
+      )
+    ) {
+      return {
+        ...hostSource(m, n, `Host environment fingerprint via ${ref}()`),
+        ref: `host:${ref}`,
+        envGate: /^(os\.(platform|arch|hostname|userInfo)|process\.cwd)$/.test(ref),
+      };
+    }
+    if (/^path\.(join|resolve)$/.test(ref)) {
+      const merged = merge(args, m);
+      const lits = args
+        .map((a) => (typeof a.literal === "string" ? a.literal : ""))
+        .filter(Boolean)
+        .join("/");
+      if (lits) {
+        merged.literal = lits;
+        if (PRIVATE_FILE.test(lits) && !merged.paths?.length) {
+          const s = source(m, n, "Sensitive credential-file reference");
+          merged.paths = s.paths;
+        }
+        if (PERSISTENCE_PATH.test(lits)) merged.persistenceTarget = true;
+      }
+      return merged;
+    }
+    if (/^querystring\.(stringify|escape)$/.test(ref)) {
+      return merge(args, m);
+    }
     const network =
       /^(fetch|axios(?:\.(get|post|put|patch|delete|head|options|request))?|https?\.(request|get)|undici\.(fetch|request))$/.test(
         ref,
       );
     if (network) {
       emit(m, "network", n, `Outbound request via ${ref}`);
+      m.hasNetworkDownload = true;
+      if (
+        args.some(
+          (a) =>
+            (typeof a.literal === "string" && CLOUD_METADATA.test(a.literal)) ||
+            a.props?.get("hostname")?.literal === "169.254.169.254" ||
+            a.props?.get("host")?.literal === "169.254.169.254" ||
+            a.props?.get("hostname")?.literal === "metadata.google.internal",
+        )
+      ) {
+        emit(m, "cloud-metadata", n, `Cloud metadata service request via ${ref}`);
+      }
       const flowArgs = args.map((v) =>
         v.ref === "process.env"
           ? source(m, n, "Entire environment object passed to request")
           : v,
       );
-      const paths = allPaths(merge(flowArgs, m), m);
+      const mergedFlow = merge(flowArgs, m);
+      const paths = allPaths(mergedFlow, m);
+      const hPaths = allHostPaths(mergedFlow, m);
       if (paths.length) {
         const options =
           ref === "axios.post" || ref === "axios.put" || ref === "axios.patch"
@@ -698,13 +929,29 @@ function analyzeProject(files, overrides = {}) {
             "Sensitive source reaches network arguments through a statically inferred path",
             { context, flows },
           );
+      } else if (hPaths.length) {
+        emit(
+          m,
+          "info-exfiltration",
+          n,
+          "Host fingerprint data reaches outbound network request",
+        );
       }
+      const synRes = {
+        ...empty(),
+        ref: "http-response",
+        remoteData: true,
+        paths: [[loc(m, n, "source", `Remote HTTP response from ${ref}`)]],
+      };
+      runCallbacks(n, args, scope, m, [synRes, synRes, synRes]);
       if (/^https?\.request$/.test(ref))
-        return { ...empty(), ref: "request-stream" };
-      return empty();
+        return { ...empty(), ref: "request-stream", remoteData: true };
+      return synRes;
     }
     if (/^request-stream\.(write|end)$/.test(ref)) {
-      const paths = allPaths(merge(args, m), m);
+      const mergedArgs = merge(args, m);
+      const paths = allPaths(mergedArgs, m);
+      const hPaths = allHostPaths(mergedArgs, m);
       emit(m, "network", n, "Request body stream");
       if (paths.length)
         emit(
@@ -724,10 +971,48 @@ function analyzeProject(files, overrides = {}) {
             })),
           },
         );
+      else if (hPaths.length)
+        emit(
+          m,
+          "info-exfiltration",
+          n,
+          "Host fingerprint data reaches HTTP request body stream",
+        );
       return empty();
     }
-    if (ref === "eval" || ref === "Function") {
+    if (/^http-response\.(on|once|addListener|then|json|text)$/.test(ref)) {
+      const chunkVal = {
+        ...empty(),
+        ref: "http-response-chunk",
+        remoteData: true,
+        paths: [[loc(m, n, "source", "Remote HTTP response body")]],
+      };
+      runCallbacks(n, args, scope, m, [chunkVal]);
+      return { ...chunkVal, ref: "http-response" };
+    }
+    if (/^http-response\.pipe$/.test(ref)) {
+      if (args.some((a) => a.ref === "fs-write-stream")) {
+        m.hasFileWrite = true;
+        m.hasStagedDownload = true;
+      }
+      return args[0] || empty();
+    }
+    if (
+      ref === "eval" ||
+      ref === "Function" ||
+      /^vm\.(runInNewContext|runInThisContext|runInContext|compileFunction)$/.test(
+        ref,
+      )
+    ) {
       emit(m, "dynamic", n, "Dynamic code execution via " + ref);
+      m.hasDynamicOrExec = true;
+      if (args.some((v) => v.remoteData))
+        emit(
+          m,
+          "c2-execution",
+          n,
+          "Remote network response reaches dynamic code execution",
+        );
       if (args.some((v) => v.encoded))
         emit(
           m,
@@ -739,17 +1024,152 @@ function analyzeProject(files, overrides = {}) {
     }
     if (
       ref === "atob" ||
-      (ref === "Buffer.from" && ["base64", "hex"].includes(args[1]?.literal))
+      (ref === "Buffer.from" && ["base64", "hex"].includes(args[1]?.literal)) ||
+      /^zlib\.(inflateSync|inflate|gunzipSync|gunzip|unzipSync|unzip|brotliDecompressSync)$/.test(
+        ref,
+      )
     ) {
       emit(m, "encoding", n, "Encoded content is decoded");
       return { ...merge(args, m), encoded: true, ref: "decoded-value" };
     }
+    if (/^crypto\.(createDecipheriv|createDecipher)$/.test(ref)) {
+      emit(m, "encoding", n, "Cryptographic decipher created");
+      return { ...merge(args, m), encoded: true, ref: "crypto-decipher" };
+    }
+    if (/^crypto-decipher\.(update|final)$/.test(ref)) {
+      emit(m, "encoding", n, "Encrypted payload decrypted");
+      return { ...merge(args, m), encoded: true, ref: "decoded-value" };
+    }
+    if (/^dns\.(resolve|resolve4|resolve6|resolveTxt|resolveAny|lookup)$/.test(ref)) {
+      emit(m, "network", n, `DNS query via ${ref}`);
+      const mergedArgs = merge(args, m);
+      const paths = allPaths(mergedArgs, m);
+      const hPaths = allHostPaths(mergedArgs, m);
+      if (paths.length || hPaths.length || mergedArgs.encoded || mergedArgs.fileRead) {
+        emit(
+          m,
+          "dns-tunneling",
+          n,
+          `Host or credential data passed to DNS query (${ref})`,
+        );
+      }
+      const dnsRes = {
+        ...empty(),
+        remoteData: true,
+        ref: "dns-response",
+      };
+      runCallbacks(n, args, scope, m, [empty(), dnsRes]);
+      return dnsRes;
+    }
+    if (/^(net|tls)\.(Socket|connect|createConnection)$/.test(ref)) {
+      emit(m, "network", n, `Raw socket connection via ${ref}`);
+      m.hasSocketConnect = true;
+      if (m.hasShellSpawn) {
+        emit(
+          m,
+          "reverse-shell",
+          n,
+          "Raw network socket combined with interactive shell process",
+        );
+      }
+      const sock = { ...empty(), ref: "net-socket", socketRef: true };
+      runCallbacks(n, args, scope, m, [sock]);
+      return sock;
+    }
+    if (/^net-socket\.(connect|on|once|write)$/.test(ref)) {
+      emit(m, "network", n, `Socket operation via ${ref}`);
+      m.hasSocketConnect = true;
+      if (m.hasShellSpawn) {
+        emit(
+          m,
+          "reverse-shell",
+          n,
+          "Raw network socket connected alongside shell process",
+        );
+      }
+      runCallbacks(n, args, scope, m, [{ ...empty(), remoteData: true }]);
+      return { ...empty(), ref: "net-socket", socketRef: true };
+    }
+    if (/^(net-socket|shell-process|shell-stream)\.pipe$/.test(ref)) {
+      if (
+        args.some((a) => a.socketRef || a.shellProcess) ||
+        (m.hasSocketConnect && m.hasShellSpawn)
+      ) {
+        emit(
+          m,
+          "reverse-shell",
+          n,
+          "Process stream piped directly to or from network socket",
+        );
+      }
+      return args[0] || empty();
+    }
+    if (/^(https?|net|tls)\.createServer$/.test(ref)) {
+      runCallbacks(n, args, scope, m, [
+        { ...empty(), remoteData: true },
+        { ...empty(), ref: "request-stream" },
+      ]);
+      return { ...empty(), ref: "http-server" };
+    }
+    if (/^http-server\.listen$/.test(ref)) {
+      emit(
+        m,
+        "persistence",
+        n,
+        "Persistent network server listener started via listen()",
+      );
+      runCallbacks(n, args, scope, m);
+      return empty();
+    }
     if (
-      /^child_process\.(exec|execSync|spawn|spawnSync|execFile|execFileSync)$/.test(
+      /^child_process\.(exec|execSync|spawn|spawnSync|execFile|execFileSync|fork)$/.test(
         ref,
       )
     ) {
       emit(m, "execution", n, "Operating-system process creation");
+      m.hasDynamicOrExec = true;
+      const cmdLit = typeof args[0]?.literal === "string" ? args[0].literal : "";
+      if (/^(?:\/bin\/(?:ba|z|da)?sh|(?:ba|z)?sh|cmd(?:\.exe)?|powershell(?:\.exe)?|pwsh)$/i.test(cmdLit)) {
+        m.hasShellSpawn = true;
+      }
+      if (m.hasSocketConnect && m.hasShellSpawn) {
+        emit(
+          m,
+          "reverse-shell",
+          n,
+          "Interactive shell spawned alongside raw network socket",
+        );
+      }
+      if (
+        args.some((v) => v.remoteData) ||
+        /\/dev\/tcp\/|\bnc\s+-e\b|\bncat\b.*-e|\bbash\s+-i\b|\bsocat\b.*exec:/i.test(
+          cmdLit,
+        )
+      ) {
+        if (args.some((v) => v.remoteData)) {
+          emit(
+            m,
+            "c2-execution",
+            n,
+            "Remote network response executed via child_process",
+          );
+        } else {
+          emit(
+            m,
+            "reverse-shell",
+            n,
+            "Shell command establishes a reverse shell connection",
+          );
+        }
+      }
+      if (m.hasNetworkDownload && m.hasFileWrite) {
+        emit(
+          m,
+          "staged-dropper",
+          n,
+          "Downloaded file written to disk and executed via child_process",
+        );
+      }
       if (
         args.some(
           (v) =>
@@ -758,23 +1178,155 @@ function analyzeProject(files, overrides = {}) {
         )
       )
         emit(m, "remote", n, "Shell downloads a remote payload");
-      return empty();
+      if (
+        args.some(
+          (v) =>
+            typeof v.literal === "string" && MINING_INDICATOR.test(v.literal),
+        )
+      )
+        emit(m, "cryptomining", n, "Process command launches cryptominer");
+      if (
+        args.some(
+          (v) =>
+            v.persistenceTarget ||
+            (typeof v.literal === "string" && PERSISTENCE_PATH.test(v.literal)),
+        )
+      )
+        emit(
+          m,
+          "persistence",
+          n,
+          "Process command modifies system persistence configuration",
+        );
+      if (
+        args.some(
+          (v) =>
+            typeof v.literal === "string" &&
+            SELF_PROPAGATION_CMD.test(v.literal),
+        )
+      )
+        emit(
+          m,
+          "self-propagation",
+          n,
+          "Process command publishes package or pushes repository changes",
+        );
+      if (
+        args.some(
+          (v) =>
+            typeof v.literal === "string" && DEFENSE_IMPAIR_CMD.test(v.literal),
+        )
+      )
+        emit(
+          m,
+          "defense-impairment",
+          n,
+          "Process command impairs host security controls or TLS verification",
+        );
+      if (
+        args.some(
+          (v) =>
+            typeof v.literal === "string" &&
+            /\brm\s+-(?:rf|fr)\s+(?:\/|~|\$HOME|\.\.)/i.test(v.literal),
+        )
+      )
+        emit(
+          m,
+          "destructive-fs",
+          n,
+          "Process command performs destructive recursive deletion",
+        );
+      runCallbacks(n, args, scope, m);
+      const streamObj = {
+        ...empty(),
+        ref: "shell-stream",
+        shellProcess: true,
+      };
+      return {
+        ...empty(),
+        ref: "shell-process",
+        shellProcess: true,
+        props: new Map([
+          ["stdin", streamObj],
+          ["stdout", streamObj],
+          ["stderr", streamObj],
+        ]),
+      };
     }
     if (
-      /^fs(?:\.promises)?\.(readFile|readFileSync|writeFile|writeFileSync|readdir|readdirSync)$/.test(
+      /^fs(?:\.promises)?\.(readFile|readFileSync|writeFile|writeFileSync|appendFile|appendFileSync|readdir|readdirSync|createWriteStream|rm|rmSync|rmdir|rmdirSync|unlink|unlinkSync|chmod|chmodSync)$/.test(
         ref,
       )
-    )
+    ) {
       emit(m, "filesystem", n, "File-system access");
+      const targetArg = args[0] || empty();
+      const targetLit = typeof targetArg.literal === "string" ? targetArg.literal : "";
+      if (/writeFile|appendFile|createWriteStream/.test(ref)) {
+        m.hasFileWrite = true;
+        if (m.hasNetworkDownload && args.some((a) => a.remoteData)) {
+          m.hasStagedDownload = true;
+        }
+        if (targetArg.persistenceTarget || PERSISTENCE_PATH.test(targetLit)) {
+          emit(
+            m,
+            "persistence",
+            n,
+            `File write targets persistence location (${targetLit || "persistence path"})`,
+          );
+        }
+        if (/\.github[\/\\]workflows[\/\\]/i.test(targetLit)) {
+          emit(
+            m,
+            "self-propagation",
+            n,
+            "File write injects or modifies GitHub Actions workflow",
+          );
+        }
+      }
+      if (/rm|rmdir|unlink/.test(ref)) {
+        if (/^(?:\/|~|\.\.\/|[A-Za-z]:\\$)/.test(targetLit)) {
+          emit(
+            m,
+            "destructive-fs",
+            n,
+            `File deletion targets sensitive or parent path (${targetLit})`,
+          );
+        }
+      }
+      if (/createWriteStream/.test(ref)) {
+        return { ...empty(), ref: "fs-write-stream" };
+      }
+      if (/readFile|readdir/.test(ref)) {
+        const readVal = {
+          ...merge(args, m),
+          fileRead: true,
+        };
+        if (PRIVATE_FILE.test(targetLit) && !readVal.paths?.length) {
+          const s = source(m, n, "Sensitive credential-file reference");
+          readVal.paths = s.paths;
+        }
+        runCallbacks(n, args, scope, m, [empty(), readVal]);
+        return readVal;
+      }
+      runCallbacks(n, args, scope, m);
+      return merge(args, m);
+    }
     if (
       ref === "JSON.stringify" ||
       ref === "Buffer.from" ||
-      ref === "decoded-value.toString"
-    )
+      ref === "decoded-value.toString" ||
+      ref.endsWith(".toString")
+    ) {
+      const obj = n.callee.object ? evaluate(n.callee.object, scope, m) : empty();
       return {
-        ...merge(args.length ? args : [evaluate(n.callee.object, scope, m)], m),
-        encoded: ref === "decoded-value.toString",
+        ...merge([obj, ...args], m),
+        ref: ref === "Buffer.from" ? "buffer" : undefined,
+        encoded:
+          ref === "decoded-value.toString" ||
+          obj.encoded ||
+          ["base64", "hex"].includes(args[0]?.literal),
       };
+    }
     // Unknown transformations preserve origins but disclose the unknown edge.
     const value = merge(args, m);
     if (value.paths.length) {
@@ -790,15 +1342,7 @@ function analyzeProject(files, overrides = {}) {
         "Unmodeled transformation; propagation is uncertain",
       );
     }
-    if (
-      n.arguments.some((a) =>
-        ["ArrowFunctionExpression", "FunctionExpression"].includes(a.type),
-      )
-    )
-      warn(
-        m,
-        "Callback scheduling is unsupported; callback bodies may be uninspected.",
-      );
+    runCallbacks(n, args, scope, m);
     return value;
   }
   function snapshot(scope) {
@@ -862,14 +1406,39 @@ function analyzeProject(files, overrides = {}) {
           stop: true,
         };
       case "IfStatement": {
-        evaluate(n.test, scope, m);
+        const cond = evaluate(n.test, scope, m);
         warn(m, "Conditional branches are merged; reachability is not proven.");
+        const evCountBefore = m.events.length;
         const before = snapshot(scope);
         const a = statement(n.consequent, scope, m),
           after = snapshot(scope);
         for (const [c, v] of before) c.value = v;
         const b = statement(n.alternate, scope, m);
         for (const [c, v] of after) c.value = merge([v, c.value], m);
+        if (cond.envGate) {
+          const newEvents = m.events.slice(evCountBefore);
+          if (
+            newEvents.some((e) =>
+              [
+                "execution",
+                "exfiltration",
+                "info-exfiltration",
+                "dynamic",
+                "encoded-execution",
+                "c2-execution",
+                "reverse-shell",
+                "staged-dropper",
+              ].includes(e.kind),
+            )
+          ) {
+            emit(
+              m,
+              "conditional-evasion",
+              n.test,
+              "Environment or host-attribute check gates sensitive execution or network behavior",
+            );
+          }
+        }
         return {
           value: merge([a?.value || empty(), b?.value || empty()], m),
           stop: !!a?.stop && !!b?.stop,
@@ -1011,6 +1580,13 @@ function analyzeProject(files, overrides = {}) {
       seen: new Set(),
       warnings: new Set(),
       exports: new Map(),
+      imports: new Set(),
+      hasNetworkDownload: false,
+      hasFileWrite: false,
+      hasStagedDownload: false,
+      hasSocketConnect: false,
+      hasShellSpawn: false,
+      hasDynamicOrExec: false,
       error: null,
       state: "new",
     };
