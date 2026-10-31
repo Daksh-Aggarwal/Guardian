@@ -235,7 +235,8 @@ def test_npm_opaque_file_outside_package_root_refused(monkeypatch, tmp_path):
 
 
 def test_npm_opaque_bytes_count_towards_expanded_limit(monkeypatch, tmp_path):
+    from dataclasses import replace
+    from backend.guardian.config import ArchiveLimits
     _, raw = package(extra={'package/one.bin': 'x' * 100, 'package/two.bin': 'x' * 100})
-    monkeypatch.setattr(ingestion, 'MAX_EXPANDED', 180)
     with pytest.raises(AcquisitionError, match='expanded-byte'):
-        npm_adapter._manifest_files(raw)
+        npm_adapter._manifest_files(raw, limits=replace(ArchiveLimits.from_env('npm'), expanded=180))

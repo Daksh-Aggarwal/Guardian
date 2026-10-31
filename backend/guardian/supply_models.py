@@ -4,11 +4,26 @@ from typing import Dict, List
 
 
 class AcquisitionError(ValueError):
-    pass
+    """Safe diagnostics only; exception causes may contain private upstream details."""
+    def __init__(self, message, *, category='acquisition_failure', operation=None,
+                 package=None, budget=None, limit=None, encountered=None, detail=None,
+                 bytes_received=0):
+        super().__init__(message)
+        self.category, self.operation, self.package = category, operation, package
+        self.budget, self.limit, self.encountered = budget, limit, encountered
+        self.detail, self.bytes_received = detail, bytes_received
+
+    def diagnostic(self):
+        return {key: value for key, value in {
+            'category': self.category, 'operation': self.operation, 'package': self.package,
+            'budget': self.budget, 'limit': self.limit, 'encountered': self.encountered,
+            'detail': self.detail}.items() if value is not None}
 
 
 class IntegrityError(AcquisitionError):
-    pass
+    def __init__(self, message, **kwargs):
+        kwargs.setdefault('category', 'integrity_mismatch')
+        super().__init__(message, **kwargs)
 
 
 class InstallError(ValueError):
@@ -43,3 +58,6 @@ class Plan:
     complete: bool = True
     limitations: List[str] = field(default_factory=list)
     installer_data: dict = field(default_factory=dict)
+    locations: List[dict] = field(default_factory=list)
+    budgets: dict = field(default_factory=dict)
+    acquisition: dict = field(default_factory=dict)

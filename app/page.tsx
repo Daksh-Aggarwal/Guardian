@@ -194,22 +194,45 @@ export default function Home() {
     const urlParams = new URLSearchParams(window.location.search);
     const gh = urlParams.get("github");
     const installationId = urlParams.get("installation_id");
+    const sessionToken = urlParams.get("session_token");
+
+    if (sessionToken) {
+      api("/session/adopt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_token: sessionToken }),
+      }).catch(console.error);
+    }
 
     if (installationId) {
       const setupAction = urlParams.get("setup_action");
       const state = urlParams.get("state");
-      const stateParam = state ? `&state=${encodeURIComponent(state)}` : "";
-      api(`/github/callback?installation_id=${installationId}&setup_action=${setupAction || ""}${stateParam}`)
-        .then(() => {
-          setNotice("GitHub App successfully connected. You can now browse and inspect repositories.");
-          window.history.replaceState(null, "", window.location.pathname);
-          setScanTab("github");
-          refresh();
-        })
-        .catch((e) => {
-          console.error("GitHub callback error:", e);
-          window.history.replaceState(null, "", window.location.pathname);
-        });
+      if (state) {
+        api(`/github/callback?installation_id=${installationId}&setup_action=${setupAction || ""}&state=${encodeURIComponent(state)}`)
+          .then(() => {
+            setNotice("GitHub App successfully connected. You can now browse and inspect repositories.");
+            window.history.replaceState(null, "", window.location.pathname);
+            setScanTab("github");
+            refresh();
+          })
+          .catch((e) => {
+            console.error("GitHub callback error:", e);
+            window.history.replaceState(null, "", window.location.pathname);
+          });
+      } else {
+        // Direct link without state (standard GitHub App setup redirect)
+        api(`/github/installations/${installationId}/link`, { method: "POST" })
+          .then(() => {
+            setNotice("GitHub App successfully connected. You can now browse and inspect repositories.");
+            window.history.replaceState(null, "", window.location.pathname);
+            setScanTab("github");
+            refresh();
+          })
+          .catch((e) => {
+            console.error("GitHub link error:", e);
+            window.history.replaceState(null, "", window.location.pathname);
+          });
+      }
     } else if (gh === "connected") {
       setNotice("GitHub App successfully connected. You can now browse and inspect repositories.");
       window.history.replaceState(null, "", window.location.pathname);

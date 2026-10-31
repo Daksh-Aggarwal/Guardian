@@ -11,3 +11,4 @@ __pycache__/
 plugins/
 unslop/
 marketing/
+guardian_local_security.egg-info

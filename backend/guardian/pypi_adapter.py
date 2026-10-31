@@ -20,6 +20,7 @@ import sysconfig
 import tempfile
 import time
 import zipfile
+from dataclasses import replace
 from email.parser import Parser
 from pathlib import Path, PurePosixPath
 from urllib.parse import quote, urlparse
@@ -32,6 +33,7 @@ from packaging.utils import canonicalize_name, parse_sdist_filename, parse_wheel
 from packaging.version import InvalidVersion, Version
 
 from . import ingestion
+from .config import ArchiveLimits, integer
 from .pypi import download_pypi_url
 from .supply_models import Artifact, Plan, AcquisitionError, IntegrityError, InstallError
 
@@ -138,18 +140,19 @@ def _manifest_specs(project, snapshot=None):
     raise AcquisitionError('No requirements.txt or static PEP 621 pyproject.toml dependencies found.')
 
 
-def _inspect(raw, filename, verified=False):
+def _inspect(raw, filename, verified=False, *, limits=None, stats=None):
     """Read members in memory and bind package identity to the actual artifact."""
     ingestion.safe_name(filename)
     if '/' in filename:
         raise AcquisitionError('Distribution filename must be a single path component.')
-    if len(raw) > ingestion.MAX_UPLOAD:
-        raise AcquisitionError('Distribution exceeds the 10 MB artifact limit.')
     wheel = filename.endswith('.whl')
+    limits = limits or ArchiveLimits.from_env('wheel' if wheel else 'sdist')
+    if len(raw) > limits.compressed:
+        raise AcquisitionError('Distribution exceeds the compressed-byte limit.', category='archive_compressed_limit', operation='distribution inspection', budget='compressed_bytes', limit=limits.compressed, encountered=len(raw))
     if not wheel and not filename.endswith(('.tar.gz', '.zip')):
         raise AcquisitionError('Only wheels, .tar.gz sdists, and .zip sdists are supported.')
     try:
-        files, warnings = ingestion.archive(raw, 'zip' if wheel or filename.endswith('.zip') else 'tar')
+        files, warnings = ingestion.archive(raw, 'zip' if wheel or filename.endswith('.zip') else 'tar', limits=limits, stats=stats)
         if wheel:
             expected_name, expected_version, _, tags = parse_wheel_filename(filename)
             if not tags.intersection(set(sys_tags())):
@@ -200,8 +203,9 @@ def _inspect(raw, filename, verified=False):
 
 def acquire_local(path):
     path = Path(path)
-    if path.is_symlink() or not path.is_file() or path.stat().st_size > ingestion.MAX_UPLOAD:
-        raise AcquisitionError('Local artifact must be a regular file no larger than 10 MB.')
+    limit = ArchiveLimits.from_env('wheel' if path.name.endswith('.whl') else 'sdist').compressed
+    if path.is_symlink() or not path.is_file() or path.stat().st_size > limit:
+        raise AcquisitionError('Local artifact must be a bounded regular distribution file.')
     artifact, _, _ = _inspect(path.read_bytes(), path.name, verified=False)
     artifact.warnings.append('Local artifact SHA-256 identifies bytes; no trusted registry digest was verified.')
     return artifact
@@ -210,17 +214,18 @@ def acquire_local(path):
 class _Resolver:
     def __init__(self):
         self.started = time.monotonic()
-        self.requests = self.bytes = self.steps = 0
+        self.requests = self.bytes = self.steps = self.expanded = 0
+        self.expanded_limit = integer('GUARDIAN_PYPI_EXPANDED_MB',128,512)*1024*1024
         self.metadata = {}
         self.releases = {}
         self.artifacts = {}
 
-    def fetch(self, url):
+    def fetch(self, url, limit=None):
         if self.requests >= MAX_REQUESTS or self.bytes >= MAX_BYTES or time.monotonic() - self.started > MAX_SECONDS:
             raise AcquisitionError('PyPI resolution exceeded its request, byte, or time budget.')
         self.requests += 1
         try:
-            raw = download_pypi_url(url, limit=min(ingestion.MAX_UPLOAD, MAX_BYTES - self.bytes), timeout=min(15, max(.1, MAX_SECONDS - (time.monotonic() - self.started))))
+            raw = download_pypi_url(url, limit=min(limit or ingestion.MAX_UPLOAD, MAX_BYTES - self.bytes), timeout=min(15, max(.1, MAX_SECONDS - (time.monotonic() - self.started))))
         except Exception as error:
             raise AcquisitionError('PyPI metadata or artifact is unavailable; resolution stopped.') from error
         self.bytes += len(raw)
@@ -282,10 +287,18 @@ class _Resolver:
         digest = entry.get('digests', {}).get('sha256', '')
         if not isinstance(digest, str) or not re.fullmatch('[0-9a-fA-F]{64}', digest):
             raise IntegrityError('PyPI artifact does not have a trusted SHA-256 digest.')
-        raw = self.fetch(url)
+        limits = ArchiveLimits.from_env('wheel' if filename.endswith('.whl') else 'sdist')
+        raw = self.fetch(url, limit=limits.compressed)
         if not hmac.compare_digest(hashlib.sha256(raw).hexdigest(), digest.lower()):
             raise IntegrityError('PyPI artifact SHA-256 does not match registry metadata.')
-        result = _inspect(raw, filename, verified=True)
+        remaining = self.expanded_limit - self.expanded
+        if remaining <= 0:
+            raise AcquisitionError('PyPI aggregate expanded-byte budget reached.', category='expanded_budget_limit', operation='distribution inspection', budget='expanded_bytes', limit=self.expanded_limit, encountered=self.expanded)
+        stats = {}
+        try:
+            result = _inspect(raw, filename, verified=True, limits=replace(limits, expanded=min(limits.expanded, remaining)), stats=stats)
+        finally:
+            self.expanded += stats.get('expanded', 0)
         if canonicalize_name(result[0].name) != name or Version(result[0].version) != Version(version):
             raise IntegrityError('PyPI registry identity does not match the artifact identity.')
         self.artifacts[key] = result

@@ -103,6 +103,9 @@ def terminal(report, verbose=False):
     cli = report.cli or {}
     decision = cli.get('decision', {})
     lines = ['Guardian Security Scanner', '', f"Decision: {decision.get('decision', 'REVIEW')}  |  Behavioral assessment: {report.risk}"]
+    if cli.get('location_count'):
+        lines[2:2] = [f"Found {cli['location_count']} installation locations.",
+                      f"Found {cli['unique_artifacts']} unique package artifacts.", '']
     for p in cli.get('packages', []):
         lines.append(f"  {p['identity']:<48} {p['decision']}")
     for reason in dict.fromkeys(decision.get('reasons', [])):
@@ -170,11 +173,15 @@ def execute(args):
     else:
         if args.command == 'check' and not specs:
             raise AcquisitionError('Specify a package or local artifact; use guardian audit for the current project.')
+        if not args.json:
+            print(f'Resolving and acquiring {eco} dependencies...', file=sys.stderr)
         plan = adapter.resolve(specs, project, offline=args.offline)
         if args.command == 'audit':
             artifact = project_artifact(project, eco)
             # Local project provenance is disclosed; its code still participates in policy.
             plan.artifacts.insert(0, artifact)
+    if not args.json:
+        print(f'Analysing {len(plan.artifacts)} unique artifacts...', file=sys.stderr)
     report = analyze_plan(plan, Policy.load(args.policy) if args.policy else None)
     decision = report.cli['decision']
     result = 0
@@ -199,7 +206,7 @@ def execute(args):
                 result = 0
             except (InstallError, AcquisitionError, OSError) as error:
                 report.cli['installation'] = {'status': 'failed', 'reason': str(error)}
-                result = EXIT_INSTALL
+                result = EXIT_INTEGRITY if isinstance(error, IntegrityError) else EXIT_INSTALL
         else:
             report.cli['installation'] = {'status': 'blocked before installation'}
     emit(report, args)
@@ -213,10 +220,23 @@ def main(argv=None):
     except (IntegrityError, AcquisitionError, InstallError, ValueError, OSError) as error:
         code = EXIT_INTEGRITY if isinstance(error, IntegrityError) else (EXIT_INSTALL if isinstance(error, InstallError) else EXIT_ACQUIRE)
         message = str(error)
+        diagnostic = error.diagnostic() if isinstance(error, AcquisitionError) else None
         if args.json:
-            print(json.dumps({'error': message, 'exit_code': code}))
+            print(json.dumps({'error': message, 'exit_code': code, **({'diagnostic': diagnostic} if diagnostic else {})}))
         else:
+            if diagnostic:
+                message = f"[{diagnostic['category']}] " + message
+                if diagnostic.get('package'):
+                    message += ' Package: ' + diagnostic['package'] + '.'
+                if 'limit' in diagnostic:
+                    message += f" Limit: {diagnostic['limit']}; encountered: {diagnostic.get('encountered', 'unknown')}."
             print('Guardian: ' + ''.join(c if c >= ' ' else '?' for c in message), file=sys.stderr)
+            if args.verbose and diagnostic:
+                for key, value in diagnostic.items():
+                    safe = ''.join(c if c >= ' ' else '?' for c in str(value))
+                    print(f'  {key}: {safe}', file=sys.stderr)
+            if isinstance(error, AcquisitionError):
+                print('No installation was attempted.', file=sys.stderr)
         return code
     except Exception as error:
         message = f'Internal error ({type(error).__name__}); installation did not report success.'
