@@ -2,20 +2,22 @@
 
 import React, { useState, useMemo } from "react";
 import {
-  Clock,
-  ShieldCheck,
   FileCode2,
   Network,
+  Minus,
+  AlertTriangle,
+  Info,
+} from "lucide-react";
+import {
+  Clock,
+  ShieldCheck,
   Layers,
   ArrowRight,
   TrendingDown,
   TrendingUp,
-  Minus,
   CheckCircle2,
-  AlertTriangle,
-  Info,
   GitBranch,
-} from "lucide-react";
+} from "@/components/icons";
 import { Report, getFindingSignature, compareSemver } from "@/lib/types";
 import { getDependencyAccounting, getFindingBreakdown } from "@/lib/accounting";
 import { Eyebrow, Badge } from "./ui";

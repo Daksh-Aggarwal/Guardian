@@ -1,5 +1,5 @@
 import React, { forwardRef, useState } from 'react';
-import { Sparkles } from 'lucide-react';
+import { SparklesIcon } from '@/components/icons';
 import { cn } from '@/lib/utils';
 
 interface ComponentProps {
@@ -29,7 +29,7 @@ export const Component = forwardRef<HTMLButtonElement, ComponentProps>(
       >
         <span className="flex items-center justify-center gap-1.5">
           {label}
-          <Sparkles size={16} className="ml-0.5" />
+          <SparklesIcon size={16} className="ml-0.5 inline-flex items-center justify-center" />
         </span>
       </button>
     );

@@ -2,19 +2,21 @@
 
 import { useState, useEffect, useRef } from "react";
 import {
-  Sparkles,
-  ArrowUp,
   Loader2,
-  ChevronRight,
   Shield,
-  ShieldCheck,
-  RotateCcw,
   PlusCircle,
   AlertTriangle,
   Info,
+} from "lucide-react";
+import {
+  Sparkles,
+  ArrowUp,
+  ChevronRight,
+  ShieldCheck,
+  RotateCcw,
   CheckCircle2,
   ChevronDown,
-} from "lucide-react";
+} from "@/components/icons";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   api,

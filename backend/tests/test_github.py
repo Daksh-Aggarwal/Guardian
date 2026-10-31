@@ -96,7 +96,8 @@ def test_connect_flow(github_env, test_client):
     assert data["state"] in _state_store
 
 def test_installation_callback_valid(github_env, test_client):
-    state = create_install_state()
+    sess = github.session_manager.create_session()
+    state = create_install_state(session_id=sess)
     mock_inst = {
         "id": 999111,
         "account": {
@@ -112,33 +113,42 @@ def test_installation_callback_valid(github_env, test_client):
     with patch("backend.guardian.github._call_app_api", return_value=mock_inst):
         resp = test_client.get(
             f"/api/github/callback?installation_id=999111&state={state}",
+            headers={"x-guardian-session": sess},
             follow_redirects=False
         )
         assert resp.status_code == 302
         assert resp.headers["location"] == "/?github=connected"
+        assert resp.cookies.get("guardian_session") == sess
 
-        # Verify active installation persisted
+        # Verify active installation persisted and authorized for session
         active = storage.get_active_github_installation()
         assert active is not None
         assert active["id"] == 999111
         assert active["account_login"] == "octocat-org"
+        assert github.session_manager.is_installation_authorized(sess, 999111) is True
 
 def test_installation_callback_invalid_state(github_env, test_client):
-    resp = test_client.get("/api/github/callback?installation_id=999111&state=bogus_state")
+    sess = github.session_manager.create_session()
+    resp = test_client.get(
+        "/api/github/callback?installation_id=999111&state=bogus_state",
+        headers={"x-guardian-session": sess}
+    )
     assert resp.status_code == 400
     assert "Invalid or expired OAuth state" in resp.json()["detail"]
 
 def test_installation_callback_without_state(github_env, test_client):
     """Browser-initiated callback without state must be rejected."""
+    sess = github.session_manager.create_session()
     resp = test_client.get(
         "/api/github/callback?installation_id=777222&setup_action=install",
+        headers={"x-guardian-session": sess},
         follow_redirects=False
     )
     assert resp.status_code == 400
     assert "Missing OAuth state parameter" in resp.json()["detail"]
 
 def test_github_sync_endpoint(github_env, test_client):
-    """POST /api/github/sync queries App API and registers installation."""
+    """POST /api/github/sync discovers and persists globally without implicitly authorizing the session."""
     mock_installations = [
         {
             "id": 333444,
@@ -154,20 +164,25 @@ def test_github_sync_endpoint(github_env, test_client):
         }
     ]
     with patch("backend.guardian.github._call_app_api", return_value=mock_installations):
-        resp = test_client.post("/api/github/sync")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["connected"] is True
-        assert data["installation"]["id"] == 333444
-        assert data["installation"]["account_login"] == "synced-user"
+        # Direct CLI/internal sync activates globally
+        res = github.sync_installations(session_id=None)
+        assert res["connected"] is True
+        assert res["installation"]["id"] == 333444
+        assert res["installation"]["account_login"] == "synced-user"
 
         active = storage.get_active_github_installation()
         assert active is not None
         assert active["id"] == 333444
 
+        # Browser HTTP sync persists metadata but never expands the session's authorization set
+        resp = test_client.post("/api/github/sync")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["connected"] is False
+        assert data["installation"] is None
+
 def test_status_auto_discovery(github_env, test_client):
-    """GET /api/github/status auto-discovers installations if database is empty."""
-    # Ensure database is clean
+    """Direct get_connection_status discovers and activates; HTTP endpoint creates isolated session without implicit authorization."""
     with storage.connection() as db:
         db.execute("DELETE FROM github_installations")
 
@@ -186,12 +201,17 @@ def test_status_auto_discovery(github_env, test_client):
         }
     ]
     with patch("backend.guardian.github._call_app_api", return_value=mock_installations):
+        # Direct CLI/internal invocation without session discovers and connects
+        res = github.get_connection_status(session_id=None)
+        assert res["connected"] is True
+        assert res["installation"]["id"] == 444555
+        assert res["installation"]["account_login"] == "discovered-user"
+
+        # HTTP request without prior callback establishes fresh session and does NOT implicitly authorize
         resp = test_client.get("/api/github/status")
         assert resp.status_code == 200
         data = resp.json()
-        assert data["connected"] is True
-        assert data["installation"]["id"] == 444555
-        assert data["installation"]["account_login"] == "discovered-user"
+        assert data["connected"] is False
 
 def test_disconnect(github_env, test_client):
     storage.save_github_installation({
@@ -199,12 +219,14 @@ def test_disconnect(github_env, test_client):
         "account_login": "octocat-org",
         "account_type": "Organization"
     })
+    sess = github.session_manager.create_session()
+    github.session_manager.authorize_installation(sess, 999111)
     assert storage.get_active_github_installation() is not None
 
-    resp = test_client.post("/api/github/disconnect")
+    resp = test_client.post("/api/github/disconnect", headers={"x-guardian-session": sess})
     assert resp.status_code == 200
     assert resp.json()["status"] == "disconnected"
-    assert storage.get_active_github_installation() is None
+    assert github.session_manager.is_installation_authorized(sess, 999111) is False
 
 def test_token_caching_and_refresh(github_env):
     storage.save_github_installation({
@@ -249,6 +271,11 @@ def test_list_repositories_and_search(github_env, test_client):
         "account_login": "acme-corp",
         "account_type": "Organization"
     })
+    sess = github.session_manager.create_session()
+    github.session_manager.authorize_installation(sess, 100)
+
+    # Unauthenticated request without session must be rejected with 401
+    assert test_client.get("/api/github/repositories").status_code == 401
 
     repos_payload = {
         "repositories": [
@@ -279,7 +306,7 @@ def test_list_repositories_and_search(github_env, test_client):
 
     with patch("backend.guardian.github._call_installation_api", return_value=repos_payload):
         # List all
-        resp = test_client.get("/api/github/repositories")
+        resp = test_client.get("/api/github/repositories", headers={"x-guardian-session": sess})
         assert resp.status_code == 200
         repos = resp.json()
         assert len(repos) == 2
@@ -289,7 +316,7 @@ def test_list_repositories_and_search(github_env, test_client):
         assert repos[1]["private"] is False
 
         # Search query
-        resp_q = test_client.get("/api/github/repositories?q=frontend")
+        resp_q = test_client.get("/api/github/repositories?q=frontend", headers={"x-guardian-session": sess})
         assert resp_q.status_code == 200
         filtered = resp_q.json()
         assert len(filtered) == 1
@@ -297,6 +324,11 @@ def test_list_repositories_and_search(github_env, test_client):
 
 def test_list_branches(github_env, test_client):
     storage.save_github_installation({"id": 100, "account_login": "acme", "account_type": "User"})
+    sess = github.session_manager.create_session()
+    github.session_manager.authorize_installation(sess, 100)
+
+    # Unauthenticated request without session must be rejected with 401
+    assert test_client.get("/api/github/repositories/1/branches").status_code == 401
 
     repo_meta = {
         "id": 1,
@@ -317,7 +349,7 @@ def test_list_branches(github_env, test_client):
         return repo_meta
 
     with patch("backend.guardian.github._call_installation_api", side_effect=mock_install_api):
-        resp = test_client.get("/api/github/repositories/1/branches")
+        resp = test_client.get("/api/github/repositories/1/branches", headers={"x-guardian-session": sess})
         assert resp.status_code == 200
         branches = resp.json()
         assert len(branches) == 3
@@ -429,6 +461,11 @@ def test_ingestion_oversized_file_limit(github_env):
 
 def test_scan_github_repository_endpoint(github_env, test_client):
     storage.save_github_installation({"id": 100, "account_login": "acme", "account_type": "User"})
+    sess = github.session_manager.create_session()
+    github.session_manager.authorize_installation(sess, 100)
+
+    # Unauthenticated request without session is rejected with 401
+    assert test_client.post("/api/scans/github", json={"repository_id": 42, "branch": "main"}).status_code == 401
 
     pkg_json = json.dumps({"name": "demo-scan", "version": "1.0.0"})
     
@@ -450,7 +487,7 @@ def test_scan_github_repository_endpoint(github_env, test_client):
         raise ValueError(endpoint)
 
     with patch("backend.guardian.github._call_installation_api", side_effect=mock_install_api):
-        resp = test_client.post("/api/scans/github", json={"repository_id": 42, "branch": "main"})
+        resp = test_client.post("/api/scans/github", json={"repository_id": 42, "branch": "main"}, headers={"x-guardian-session": sess})
         assert resp.status_code == 202
         job_id = resp.json()["id"]
 
@@ -601,6 +638,11 @@ def test_remediation_branch_moved_preflight_fails(github_env):
 
 def test_close_remediation_pull_request(github_env, test_client):
     storage.save_github_installation({"id": 100, "account_login": "acme", "account_type": "User"})
+    sess = github.session_manager.create_session()
+    github.session_manager.authorize_installation(sess, 100)
+
+    # Unauthenticated request without session is rejected with 401
+    assert test_client.post("/api/remediation/plans/plan_to_close/close-github-pr").status_code == 401
 
     plan = RemediationPlan(
         plan_id="plan_to_close",
@@ -626,7 +668,7 @@ def test_close_remediation_pull_request(github_env, test_client):
         raise ValueError(endpoint)
 
     with patch("backend.guardian.github._call_installation_api", side_effect=mock_install_api):
-        resp = test_client.post("/api/remediation/plans/plan_to_close/close-github-pr")
+        resp = test_client.post("/api/remediation/plans/plan_to_close/close-github-pr", headers={"x-guardian-session": sess})
         assert resp.status_code == 200
         data = resp.json()
         assert data["pr_state"] == "closed"
@@ -662,6 +704,10 @@ def test_multiple_installations_preservation_and_explicit_selection(github_env, 
     storage.save_github_installation(inst1, make_active=True)
     storage.save_github_installation(inst2, make_active=False)
 
+    sess = github.session_manager.create_session()
+    github.session_manager.authorize_installation(sess, 1001)
+    github.session_manager.authorize_installation(sess, 1002)
+
     # Active installation must be inst1 (alice-org)
     active = storage.get_active_github_installation()
     assert active["id"] == 1001
@@ -673,14 +719,14 @@ def test_multiple_installations_preservation_and_explicit_selection(github_env, 
         {"id": 1002, "account": {"id": 102, "login": "bob-team", "type": "User"}, "created_at": "2026-02-01T00:00:00Z", "updated_at": "2026-10-31T20:00:00Z"}
     ]
     with patch("backend.guardian.github._call_app_api", return_value=mock_gh_installations):
-        sync_resp = test_client.post("/api/github/sync")
+        sync_resp = test_client.post("/api/github/sync", headers={"x-guardian-session": sess})
         assert sync_resp.status_code == 200
         # Active account is still alice-org
         active_after_sync = storage.get_active_github_installation()
         assert active_after_sync["id"] == 1001
 
         # Listing installations exposes both accounts
-        list_resp = test_client.get("/api/github/installations")
+        list_resp = test_client.get("/api/github/installations", headers={"x-guardian-session": sess})
         assert list_resp.status_code == 200
         inst_list = list_resp.json()
         assert len(inst_list) == 2
@@ -689,7 +735,7 @@ def test_multiple_installations_preservation_and_explicit_selection(github_env, 
         assert "bob-team" in logins
 
         # Explicitly switch account to bob-team
-        sel_resp = test_client.post("/api/github/installations/1002/select")
+        sel_resp = test_client.post("/api/github/installations/1002/select", headers={"x-guardian-session": sess})
         assert sel_resp.status_code == 200
         assert sel_resp.json()["id"] == 1002
 
@@ -703,25 +749,28 @@ def test_disconnect_selected_installation_preserves_others(github_env, test_clie
     storage.save_github_installation({"id": 2001, "account_login": "user-one", "account_type": "User"}, make_active=True)
     storage.save_github_installation({"id": 2002, "account_login": "user-two", "account_type": "User"}, make_active=False)
 
+    sess = github.session_manager.create_session()
+    github.session_manager.authorize_installation(sess, 2001)
+    github.session_manager.authorize_installation(sess, 2002)
+
     # Disconnect user-two
-    resp = test_client.post("/api/github/installations/2002/disconnect")
+    resp = test_client.post("/api/github/installations/2002/disconnect", headers={"x-guardian-session": sess})
     assert resp.status_code == 200
     assert resp.json()["installation_id"] == 2002
 
     # user-one is still active and preserved
-    active = storage.get_active_github_installation()
-    assert active is not None
-    assert active["id"] == 2001
+    assert github.session_manager.is_installation_authorized(sess, 2001) is True
+    assert github.session_manager.is_installation_authorized(sess, 2002) is False
 
     # Disconnect target user-one
-    resp2 = test_client.post("/api/github/installations/2001/disconnect")
+    resp2 = test_client.post("/api/github/installations/2001/disconnect", headers={"x-guardian-session": sess})
     assert resp2.status_code == 200
-    assert storage.get_active_github_installation() is None
+    assert github.session_manager.is_installation_authorized(sess, 2001) is False
 
 def test_oauth_state_validation_and_session_binding(github_env):
     """Part 2.3: OAuth state requires non-empty, unexpired, single-use, session-bound tokens."""
-    sess_A = "session_user_A"
-    sess_B = "session_user_B"
+    sess_A = github.session_manager.create_session()
+    sess_B = github.session_manager.create_session()
 
     # Missing state fails
     assert verify_and_consume_state(None) is False
@@ -826,6 +875,9 @@ def test_close_merged_pull_request_preserves_applied(github_env, test_client):
     )
     storage.save_plan(plan)
 
+    sess = github.session_manager.create_session()
+    github.session_manager.authorize_installation(sess, 500)
+
     # GitHub reports PR as merged
     def mock_install_api(inst_id, endpoint, method="GET", json_data=None):
         if endpoint == "/repositories/99/pulls/88" and method == "GET":
@@ -833,7 +885,7 @@ def test_close_merged_pull_request_preserves_applied(github_env, test_client):
         raise ValueError(endpoint)
 
     with patch("backend.guardian.github._call_installation_api", side_effect=mock_install_api):
-        resp = test_client.post("/api/remediation/plans/plan_merged_pr/close-github-pr")
+        resp = test_client.post("/api/remediation/plans/plan_merged_pr/close-github-pr", headers={"x-guardian-session": sess})
         assert resp.status_code == 200
         data = resp.json()
         assert data["pr_state"] == "merged"
@@ -854,8 +906,8 @@ def test_session_isolation_and_authorization_boundary(github_env, test_client):
     """Guardian 4.2 Section 2: Session isolation guarantees that Session B cannot
     access or select installations authorized strictly for Session A.
     """
-    sess_A = "sess_user_alpha_123"
-    sess_B = "sess_user_beta_456"
+    sess_A = github.session_manager.create_session()
+    sess_B = github.session_manager.create_session()
 
     # Save an installation
     storage.save_github_installation({
@@ -898,7 +950,7 @@ def test_session_disconnect_isolation(github_env, test_client):
     """Guardian 4.2 Section 2.C: Disconnecting in Session A removes it from Session A's
     authorized/selected set, but does not delete the installation globally from SQLite.
     """
-    sess_A = "sess_user_alpha_disc"
+    sess_A = github.session_manager.create_session()
     storage.save_github_installation({
         "id": 8881,
         "account_login": "org-shared",
@@ -921,8 +973,8 @@ def test_session_disconnect_isolation(github_env, test_client):
 
 def test_token_retrieval_enforces_session_authorization(github_env):
     """Guardian 4.2 Section 2.C: get_installation_access_token must reject unauthorized sessions."""
-    sess_A = "sess_auth"
-    sess_B = "sess_unauth"
+    sess_A = github.session_manager.create_session()
+    sess_B = github.session_manager.create_session()
 
     github.session_manager.authorize_installation(sess_A, 9999)
 
@@ -935,4 +987,237 @@ def test_token_retrieval_enforces_session_authorization(github_env):
     import pytest
     with pytest.raises(PermissionError):
         github.get_installation_access_token(9999, session_id=sess_B)
+
+# ==========================================
+# 6. GUARDIAN 4.3 SESSION ISOLATION & LIFECYCLE TESTS (16 OBJECTIVES)
+# ==========================================
+
+def test_req_1_to_4_session_isolation_cross_access(github_env, test_client):
+    """Req 1-4: Session A authorizes inst 100, Session B authorizes inst 200. Cross access forbidden."""
+    sess_A = github.session_manager.create_session()
+    sess_B = github.session_manager.create_session()
+    storage.save_github_installation({"id": 100, "account_login": "org-100", "account_type": "Organization"}, make_active=False)
+    storage.save_github_installation({"id": 200, "account_login": "org-200", "account_type": "Organization"}, make_active=False)
+
+    github.session_manager.authorize_installation(sess_A, 100)
+    github.session_manager.authorize_installation(sess_B, 200)
+
+    # Session A sees 100, cannot see 200
+    res_A = test_client.get("/api/github/installations", headers={"x-guardian-session": sess_A})
+    assert res_A.status_code == 200
+    ids_A = [i["id"] for i in res_A.json()]
+    assert 100 in ids_A
+    assert 200 not in ids_A
+
+    # Session A cannot select 200
+    sel_A = test_client.post("/api/github/installations/200/select", headers={"x-guardian-session": sess_A})
+    assert sel_A.status_code == 404
+
+    # Session B sees 200, cannot see 100
+    res_B = test_client.get("/api/github/installations", headers={"x-guardian-session": sess_B})
+    assert res_B.status_code == 200
+    ids_B = [i["id"] for i in res_B.json()]
+    assert 200 in ids_B
+    assert 100 not in ids_B
+
+    # Session B cannot select 100
+    sel_B = test_client.post("/api/github/installations/100/select", headers={"x-guardian-session": sess_B})
+    assert sel_B.status_code == 404
+
+def test_req_5_and_6_sync_does_not_authorize_or_select_for_session(github_env, test_client):
+    """Req 5-6: Sync does not expand session's authorization set nor select globally active installation."""
+    sess = github.session_manager.create_session()
+    mock_gh_insts = [
+        {"id": 300, "account": {"id": 300, "login": "discovered-300", "type": "User"}, "created_at": "2026-01-01T00:00:00Z"}
+    ]
+    with patch("backend.guardian.github._call_app_api", return_value=mock_gh_insts):
+        resp = test_client.post("/api/github/sync", headers={"x-guardian-session": sess})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["connected"] is False
+        assert data["installation"] is None
+        assert storage.get_github_installation(300) is not None
+        assert github.session_manager.is_installation_authorized(sess, 300) is False
+        assert github.session_manager.get_selected_installation_id(sess) is None
+
+def test_req_7_missing_http_session_establishes_session_cookie(github_env, test_client):
+    """Req 7: Missing HTTP session establishes a new session consistently via HttpOnly cookie."""
+    resp = test_client.get("/api/github/status")
+    assert resp.status_code == 200
+    cookie = resp.cookies.get("guardian_session")
+    assert cookie is not None
+    assert github.session_manager.is_session_valid(cookie) is True
+    data = resp.json()
+    assert data["connected"] is False
+
+def test_req_8_protected_endpoint_rejects_invalid_or_expired_session(github_env, test_client):
+    """Req 8: Protected HTTP request with invalid or expired session is rejected with 401."""
+    # Missing session
+    res_missing = test_client.get("/api/github/installations")
+    assert res_missing.status_code == 401
+    assert "Valid GitHub session is required" in res_missing.json()["detail"]
+
+    # Invalid session
+    res_invalid = test_client.get("/api/github/installations", headers={"x-guardian-session": "totally_bogus_session_id"})
+    assert res_invalid.status_code == 401
+
+    # Expired session
+    sess = github.session_manager.create_session()
+    with github.session_manager._lock:
+        github.session_manager._sessions[sess]["last_active"] = time.time() - 86400 * 2
+    res_expired = test_client.get("/api/github/installations", headers={"x-guardian-session": sess})
+    assert res_expired.status_code == 401
+
+def test_req_9_oauth_callback_without_session_rejected(github_env, test_client):
+    """Req 9: OAuth callback without a session is rejected with HTTP 400."""
+    state = create_install_state()
+    resp = test_client.get(f"/api/github/callback?installation_id=100&state={state}")
+    assert resp.status_code == 400
+    assert "Missing or invalid session for GitHub callback" in resp.json()["detail"]
+
+def test_req_10_oauth_state_cross_session_rejected(github_env, test_client):
+    """Req 10: State created by Session A cannot be consumed by Session B."""
+    sess_A = github.session_manager.create_session()
+    sess_B = github.session_manager.create_session()
+    state = create_install_state(session_id=sess_A)
+
+    resp = test_client.get(
+        f"/api/github/callback?installation_id=100&state={state}",
+        headers={"x-guardian-session": sess_B}
+    )
+    assert resp.status_code == 400
+    assert "Invalid or expired OAuth state parameter" in resp.json()["detail"]
+
+def test_req_11_oauth_state_single_use(github_env, test_client):
+    """Req 11: OAuth state cannot be consumed twice."""
+    sess = github.session_manager.create_session()
+    state = create_install_state(session_id=sess)
+    mock_inst = {
+        "id": 555,
+        "account": {"id": 555, "login": "once-org", "type": "Organization"},
+        "repository_selection": "all",
+        "created_at": "2026-01-01T00:00:00Z"
+    }
+    with patch("backend.guardian.github._call_app_api", return_value=mock_inst):
+        resp1 = test_client.get(
+            f"/api/github/callback?installation_id=555&state={state}",
+            headers={"x-guardian-session": sess},
+            follow_redirects=False
+        )
+        assert resp1.status_code == 302
+
+        resp2 = test_client.get(
+            f"/api/github/callback?installation_id=555&state={state}",
+            headers={"x-guardian-session": sess},
+            follow_redirects=False
+        )
+        assert resp2.status_code == 400
+        assert "Invalid or expired OAuth state parameter" in resp2.json()["detail"]
+
+def test_req_12_failed_cross_session_state_validation_prevents_replay(github_env, test_client):
+    """Req 12: Failed cross-session attempt pops state and does not permit replay by Session A."""
+    sess_A = github.session_manager.create_session()
+    sess_B = github.session_manager.create_session()
+    state = create_install_state(session_id=sess_A)
+
+    resp_B = test_client.get(
+        f"/api/github/callback?installation_id=100&state={state}",
+        headers={"x-guardian-session": sess_B}
+    )
+    assert resp_B.status_code == 400
+
+    mock_inst = {
+        "id": 100,
+        "account": {"id": 100, "login": "a-org", "type": "Organization"},
+        "repository_selection": "all",
+        "created_at": "2026-01-01T00:00:00Z"
+    }
+    with patch("backend.guardian.github._call_app_api", return_value=mock_inst):
+        resp_A = test_client.get(
+            f"/api/github/callback?installation_id=100&state={state}",
+            headers={"x-guardian-session": sess_A}
+        )
+        assert resp_A.status_code == 400
+        assert "Invalid or expired OAuth state parameter" in resp_A.json()["detail"]
+
+def test_req_13_installation_authorization_cannot_create_arbitrary_sessions():
+    """Req 13: authorize_installation rejects nonexistent sessions rather than auto-creating them."""
+    with pytest.raises(ValueError) as exc:
+        github.session_manager.authorize_installation("nonexistent_session_id", 123)
+    assert "not valid or has expired" in str(exc.value)
+
+def test_req_14_disconnect_session_isolation(github_env, test_client):
+    """Req 14: Disconnecting installation from Session A does not affect Session B."""
+    sess_A = github.session_manager.create_session()
+    sess_B = github.session_manager.create_session()
+    storage.save_github_installation({"id": 600, "account_login": "shared-org", "account_type": "Organization"}, make_active=False)
+
+    github.session_manager.authorize_installation(sess_A, 600)
+    github.session_manager.authorize_installation(sess_B, 600)
+
+    # Disconnect in Session A
+    resp_A = test_client.post("/api/github/installations/600/disconnect", headers={"x-guardian-session": sess_A})
+    assert resp_A.status_code == 200
+
+    # Session A is no longer authorized
+    assert github.session_manager.is_installation_authorized(sess_A, 600) is False
+    # Session B remains authorized and selected
+    assert github.session_manager.is_installation_authorized(sess_B, 600) is True
+    assert github.session_manager.get_selected_installation_id(sess_B) == 600
+
+def test_req_15_remediation_pr_session_isolation(github_env, test_client):
+    """Req 15: Session cannot apply or close remediation PR using another session's installation."""
+    sess_A = github.session_manager.create_session()
+    sess_B = github.session_manager.create_session()
+    storage.save_github_installation({"id": 700, "account_login": "pr-org", "account_type": "Organization"}, make_active=False)
+    github.session_manager.authorize_installation(sess_A, 700)
+    # sess_B does not authorize 700
+
+    plan = RemediationPlan(
+        plan_id="plan_iso_pr",
+        scan_id="scan_1",
+        title="Session isolation plan",
+        summary="Test",
+        expected_outcome="Applied",
+        repository_id=99,
+        branch="main",
+        commit_sha="commit_sha_1",
+        pr_number=10,
+        pr_url="https://github.com/pr-org/app/pull/10",
+        status="approved",
+        created_at="2026-10-31T12:00:00Z"
+    )
+    storage.save_plan(plan)
+
+    # Session B attempts to apply PR -> rejected (400 or 403)
+    resp_apply = test_client.post("/api/remediation/plans/plan_iso_pr/apply-github", headers={"x-guardian-session": sess_B})
+    assert resp_apply.status_code in (400, 403)
+
+    # Session B attempts to close PR -> rejected (400 or 403)
+    resp_close = test_client.post("/api/remediation/plans/plan_iso_pr/close-github-pr", headers={"x-guardian-session": sess_B})
+    assert resp_close.status_code in (400, 403)
+
+def test_req_16_token_cache_reuse_cannot_bypass_authorization(github_env, test_client):
+    """Req 16: Cached token for installation 800 cannot be used by an unauthorized session."""
+    sess_A = github.session_manager.create_session()
+    sess_B = github.session_manager.create_session()
+    storage.save_github_installation({"id": 800, "account_login": "cached-token-org", "account_type": "Organization"}, make_active=False)
+    github.session_manager.authorize_installation(sess_A, 800)
+
+    # Prime token cache using Session A
+    with patch("backend.guardian.github._call_app_api", return_value={"token": "ghs_cached_token_800", "expires_at": "2030-01-01T00:00:00Z"}):
+        tok = github.get_installation_access_token(800, session_id=sess_A)
+        assert tok == "ghs_cached_token_800"
+
+    # Token is now cached in _token_cache for installation 800
+    assert 800 in _token_cache
+
+    # Session B (unauthorized) attempts to fetch token directly -> PermissionError
+    with pytest.raises(PermissionError):
+        github.get_installation_access_token(800, session_id=sess_B)
+
+    # Session B attempts to list repositories -> rejected with 400
+    res_b = test_client.get("/api/github/repositories", headers={"x-guardian-session": sess_B})
+    assert res_b.status_code == 400
+    assert "No GitHub App installation is selected or authorized" in res_b.json()["detail"]
 

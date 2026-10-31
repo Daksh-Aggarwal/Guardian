@@ -4,25 +4,27 @@ import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Share2,
+  Loader2,
+  AlertTriangle,
+  ShieldAlert,
+  FileCode2,
+  Code,
+  Info,
+} from "lucide-react";
+import {
   Copy,
   Check,
   Download,
   X,
-  Loader2,
-  AlertTriangle,
   ShieldCheck,
-  ShieldAlert,
-  FileCode2,
   GitBranch,
   Terminal,
   Cpu,
   Layers,
   Sparkles,
   ExternalLink,
-  Code,
   FileText,
-  Info,
-} from "lucide-react";
+} from "@/components/icons";
 import {
   Report,
   HandoffTarget,
@@ -46,7 +48,7 @@ const TARGET_OPTIONS: {
   id: HandoffTarget;
   label: string;
   badge: string;
-  icon: typeof Terminal;
+  icon: React.ComponentType<{ size?: number; className?: string; color?: string }>;
   description: string;
 }[] = [
   {

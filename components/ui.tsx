@@ -2,31 +2,35 @@
 
 import React, { useState } from "react";
 import {
-  ShieldCheck,
-  ArrowUpRight,
   Info,
   AlertTriangle,
   AlertCircle,
-  CheckCircle2,
   ShieldAlert,
+} from "lucide-react";
+import {
+  ShieldCheck,
+  ArrowUpRight,
+  CheckCircle2,
   HelpCircle,
   Activity,
   Layers,
   ChevronRight,
   Sparkles,
-} from "lucide-react";
+  ShieldCheckIcon,
+} from "@/components/icons";
 import { motion } from "framer-motion";
 import type { Severity } from "@/lib/types";
 
 export function Brand({ size = "default" }: { size?: "default" | "compact" }) {
+  const pixelSize = size === "compact" ? 20 : 24;
   return (
     <div className={size === "compact" ? "brand brand-compact" : "brand"}>
       <motion.span
-        className="brand-icon"
+        className="brand-icon flex items-center justify-center"
         whileHover={{ scale: 1.06, rotate: -3 }}
         transition={{ type: "spring", stiffness: 400, damping: 15 }}
       >
-        <ShieldCheck size={size === "compact" ? 20 : 24} strokeWidth={2.2} />
+        <ShieldCheckIcon size={pixelSize} className="inline-flex items-center justify-center" />
       </motion.span>
       <span className="brand-text">
         guardian<span className="brand-dot">.</span>

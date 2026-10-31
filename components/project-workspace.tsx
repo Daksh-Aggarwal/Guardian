@@ -3,28 +3,31 @@
 import { useState, useMemo, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
+  Code2,
+  ShieldAlert,
+  AlertTriangle,
+  Info,
+  Loader2,
+  FileCode2,
+  HardDrive,
+  Network,
+  Share2,
+} from "lucide-react";
+import {
   FolderOpen,
   FolderSync,
   Layers,
-  Code2,
   Terminal,
-  ShieldAlert,
   ShieldCheck,
   CheckCircle2,
-  AlertTriangle,
-  Info,
   ChevronDown,
   ChevronRight,
-  Loader2,
   X,
-  FileCode2,
   Wrench,
   Sparkles,
   ArrowRight,
-  HardDrive,
   Upload,
   GitBranch,
-  Network,
   Clock,
   Eye,
   FileText,
@@ -33,8 +36,7 @@ import {
   RefreshCw,
   ExternalLink,
   GitPullRequest,
-  Share2,
-} from "lucide-react";
+} from "@/components/icons";
 import { api, Report, ScanJob, ProjectMetadata, Finding } from "@/lib/types";
 import { getDependencyAccounting, getFindingBreakdown } from "@/lib/accounting";
 import {

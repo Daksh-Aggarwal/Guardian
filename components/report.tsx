@@ -3,32 +3,34 @@
 import React, { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  ArrowLeft,
   ArrowDownToLine,
+  AlertTriangle,
+  FileCode2,
+  Info,
+  Network,
+  Filter,
+  ShieldAlert,
+  Share2,
+} from "lucide-react";
+import {
+  ArrowLeft,
   ChevronDown,
   ChevronRight,
   ShieldCheck,
-  AlertTriangle,
   Check,
-  FileCode2,
   Package,
-  Info,
-  Network,
   Wrench,
   Search,
-  Filter,
   Sparkles,
   Layers,
   GitBranch,
-  ShieldAlert,
   HelpCircle,
   Clock,
   FileText,
   ExternalLink,
   SlidersHorizontal,
   FolderOpen,
-  Share2,
-} from "lucide-react";
+} from "@/components/icons";
 import {
   Report,
   Finding,

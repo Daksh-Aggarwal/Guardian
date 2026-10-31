@@ -35,12 +35,45 @@ function openRegistryDB(): Promise<IDBDatabase> {
 }
 
 /**
+ * Executes a write transaction in IndexedDB and strictly awaits its 'complete' event.
+ * Rejects cleanly on transaction errors or aborts.
+ */
+function putEntryWithTransaction(
+  db: IDBDatabase,
+  record: RegisteredProjectHandle
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    try {
+      const tx = db.transaction(REGISTRY_STORE, "readwrite");
+      const store = tx.objectStore(REGISTRY_STORE);
+
+      tx.oncomplete = () => {
+        resolve();
+      };
+
+      tx.onerror = () => {
+        reject(tx.error || new Error("IndexedDB transaction failed while persisting project registration."));
+      };
+
+      tx.onabort = () => {
+        reject(tx.error || new Error("IndexedDB transaction was aborted while persisting project registration."));
+      };
+
+      store.put(record);
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
+/**
  * Resolves a stable, collision-free project ID for a local directory handle.
  * 1. Checks existing registered directory handles using handle.isSameEntry().
  * 2. If an exact match is found, returns the directory's persistent ID.
  * 3. If no match is found, assigns a new unique ID and registers the directory handle.
- * 4. Fallback: If isSameEntry() is unavailable, assigns an independent ID per session
- *    to prevent merging distinct directories with identical folder names.
+ * 4. Fallback: If isSameEntry() is unavailable or IndexedDB fails, assigns an independent
+ *    cryptographically-unpredictable random ID per session to prevent merging distinct directories
+ *    with identical folder names.
  */
 export async function resolveProjectDirectoryId(
   directoryHandle: FileSystemDirectoryHandle,
@@ -52,16 +85,17 @@ export async function resolveProjectDirectoryId(
     return existingProjectId;
   }
 
-  const sanitized = projectName.replace(/[^a-zA-Z0-9_-]/g, "_").toLowerCase() || "dir";
+  const sanitized = projectName.replace(/[^a-zA-Z0-9]/g, "_").toLowerCase() || "dir";
 
+  let db: IDBDatabase | null = null;
   try {
-    const db = await openRegistryDB();
+    db = await openRegistryDB();
     const entries: RegisteredProjectHandle[] = await new Promise((resolve, reject) => {
-      const tx = db.transaction(REGISTRY_STORE, "readonly");
+      const tx = db!.transaction(REGISTRY_STORE, "readonly");
       const store = tx.objectStore(REGISTRY_STORE);
       const req = store.getAll();
       req.onsuccess = () => resolve(req.result || []);
-      req.onerror = () => reject(req.error);
+      req.onerror = () => reject(req.error || new Error("Failed to query project registry."));
     });
 
     // Check if any registered handle matches the current directory handle
@@ -77,12 +111,15 @@ export async function resolveProjectDirectoryId(
               handle: directoryHandle,
               lastOpenedAt: new Date().toISOString(),
             };
-            const writeTx = db.transaction(REGISTRY_STORE, "readwrite");
-            writeTx.objectStore(REGISTRY_STORE).put(updated);
+            try {
+              await putEntryWithTransaction(db, updated);
+            } catch {
+              // Non-fatal if timestamp refresh write fails; return existing verified entry ID
+            }
             return entry.id;
           }
         } catch {
-          // If isSameEntry throws (e.g. permission check), continue checking remaining entries
+          // If isSameEntry throws (e.g. permission check failure), safely continue checking remaining entries
         }
       }
     }
@@ -99,14 +136,24 @@ export async function resolveProjectDirectoryId(
       lastOpenedAt: new Date().toISOString(),
     };
 
-    const writeTx = db.transaction(REGISTRY_STORE, "readwrite");
-    writeTx.objectStore(REGISTRY_STORE).put(newRecord);
+    // Strictly await transaction completion before treating registration as persisted
+    await putEntryWithTransaction(db, newRecord);
 
     return newId;
   } catch (err) {
-    // Safe fallback when IndexedDB is unavailable: generate a unique random ID
-    // (Never reuse a name-based ID to ensure folders with identical names do not collide)
+    // Safe fallback when IndexedDB or transaction write is unavailable, failed, or aborted:
+    // Generate a unique random ID (never reuse a name-based ID to ensure folders with identical names do not collide).
+    // Limitations of fallback: Without IndexedDB handle persistence, reopening the same directory in a future
+    // session cannot be matched via isSameEntry(), resulting in fresh project identities per session.
     const randomSuffix = Math.random().toString(36).substring(2, 10);
     return `proj_loc_${sanitized}_${randomSuffix}`;
+  } finally {
+    if (db) {
+      try {
+        db.close();
+      } catch {
+        // Safe disposal
+      }
+    }
   }
 }

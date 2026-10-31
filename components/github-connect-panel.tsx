@@ -2,12 +2,14 @@
 
 import React, { useState, useEffect, useMemo } from "react";
 import {
-  GitBranch,
-  Search,
-  Lock,
   Globe,
   Loader2,
   AlertTriangle,
+} from "lucide-react";
+import {
+  GitBranch,
+  Search,
+  Lock,
   CheckCircle2,
   ExternalLink,
   ChevronRight,
@@ -17,7 +19,7 @@ import {
   RefreshCw,
   LogOut,
   FolderGit2,
-} from "lucide-react";
+} from "@/components/icons";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   api,
