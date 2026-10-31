@@ -10,7 +10,14 @@
 - `components/explainer.tsx`: contextual question UI and finding citations.
 - `components/ui.tsx`: design system primitives (`MetricCard`, `SecurityDimensionCard`, `RecommendedActionCard`, `StatusChip`, `Badge`, `Brand`, `Empty`, `Note`, `SectionHeader`).
 - `lib/types.ts`: typed frontend report and job contracts, HTTP error handling, and API client.
-- `backend/guardian/models.py`: authoritative Pydantic models for findings, evidence, data flows, integrity results, inspections (`InspectionSummary` with reconciled status counts), advisories, reports, and API requests.
+- `lib/accounting.ts`: authoritative frontend data accounting selectors (`getDependencyAccounting`, `getFindingBreakdown`) enforcing strict arithmetic reconciliation across reports, cards, and workspace views.
+- `components/project-workspace.tsx`: project investigation workspace integrating all 6 interactive security views (Overview, Dependency Graph, Vulnerabilities, Behavioral Flows, Remediation History, Security Timeline), historical scan selector, and local project folder binding.
+- `components/dependency-graph.tsx`: interactive hierarchical dependency graph explorer built with `@xyflow/react` and `@dagrejs/dagre`, featuring zoom/pan/minimap, severity filtering, depth limits, focused subtree tracing, and a package detail inspector panel.
+- `components/vulnerabilities-explorer.tsx`: dependency-first vulnerability explorer mapping project packages to OSV advisories with CVSS vectors, Guardian review priority, and jump-to-graph actions.
+- `components/behavioral-flow-explorer.tsx`: visual step-by-step source-to-sink data-flow explorer (`Source` -> `Assignment` -> `Argument` -> `Parameter` -> `Return` -> `Sink`) with syntax code snippets and limitation disclosures.
+- `components/remediation-history.tsx`: project-level audit trail of Guardian Autopilot remediation plans, approvals, undos, and rescan verification outcomes.
+- `components/security-timeline.tsx`: multi-scan posture timeline and side-by-side delta comparator across independent security dimensions.
+- `backend/guardian/models.py`: authoritative Pydantic models for findings, evidence, data flows, integrity results, inspections (`InspectionSummary` with reconciled status counts), advisories, reports (with explicit `classification: "real" | "demo"` and legacy migration validator), `FindingBreakdown`, and `DependencyAccounting`.
 - `backend/guardian/dependencies.py`: modern lockfile graph traversal (`lock_graph`), nearest `node_modules` resolution, bounded `RegistrySession` retrieval, and reconciled dependency accounting across direct/transitive and six mutually exclusive statuses.
 - `backend/guardian/integrity.py`: strict Subresource Integrity (SRI) validation against compressed tarball bytes.
 - `backend/guardian/config.py`: operator-controlled inspection budgets (`Budget`) and parser ceilings.
@@ -73,11 +80,64 @@ Workers perform an atomic check under concurrency lock immediately before callin
 | DELETE | `/api/projects/{id}` | Discard ephemeral in-memory project snapshot |
 | POST | `/api/scans/{id}/remediation/plan` | Generate and validate structured remediation plan (Gemini / deterministic) |
 | GET | `/api/remediation/plans/{id}` | Retrieve stored remediation plan |
+| GET | `/api/scans/{id}/remediation/plans` | Retrieve all stored remediation plans for a specific scan |
+| GET | `/api/projects/{name}/remediation/history` | Retrieve full project remediation audit history across all scans |
 | POST | `/api/remediation/plans/{id}/approve` | Mark remediation plan as approved by user |
 | POST | `/api/remediation/plans/{id}/reject` | Mark remediation plan as rejected by user |
 | POST | `/api/remediation/plans/{id}/applied` | Record plan application result from browser |
 | POST | `/api/remediation/plans/{id}/verification` | Compare baseline and rescanned reports to verify remediation outcomes |
 | GET | `/api/remediation/plans/{id}/verification` | Retrieve stored verification record |
+
+## Data accounting & semantics
+
+Guardian 3.1 establishes an exact, reconciled accounting model across all frontend and backend views:
+
+### 1. Classification
+Every scan record carries an explicit `classification`:
+- `"demo"`: Synthetic fixtures, generated test scenarios, and example fixtures.
+- `"real"`: Genuine uploaded archives, registry lookups, and local project folders.
+Legacy reports without a classification field are migrated conservatively via Pydantic model validator (`source == 'synthetic fixture'` -> `demo`, otherwise `real`). The global dataset filter (`all`, `real`, `demo`) persists in session storage and filters dashboard cards, project lists, and scan history. Unique project metrics are deduplicated by package name (`latestProjectScans`), displaying unique project count while surfacing total scan volume in detail.
+
+### 2. Dependency accounting reconciliation
+Dependency arithmetic reconciles strictly:
+- Population identity: `declaredDirect + transitive == totalResolved`
+- Inspection status partition:
+  `inspected + skipped + unavailable + unresolved + integrityFailed + notAttempted == totalResolved`
+Discrepancies between direct manifest counts and resolved lockfile trees are eliminated: report headers display the total resolved population with direct and transitive breakdown, while inspection cards and the dependency tab reflect the exact same resolved count.
+
+### 3. Finding classification
+Findings are partitioned into clear categories:
+- `actionable`: Elevated findings (`severity !== 'info'`) that require security attention.
+- `informational`: Benign observations (`severity === 'info'`), such as standard lifecycle install hooks or harmless credential reads.
+- `advisories`: Known vulnerability matches from the OSV database.
+- `behavioral`: AST-observed syntax behaviors (excluding external OSV and integrity records).
+- `integrity`: Subresource integrity (SRI) checksum mismatches or anomalies.
+
+## Project investigation workspace
+
+The Project Investigation Workspace (`components/project-workspace.tsx`) provides an interactive security workbench across six dedicated tabs:
+
+1. **Overview**: Project identity, demo/real classification badge, direct vs transitive package counts, 4 decoupled dimension cards, and delta comparison against preceding scans.
+2. **Dependency Graph**: Interactive hierarchical DAG visualizer built with `@xyflow/react` and `@dagrejs/dagre`:
+   - Node badges: direct/transitive flag, critical/high/medium/low vulnerability markers, behavioral signal badges, and inspection status.
+   - Filtering & Search: Filter by severity (All, Critical, High, Medium, Low), search package names, and limit rendering depth (1 to 10 levels).
+   - Focused Subtree Tracing: Click any node to isolate its upstream parents (who depends on it) and downstream children (what it depends on) — essential for inspecting large graphs with 300+ dependencies.
+   - Package Detail Drawer: Slide-out inspector showing package version, status, attributed advisories, behavioral findings, and parent dependency links.
+3. **Vulnerabilities**: Project -> Dependency -> Advisory -> Evidence hierarchy detailing affected versions, CVSS vectors, and Guardian review priority.
+4. **Behavioral Flows**: Visual step-by-step source-to-sink flow trace (`Source` -> `Assignment` -> `Argument` -> `Parameter` -> `Return` -> `Sink`) with syntax code snippets, variable binding badges, and explicit limitations disclosures.
+5. **Remediation History**: Audit trail of Guardian Autopilot remediation plans, user approvals/rejections, applied files, and rescan verification outcomes.
+6. **Security Timeline**: Chronological security posture timeline across scans with side-by-side two-scan delta comparison.
+
+## Guardian Autopilot filesystem safety
+
+Guardian Autopilot's browser-side file application (`lib/fs-access.ts` & `lib/indexeddb-backup.ts`) provides multi-file atomic execution:
+- **Pre-Flight Destination Check**: Before applying any `create` change, verifies the destination file does not already exist on disk.
+- **Pre-Flight Content Hash Verification**: Before applying any `update` change, computes SHA-256 of the current disk file and asserts exact match with `before_hash`.
+- **Operational Journal**: Tracks modified files and newly created files sequentially during the apply loop.
+- **Multi-File Rollback on Failure**: If any file write fails, the operational journal initiates an immediate rollback:
+  - Updates are restored to their original contents from the IndexedDB backup snapshot.
+  - Newly created files are deleted from the disk via `directoryHandle.removeEntry(filename)`.
+- **Safe Undo with Created File Removal**: When undoing a remediation, newly created files are safely removed from the user's directory, and original files are restored after verifying file hashes have not been modified post-apply.
 
 ## Analysis and risk
 

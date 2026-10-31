@@ -3087,8 +3087,18 @@ select {
 }
 .dimension-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 16px;
+}
+@media (max-width: 1349px) {
+  .dimension-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 768px) {
+  .dimension-grid {
+    grid-template-columns: 1fr;
+  }
 }
 .dimension-card {
   background: var(--surface);
@@ -3098,6 +3108,9 @@ select {
   box-shadow: var(--shadow);
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  word-break: break-word;
   transition:
     transform 0.16s ease,
     border-color 0.16s ease,
@@ -5651,4 +5664,276 @@ select {
   .table-row {
     grid-template-columns: 1fr 1fr 30px;
   }
+}
+
+/* ==========================================================================
+   GUARDIAN 3.1 — DATASET FILTER & CLASSIFICATION BADGES
+   ========================================================================== */
+
+.classification-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.classification-badge.demo {
+  background: rgba(168, 85, 247, 0.12);
+  color: #c084fc;
+  border: 1px solid rgba(168, 85, 247, 0.28);
+}
+
+.classification-badge.real {
+  background: rgba(59, 130, 246, 0.1);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.25);
+}
+
+.classification-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+}
+
+.classification-badge.demo .classification-dot {
+  background: #c084fc;
+}
+
+.classification-badge.real .classification-dot {
+  background: #60a5fa;
+}
+
+.dataset-filter-control {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px;
+  border-radius: 8px;
+  background: var(--surface-muted, rgba(255, 255, 255, 0.03));
+  border: 1px solid var(--line);
+}
+
+.dataset-filter-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.dataset-filter-btn:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.dataset-filter-btn.active {
+  color: var(--text);
+  background: var(--surface);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.dataset-count-pill {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--muted);
+}
+
+.dataset-filter-btn.active .dataset-count-pill {
+  background: var(--accent-soft, rgba(99, 102, 241, 0.15));
+  color: var(--accent, #818cf8);
+}
+
+/* ==========================================================================
+   GUARDIAN 3.1 — PROJECT INVESTIGATION WORKSPACE
+   ========================================================================== */
+
+.project-workspace-container {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.workspace-top-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 18px 22px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.workspace-project-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.workspace-project-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.workspace-project-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.workspace-nav-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow-x: auto;
+}
+
+.workspace-nav-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 7px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+
+.workspace-nav-tab:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.workspace-nav-tab.active {
+  color: var(--text);
+  background: var(--surface-muted, rgba(255, 255, 255, 0.08));
+  border: 1px solid var(--line);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+}
+
+.workspace-tab-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--muted);
+}
+
+.workspace-nav-tab.active .workspace-tab-badge {
+  background: var(--accent-soft, rgba(99, 102, 241, 0.15));
+  color: var(--accent, #818cf8);
+}
+
+/* Dependency Graph Explorer */
+.dependency-graph-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.graph-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 18px;
+  background: var(--surface-muted, rgba(255, 255, 255, 0.02));
+  border-bottom: 1px solid var(--line);
+}
+
+.graph-canvas-container {
+  position: relative;
+  width: 100%;
+  height: 600px;
+  background: #090d16;
+}
+
+.graph-sidebar-panel {
+  width: 380px;
+  max-width: 100%;
+  padding: 20px;
+  background: var(--surface);
+  border-left: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow-y: auto;
+}
+
+/* Custom XYFlow / ReactFlow Node Styling for Dark Theme */
+.react-flow__node {
+  font-family: inherit;
+}
+
+.custom-dependency-node {
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: #111726;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #e2e8f0;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  min-width: 180px;
+  max-width: 240px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.custom-dependency-node:hover,
+.custom-dependency-node.selected {
+  border-color: #6366f1;
+  box-shadow:
+    0 0 0 2px rgba(99, 102, 241, 0.4),
+    0 6px 16px rgba(0, 0, 0, 0.5);
+  transform: translateY(-1px);
+}
+
+.custom-dependency-node.node-root {
+  background: linear-gradient(135deg, #1e1b4b, #0f172a);
+  border-color: #818cf8;
+}
+
+.custom-dependency-node.has-vuln {
+  border-left: 4px solid #ef4444;
+}
+
+.custom-dependency-node.has-behavioral {
+  border-left: 4px solid #f59e0b;
+}
+
+.custom-dependency-node.has-both {
+  border-left: 4px solid #ec4899;
 }

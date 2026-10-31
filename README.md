@@ -4,10 +4,23 @@
 
 ## What works
 
+- **Guardian 3.1 — Data Integrity, Project Intelligence & Investigation Workspace**:
+  - **Explicit Project Classification & Dataset Filtering**: Scan records carry explicit `classification: "real" | "demo"` metadata (`synthetic fixture` -> `demo`, real uploads/registries/local projects -> `real`). Global dataset filter (`All`, `Real Projects`, `Demo Data`) persistently filters dashboard metrics, project lists, recommended actions, and scan history without mutative record loss. Deduplicated project metrics prevent repeated scans of the same project from inflating counts.
+  - **Reconciled Data Accounting & Report Semantics**: Actionable security findings are strictly separated from informational observations (e.g. benign lifecycle scripts or credential reads). Dependency counts are reconciled across report headers, dimension cards, and inspection breakdowns: `declaredDirect + transitive === totalResolved`, and `inspected + skipped + unavailable + unresolved + integrity_failed + not_attempted === totalResolved`.
+  - **Responsive Layout & Visual Consistency**: Four-dimension assessment cards adaptively render across 4 columns ($\ge 1350$px), 2 columns ($768–1349$px), and 1 column ($< 768$px) with word-break safeguards preventing viewport clipping or horizontal scrollbars.
+  - **Project Investigation Workspace**: Dedicated 6-tab workspace for deep project-level security analysis consuming genuine report and lockfile data:
+    1. *Overview*: Project identity, demo/real classification badge, package count breakdown, decoupled 4-dimension posture summary, and delta comparisons with preceding scans.
+    2. *Dependency Graph*: Interactive hierarchical DAG explorer powered by `@xyflow/react` and `@dagrejs/dagre`, featuring zoom/pan/minimap controls, severity filtering, search, depth limit sliders, focused upstream/downstream subtree isolation, and an interactive package detail drawer.
+    3. *Vulnerabilities*: Hierarchical Project $\rightarrow$ Dependency $\rightarrow$ Advisory $\rightarrow$ Evidence explorer displaying published CVSS severity, Guardian review priority, and direct jump-to-graph actions.
+    4. *Behavioral Flows*: Visual source-to-sink flow step progression (`Source` $\rightarrow$ `Assignment` $\rightarrow$ `Argument` $\rightarrow$ `Parameter` $\rightarrow$ `Return` $\rightarrow$ `Sink`) with syntax code snippets, variable binding badges, and explicit limitations disclosure.
+    5. *Remediation History*: Project-level audit log of Guardian Autopilot remediation plans, user approvals/rejections, file application outcomes, and rescan verification states.
+    6. *Security Timeline*: Chronological multi-scan security posture tracking across independent dimensions with side-by-side two-scan delta comparison.
+  - **Guardian Autopilot Safety Hardening**: Multi-file rollback journal that removes newly created files on failure, undo operations that safely remove created files, pre-flight collision rejection if a `create` target already exists, and reapplication validation.
+  - **Standardized Product Terminology**: Canonical naming enforced across all user interfaces: **Guardian** (platform), **Guardian Intelligence** (AI security advisor), and **Guardian Autopilot** (AI remediation system).
 - **Guardian 3.0 Experience Overhaul**:
   - **Security Command Centre Dashboard**: Workspace overview with real historical metrics (projects inspected, scans requiring attention, dependencies inventoried, critical advisory matches), decoupled 4-dimension posture breakdown, prioritized evidence-grounded next steps, and modernized scan launchpad with file dropzone and multi-stage progress tracking.
   - **Major Report Redesign**: Adaptive assessment summary that dynamically leads with primary security concerns (vulnerabilities, behavioral signals, or coverage boundaries), 4 independent assessment dimension cards, tabbed report navigation (Findings, Dependencies, Coverage, Evidence & Data Flows), meaningful advisory titles (replacing repetitive generic titles), package-grouped finding exploration without concealing underlying findings, and practical filters.
-  - **Contextual AI Copilot (Guardian Intelligence Drawer)**: Persistent, collapsible right-side drawer sliding in smoothly alongside the report, context-aware of selected findings and reports, dynamic suggested prompts, rich markdown rendering, and clickable citations that highlight and jump to findings in the report.
+  - **Guardian Intelligence Drawer**: Persistent, collapsible right-side drawer sliding in smoothly alongside the report, context-aware of selected findings and reports, dynamic suggested prompts, rich markdown rendering, and clickable citations that highlight and jump to findings in the report.
 - Next.js/React/TypeScript interface with self-hosted Inter, Tailwind CSS, Lucide icons, Framer Motion, responsive layouts and persistent dark-mode preference.
 - Independent security assessments & three-dimensional coverage (Intelligence Engine 2.1.1):
   - Behavioral findings & source coverage (files analyzed, parser boundaries, explicit disclaimers on partial code coverage).
@@ -78,6 +91,104 @@
   - Strict execution boundaries: safe static analysis only; manual package commands (e.g. `npm install`, `npm test`) are presented clearly but never automatically executed.
   - Cross-browser compatibility fallback for non-Chromium browsers with ZIP archive inspection and `.patch` bundle export.
 - Nine synthetic fixtures, including benign HTTP/environment access, sensitive data flow, installer behaviors, and full remediation demonstration. Fixture source is test data: never execute it.
+
+## Architecture Diagrams
+
+### 1. Project Investigation Workspace Architecture
+
+```
++--------------------------------------------------------------------------------------------------+
+|                                GUARDIAN PROJECT WORKSPACE                                       |
+|                                                                                                  |
+|  +--------------------+  +----------------------+  +---------------------+  +-----------------+  |
+|  | Project Selector   |  | Classification Badge |  | Historical Scans    |  | Intelligence    |  |
+|  | (Deduplicated)     |  | [REAL] / [DEMO]      |  | Scan Switcher / Run |  | Drawer Launcher |  |
+|  +--------------------+  +----------------------+  +---------------------+  +-----------------+  |
+|                                                                                                  |
+|  +---------------+ +------------------+ +-----------------+ +--------------+ +---------------+   |
+|  | 1. Overview   | | 2. Dep Graph     | | 3. Vulnerability| | 4. Behav Flow| | 5. Remediation|   |
+|  | 4 Dimensions  | | ReactFlow+Dagre  | | Dependency-First| | Source->Sink | | Autopilot Log |   |
+|  | Scan Deltas   | | Subtree Tracing  | | Advisories+CVSS | | Syntax Steps | | Rescan Verify |   |
+|  +---------------+ +------------------+ +-----------------+ +--------------+ +---------------+   |
+|                                   | 6. Security Timeline  |                                      |
+|                                   | Cross-Scan Delta View |                                      |
+|                                   +-----------------------+                                      |
++--------------------------------------------------------------------------------------------------+
+```
+
+### 2. Ingestion, Storage, Filtering & Data Accounting Flow
+
+```
++----------------------------------------------------------------------------------------------------+
+|                                    GUARDIAN 3.1 DATA FLOW                                          |
+|                                                                                                    |
+|  [User Input / Files / ZIP / Local FS / npm Registry]                                              |
+|                           │                                                                        |
+|                           ▼                                                                        |
+|  [Ingestion & Classification Engine] ─── Explicit Metadata: classification = "real" | "demo"       |
+|                           │                                                                        |
+|                           ▼                                                                        |
+|  [Analysis Engine: AST Syntax / OSV Intelligence / SRI Integrity / Lockfile Traversal]             |
+|                           │                                                                        |
+|                           ▼                                                                        |
+|  [Immutable Report Generation] ─── Reconciled Accounting (getDependencyAccounting / Breakdown)    |
+|                           │                                                                        |
+|                           ▼                                                                        |
+|  [SQLite Storage: backend/guardian.sqlite3] ─── Preserves report + classification + plans          |
+|                           │                                                                        |
+|                           ▼                                                                        |
+|  [Frontend API Proxy: /api/scans] ─── Session-level Dataset Filter: "all" | "real" | "demo"        |
+|               │                                                 │                                  |
+|               ▼                                                 ▼                                  |
+|  [Dashboard Command Centre]                       [Project Investigation Workspace]                |
+|  - Deduplicated Project Metrics                   - 6 Dedicated Interactive Analysis Tabs          |
+|  - 4D Responsive Assessment Cards                 - Hierarchical DAG / Trace / Audit Views         |
++----------------------------------------------------------------------------------------------------+
+```
+
+### 3. Guardian Autopilot Remediation Lifecycle & Rollback Journal State Machine
+
+```
++----------------------------------------------------------------------------------------------------+
+|                       GUARDIAN AUTOPILOT SAFETY & ROLLBACK STATE MACHINE                           |
+|                                                                                                    |
+|   [Finding Review]                                                                                 |
+|          │                                                                                         |
+|          ▼                                                                                         |
+|   [Plan Generation] ──── LLM / Deterministic Planner (Exact verbatim anchors, Pydantic validated)  |
+|          │                                                                                         |
+|          ▼                                                                                         |
+|   [Diff Inspection] ─── User reviews unified diff and manual action requirements                   |
+|          │                                                                                         |
+|          ▼                                                                                         |
+|   [Explicit Approval] ── User confirms apply with Git branch safeguard check                       |
+|          │                                                                                         |
+|          ▼                                                                                         |
+|   [Pre-Flight Verification]                                                                        |
+|     ├── For updates: verify disk SHA-256 matches expected before_hash                              |
+|     └── For creates: verify target file DOES NOT already exist on disk                             |
+|          │                                                                                         |
+|          ├── If Pre-check Fails ──────> [ABORT: No files touched]                                  |
+|          ▼                                                                                         |
+|   [Capture Rollback Snapshot] ──────── Store original file bytes in IndexedDB                      |
+|          │                                                                                         |
+|          ▼                                                                                         |
+|   [Apply Operational Journal] ──────── Track modified and created files sequentially               |
+|          │                                                                                         |
+|          ├── If Any Write Fails ──────> [AUTOMATIC ROLLBACK JOURNAL]                               |
+|          │                              ├── Restore modified files from backup                     |
+|          │                              └── Delete created files via directoryHandle.removeEntry   |
+|          ▼                                                                                         |
+|   [Application Complete] ───────────── Plan recorded as applied; ready for rescan                  |
+|          │                                                                                         |
+|          ├── User Requests [Undo] ────> [UNDO ROLLBACK ENGINE]                                     |
+|          │                              ├── Verify file hashes match post-applied state            |
+|          │                              ├── Restore original file contents from IndexedDB          |
+|          │                              └── Delete files created by this plan                      |
+|          ▼                                                                                         |
+|   [Rescan & Verification] ──────────── Deterministic outcome comparison (resolved / persistent)     |
++----------------------------------------------------------------------------------------------------+
+```
 
 ## Setup
 
@@ -180,13 +291,14 @@ Example scans are explicitly marked synthetic. No prefilled or fabricated report
 
 Verified production screenshot: [Advanced report](docs/screenshots/advanced-report.png).
 
-## Verification on 2026-10-31
+## Verification on 2026-10-31 (Guardian 3.1)
 
 - Production `npm run build`: passed (Next.js 16.4.3 / webpack).
-- `npm run typecheck`: passed (strict TypeScript 5.9).
-- `npm run format`: passed (Prettier).
-- `pytest backend/tests -q`: 180 tests passed in ~4.9s.
-- Integration tests verified:
+- `npm run typecheck`: passed (strict TypeScript 5.9 with zero errors).
+- `npm run format`: passed (Prettier formatting verified).
+- `npm test` (`scripts/test_fs_reapply.mjs`): 10 filesystem safety and rollback tests passed.
+- `pytest backend/tests -q`: 187 tests passed in ~5.1s.
+- Integration & Integrity tests verified:
   1. Benign synthetic package (observations only).
   2. Sensitive-data source-to-sink flow (step-by-step trace).
   3. Cross-file data-flow scenario (ESM/CJS propagation).
@@ -202,9 +314,12 @@ Verified production screenshot: [Advanced report](docs/screenshots/advanced-repo
   13. Archive hardening (traversal, normalized path collisions, symlinks/hardlinks/FIFOs/devices, decompression limits, unextracted nested archives).
   14. Fast and deep inspection profiles (bounded depth/package budgets).
   15. Simple and Advanced report rendering (everyday vs technical evidence).
-  16. JSON export & legacy report compatibility (backward compatibility with legacy v1 reports).
-  17. Guardian Cognitive Intelligence 1.0 (Gemini 3.8 Flash, secret redaction, citation validation, deterministic fallback).
-  18. Guardian Autopilot Remediation 1.0 (Local project access, bounds, edit validation, unified diffs, approval, browser application, IndexedDB backup rollback, safe undo, and verification).
+  16. JSON export & legacy report compatibility (backward compatibility with legacy v1 reports and automatic `demo`/`real` classification migration).
+  17. Guardian Cognitive Intelligence (Gemini 3.8 Flash, secret redaction, citation validation, deterministic fallback).
+  18. Guardian Autopilot Remediation (Local project access, bounds, edit validation, unified diffs, approval, browser application, IndexedDB backup rollback, safe undo, and verification).
+  19. Data Integrity & Exact Accounting: `declaredDirect + transitive === totalResolved` and disjoint status partition `inspected + skipped + unavailable + unresolved + integrity_failed + not_attempted === totalResolved`.
+  20. Autopilot Multi-File Safety Hardening: Pre-flight create collision rejection, operational write journal, automatic removal of newly created files upon write failure, and safe undo removal of created files without touching subsequent user modifications.
+  21. Project Investigation Workspace: 6 interactive tabs (Overview, Dependency Graph via `@xyflow/react` and `@dagrejs/dagre`, Vulnerabilities, Behavioral Flows, Remediation History, Security Timeline).
 
 `backend/requirements.lock.txt` records the tested Python dependency versions; install it instead of `requirements.txt` to reproduce this environment.
 

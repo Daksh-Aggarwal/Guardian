@@ -75,6 +75,7 @@ export type Report = {
   intelligence: string;
   duration_ms: number;
   engine_version?: string;
+  classification?: "real" | "demo";
   inspections?: Inspection[];
   inspection_summary?: InspectionSummary | null;
   root_integrity?: Integrity | null;
@@ -295,3 +296,6 @@ export type ProjectMetadata = {
   created_at: string;
   expires_at: string;
 };
+
+export type { DependencyAccounting, FindingBreakdown } from "./accounting";
+export { getDependencyAccounting, getFindingBreakdown } from "./accounting";

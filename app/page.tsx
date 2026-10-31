@@ -31,6 +31,7 @@ import {
   Menu,
 } from "lucide-react";
 import { api, Report, ScanJob, Finding } from "@/lib/types";
+import { getDependencyAccounting, getFindingBreakdown } from "@/lib/accounting";
 import {
   Brand,
   Eyebrow,
@@ -41,6 +42,7 @@ import {
   RecommendedActionCard,
   Badge,
   StatusChip,
+  ClassificationBadge,
 } from "@/components/ui";
 import ScanPanel from "@/components/scan-panel";
 import ReportView from "@/components/report";
@@ -59,6 +61,14 @@ export default function Home() {
   const [connected, setConnected] = useState(false);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [datasetFilter, setDatasetFilter] = useState<"all" | "real" | "demo">(
+    "all",
+  );
+  const [workspaceProjectName, setWorkspaceProjectName] = useState<
+    string | null
+  >(null);
+  const [workspaceInitialReport, setWorkspaceInitialReport] =
+    useState<Report | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [remediationOpen, setRemediationOpen] = useState(false);
   const [remediationFinding, setRemediationFinding] = useState<string | null>(
@@ -94,6 +104,12 @@ export default function Home() {
         window.matchMedia("(prefers-color-scheme: dark)").matches);
     setDark(isDark);
 
+    const storedFilter = sessionStorage.getItem("guardian-dataset-filter") as
+      "all" | "real" | "demo" | null;
+    if (storedFilter && ["all", "real", "demo"].includes(storedFilter)) {
+      setDatasetFilter(storedFilter);
+    }
+
     const id = new URLSearchParams(window.location.search).get("scan");
     if (id) {
       api<Report>(`/scans/${id}`)
@@ -101,6 +117,10 @@ export default function Home() {
         .catch((e) => setError(e.message));
     }
   }, [refresh]);
+
+  useEffect(() => {
+    sessionStorage.setItem("guardian-dataset-filter", datasetFilter);
+  }, [datasetFilter]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = dark ? "dark" : "light";
@@ -182,38 +202,95 @@ export default function Home() {
     }
   }
 
-  // Meaningful Calculated Metrics from Actual History
-  const metrics = useMemo(() => {
-    const totalProjects = reports.length;
-    const elevatedProjects = reports.filter((r) =>
-      r.findings.some((f) =>
-        ["critical", "high", "medium"].includes(f.severity),
-      ),
-    ).length;
+  // Filter reports according to active dataset filter
+  const filteredReports = useMemo(() => {
+    return reports.filter((r) => {
+      const classification =
+        r.classification ||
+        (r.source === "synthetic fixture" ? "demo" : "real");
+      if (datasetFilter === "real") return classification === "real";
+      if (datasetFilter === "demo") return classification === "demo";
+      return true;
+    });
+  }, [reports, datasetFilter]);
 
-    const uniqueDependencies = new Set(
-      reports.flatMap((r) => r.dependencies.map((d) => d.name)),
+  const realReportsCount = useMemo(
+    () =>
+      reports.filter(
+        (r) =>
+          (r.classification ||
+            (r.source === "synthetic fixture" ? "demo" : "real")) === "real",
+      ).length,
+    [reports],
+  );
+
+  const demoReportsCount = useMemo(
+    () =>
+      reports.filter(
+        (r) =>
+          (r.classification ||
+            (r.source === "synthetic fixture" ? "demo" : "real")) === "demo",
+      ).length,
+    [reports],
+  );
+
+  // Group latest scan per project for deduplicated project metrics
+  const latestProjectScans = useMemo(() => {
+    const map = new Map<string, Report>();
+    for (const r of filteredReports) {
+      if (!map.has(r.name)) {
+        map.set(r.name, r);
+      }
+    }
+    return Array.from(map.values());
+  }, [filteredReports]);
+
+  // Meaningful Calculated Metrics from Actual History (Reconciled & Deduplicated)
+  const metrics = useMemo(() => {
+    const uniqueProjectsCount = latestProjectScans.length;
+    const totalScansCount = filteredReports.length;
+
+    const elevatedProjectsCount = latestProjectScans.filter((r) => {
+      const bd = getFindingBreakdown(r.findings);
+      return bd.actionable > 0;
+    }).length;
+
+    const totalActionableFindings = latestProjectScans.reduce((sum, r) => {
+      return sum + getFindingBreakdown(r.findings).actionable;
+    }, 0);
+
+    const uniqueDependencyNamesCount = new Set(
+      filteredReports.flatMap((r) =>
+        r.inspections?.length
+          ? r.inspections.map((n) => n.name)
+          : r.dependencies.map((d) => d.name),
+      ),
     ).size;
 
-    const criticalAdvisoriesCount = reports.reduce(
-      (sum, r) =>
-        sum +
-        r.findings.filter(
-          (f) =>
-            f.severity === "critical" && (f.rule === "OSV" || !!f.advisory),
-        ).length,
-      0,
-    );
+    const dependencyVersionsCount = new Set(
+      filteredReports.flatMap((r) =>
+        r.inspections?.length
+          ? r.inspections.map((n) => `${n.name}@${n.version}`)
+          : r.dependencies.map((d) => `${d.name}@${d.version}`),
+      ),
+    ).size;
+
+    const criticalAdvisoriesCount = latestProjectScans.reduce((sum, r) => {
+      return sum + getFindingBreakdown(r.findings).criticalAdvisories;
+    }, 0);
 
     return {
-      totalProjects,
-      elevatedProjects,
-      uniqueDependencies,
+      uniqueProjectsCount,
+      totalScansCount,
+      elevatedProjectsCount,
+      totalActionableFindings,
+      uniqueDependencyNamesCount,
+      dependencyVersionsCount,
       criticalAdvisoriesCount,
     };
-  }, [reports]);
+  }, [latestProjectScans, filteredReports]);
 
-  // Evidence-grounded Recommended Next Steps derived from actual reports
+  // Evidence-grounded Recommended Next Steps derived from active filtered reports
   const recommendedActions = useMemo(() => {
     const actions: {
       id: string;
@@ -225,7 +302,7 @@ export default function Home() {
       findingId?: string;
     }[] = [];
 
-    for (const r of reports) {
+    for (const r of latestProjectScans) {
       // 1. Critical OSV vulnerability
       const critOsv = r.findings.find(
         (f) => f.severity === "critical" && (f.rule === "OSV" || !!f.advisory),
@@ -283,7 +360,7 @@ export default function Home() {
     }
 
     return actions;
-  }, [reports]);
+  }, [latestProjectScans]);
 
   return (
     <div className="app-shell">
@@ -472,6 +549,11 @@ export default function Home() {
                   setRemediationFinding(f.id);
                   setRemediationOpen(true);
                 }}
+                onInvestigateProject={(r) => {
+                  setWorkspaceProjectName(r.name);
+                  setWorkspaceInitialReport(r);
+                  navigate("Project workspace");
+                }}
               />
 
               {remediationOpen && (
@@ -504,6 +586,10 @@ export default function Home() {
                 refresh();
               }}
               onDirectoryHandleChange={setConnectedDirectoryHandle}
+              initialReport={workspaceInitialReport}
+              initialProjectName={workspaceProjectName}
+              allReports={reports}
+              onOpenReportView={(r) => openReport(r)}
             />
           ) : page === "How it works" ? (
             /* VIEW 3: METHODOLOGY */
@@ -532,12 +618,52 @@ export default function Home() {
                 </div>
 
                 <div className="page-heading-actions">
+                  <div
+                    className="dataset-filter-control"
+                    role="group"
+                    aria-label="Dataset Filter"
+                  >
+                    <button
+                      type="button"
+                      className={`dataset-filter-btn ${datasetFilter === "all" ? "active" : ""}`}
+                      onClick={() => setDatasetFilter("all")}
+                      title="Show all projects and demo data"
+                    >
+                      All{" "}
+                      <span className="dataset-count-pill">
+                        {reports.length}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`dataset-filter-btn ${datasetFilter === "real" ? "active" : ""}`}
+                      onClick={() => setDatasetFilter("real")}
+                      title="Show only real projects and registry lookups"
+                    >
+                      Real Projects{" "}
+                      <span className="dataset-count-pill">
+                        {realReportsCount}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`dataset-filter-btn ${datasetFilter === "demo" ? "active" : ""}`}
+                      onClick={() => setDatasetFilter("demo")}
+                      title="Show only synthetic fixtures and demo data"
+                    >
+                      Demo Data{" "}
+                      <span className="dataset-count-pill">
+                        {demoReportsCount}
+                      </span>
+                    </button>
+                  </div>
+
                   <button
                     className="button secondary"
                     onClick={() => navigate("Project workspace")}
                   >
                     <FolderOpen size={16} />
-                    <span>Open project folder</span>
+                    <span>Project workspace</span>
                   </button>
                   <button
                     className="button primary"
@@ -565,25 +691,27 @@ export default function Home() {
                   <div className="metrics-grid">
                     <MetricCard
                       label="Projects Inspected"
-                      value={metrics.totalProjects}
+                      value={metrics.uniqueProjectsCount}
                       icon={<Package size={18} />}
-                      detail="Total repositories and packages analyzed"
+                      detail={`${metrics.totalScansCount} total ${metrics.totalScansCount === 1 ? "scan" : "scans"} recorded`}
                       status="neutral"
                     />
                     <MetricCard
                       label="Requiring Attention"
-                      value={metrics.elevatedProjects}
+                      value={metrics.elevatedProjectsCount}
                       icon={<AlertTriangle size={18} />}
-                      detail="Projects with elevated or critical signals"
+                      detail={`${metrics.totalActionableFindings} actionable ${metrics.totalActionableFindings === 1 ? "signal" : "signals"} to review`}
                       status={
-                        metrics.elevatedProjects > 0 ? "warning" : "success"
+                        metrics.elevatedProjectsCount > 0
+                          ? "warning"
+                          : "success"
                       }
                     />
                     <MetricCard
                       label="Dependencies Inventoried"
-                      value={metrics.uniqueDependencies}
+                      value={metrics.uniqueDependencyNamesCount}
                       icon={<ShieldCheck size={18} />}
-                      detail="Unique third-party packages mapped"
+                      detail={`${metrics.dependencyVersionsCount} resolved versions mapped`}
                       status="neutral"
                     />
                     <MetricCard
@@ -873,16 +1001,21 @@ export default function Home() {
                     <>
                       <div className="table-header">
                         <span>PACKAGE / PROJECT</span>
-                        <span>BEHAVIORAL POSTURE</span>
+                        <span>BEHAVIORAL ASSESSMENT</span>
                         <span>FINDINGS</span>
                         <span>SCANNED AT</span>
-                        <span />
+                        <span>ACTION</span>
                       </div>
 
-                      {reports
-                        .filter((r) =>
-                          r.name.toLowerCase().includes(search.toLowerCase()),
-                        )
+                      {filteredReports
+                        .filter((r) => {
+                          const q = search.toLowerCase();
+                          return (
+                            r.name.toLowerCase().includes(q) ||
+                            r.version.toLowerCase().includes(q) ||
+                            r.source.toLowerCase().includes(q)
+                          );
+                        })
                         .slice(0, page === "Overview" ? 6 : 50)
                         .map((r) => {
                           const hasElevated = r.findings.some((f) =>
@@ -891,15 +1024,13 @@ export default function Home() {
                           const hasMedium = r.findings.some(
                             (f) => f.severity === "medium",
                           );
-                          const elevatedCount = r.findings.filter(
-                            (f) => f.severity !== "info",
-                          ).length;
+                          const bd = getFindingBreakdown(r.findings);
 
                           return (
-                            <button
+                            <div
                               key={r.id}
-                              type="button"
                               className="table-row"
+                              style={{ cursor: "pointer" }}
                               onClick={() => openReport(r)}
                             >
                               <span className="package-cell">
@@ -907,7 +1038,24 @@ export default function Home() {
                                   <Package size={18} />
                                 </span>
                                 <span className="package-titles">
-                                  <strong>{r.name}</strong>
+                                  <div
+                                    style={{
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: "6px",
+                                    }}
+                                  >
+                                    <strong>{r.name}</strong>
+                                    <ClassificationBadge
+                                      classification={
+                                        r.classification ||
+                                        (r.source === "synthetic fixture"
+                                          ? "demo"
+                                          : "real")
+                                      }
+                                      size="sm"
+                                    />
+                                  </div>
                                   <small>
                                     v{r.version} · {r.source} ·{" "}
                                     {r.files_analyzed} files
@@ -925,14 +1073,25 @@ export default function Home() {
                               </span>
 
                               <span className="findings-cell">
-                                <strong>{elevatedCount}</strong>
+                                <strong>{bd.actionable}</strong>
                                 <small>
                                   {" "}
-                                  {elevatedCount === 1
+                                  {bd.actionable === 1
                                     ? "signal"
                                     : "signals"}{" "}
                                   to review
                                 </small>
+                                {bd.informational > 0 && (
+                                  <small
+                                    style={{
+                                      color: "var(--muted)",
+                                      fontSize: "10px",
+                                      display: "block",
+                                    }}
+                                  >
+                                    +{bd.informational} observations
+                                  </small>
+                                )}
                               </span>
 
                               <span className="date-cell">
@@ -956,10 +1115,42 @@ export default function Home() {
                                 </small>
                               </span>
 
-                              <span className="row-action-arrow">
-                                <ChevronRight size={16} />
+                              <span
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "8px",
+                                  justifyContent: "flex-end",
+                                }}
+                              >
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setWorkspaceProjectName(r.name);
+                                    setWorkspaceInitialReport(r);
+                                    navigate("Project workspace");
+                                  }}
+                                  style={{
+                                    background: "rgba(99, 102, 241, 0.12)",
+                                    border: "1px solid rgba(99, 102, 241, 0.3)",
+                                    color: "#818cf8",
+                                    borderRadius: "4px",
+                                    padding: "3px 8px",
+                                    fontSize: "11px",
+                                    cursor: "pointer",
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: "4px",
+                                    fontWeight: 500,
+                                  }}
+                                  title="Open in Project Investigation Workspace"
+                                >
+                                  <span>Investigate</span>
+                                  <ChevronRight size={12} />
+                                </button>
                               </span>
-                            </button>
+                            </div>
                           );
                         })}
                     </>

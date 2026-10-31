@@ -40,15 +40,27 @@
 - [x] Deterministic rescan & outcome verification comparing pre-remediation and post-remediation security findings.
 - [x] Guardian 3.0 Security Command Centre: Meaningful metrics derived from historical report data, 4D decoupled security posture breakdown, evidence-grounded recommended actions, and modernized security launchpad.
 - [x] Redesigned Report Experience: Adaptive contextual summaries, 4 independent dimension cards, tabbed report navigation (Findings, Dependencies, Coverage, Evidence & Data Flows), meaningful advisory titles, package-grouped finding presentation, and practical multi-dimensional filters.
-- [x] Contextual AI Copilot Drawer (Guardian Intelligence): Collapsible right-side drawer, finding selection context awareness, dynamic prompt suggestions, clickable evidence citations, and seamless markdown rendering.
+- [x] Guardian 3.1 Data Integrity & Project Investigation Workspace:
+  - [x] Explicit project classification (`real` vs `demo`) with safe legacy migration validator and persistent global dataset filter (`All`, `Real Projects`, `Demo Data`).
+  - [x] Deduplicated dashboard metrics by unique project name, distinguishing scans, unique projects, and unique dependency names.
+  - [x] Reconciled dependency accounting and report semantics (`declaredDirect + transitive === totalResolved`, disjoint status sum == `totalResolved`).
+  - [x] Responsive 4/2/1 dimension grid breakpoints preventing clipping or horizontal scrolling across all viewports.
+  - [x] Project Investigation Workspace integrating 6 dedicated tabs:
+    - [x] Overview: Project identity, metadata, 4 independent dimensions, and previous scan delta.
+    - [x] Interactive Dependency Graph: Hierarchical DAG visualizer (`@xyflow/react` + `@dagrejs/dagre`), zoom/pan/minimap, severity filtering, depth limits, focused subtree tracing, and package detail inspector panel.
+    - [x] Vulnerabilities Explorer: Dependency-first OSV advisory explorer with CVSS vectors, Guardian review priority, and jump-to-graph actions.
+    - [x] Behavioral Flow Explorer: Step-by-step source-to-sink flow trace (`Source` -> `Assignment` -> `Argument` -> `Parameter` -> `Return` -> `Sink`) with syntax code snippets.
+    - [x] Remediation History: Project-level audit log of Guardian Autopilot plans, status badges, and rescan verification outcomes.
+    - [x] Security Timeline: Chronological security posture timeline and side-by-side 2-scan delta comparator.
+  - [x] Guardian Autopilot Multi-File Safety Hardening: Pre-flight create collision rejection, operational write journal, automatic removal of newly created files upon write failure, and safe undo removal of created files without touching user edits.
+  - [x] Product Terminology Standardization: Guardian, Guardian Intelligence, Guardian Autopilot.
 
 ## Next priorities
 
-1. Interactive dependency graph visualizer showing dependency edges and risk propagation.
-2. Configurable report retention and historical report deletion policies.
-3. Expanded lockfile support for pnpm and Yarn Berry v2+ formats.
-4. Automated CI/CD action/CLI command (`guardian scan`) for pull request checks.
-5. Accessible keyboard navigation and screen-reader audit.
+1. Configurable report retention and historical report deletion policies.
+2. Expanded lockfile support for pnpm and Yarn Berry v2+ formats.
+3. Automated CI/CD action/CLI command (`guardian scan`) for pull request checks.
+4. Accessible keyboard navigation and screen-reader audit.
 
 ## Later
 

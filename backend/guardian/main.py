@@ -44,7 +44,7 @@ def stage(job_id, label):
         if job_id in JOBS and JOBS[job_id]['status'] in ('queued', 'running'):
             JOBS[job_id]['stage'] = label
 
-def run(job_id, loader, source, profile):
+def run(job_id, loader, source, profile, classification='real'):
     started = time.monotonic()
     try:
         with LOCK:
@@ -121,6 +121,7 @@ def run(job_id, loader, source, profile):
             version=version,
             created_at=datetime.now(timezone.utc).isoformat(),
             source=source,
+            classification=classification,
             risk=risk,
             rationale=rationale,
             findings=findings,
@@ -190,11 +191,13 @@ def run(job_id, loader, source, profile):
                 JOBS[job_id].update(status='cancelled', stage='Scan cancelled')
         SLOTS.release()
 
-def submit(loader, source, profile="fast", job_id=None):
+def submit(loader, source, profile="fast", job_id=None, classification=None):
     if not SLOTS.acquire(blocking=False):
         raise HTTPException(429, 'Two scans are already running. Try again shortly.')
     if not job_id:
         job_id = uuid4().hex
+    if classification is None:
+        classification = 'demo' if source == 'synthetic fixture' else 'real'
     with LOCK:
         # Only retain the most recent completed job states; reports stay in SQLite.
         if len(JOBS) >= 100:
@@ -205,7 +208,7 @@ def submit(loader, source, profile="fast", job_id=None):
                     break
         JOBS[job_id] = {'id':job_id, 'status':'queued', 'stage':'Queued'}
         CANCELLATIONS[job_id] = threading.Event()
-    threading.Thread(target=run, args=(job_id, loader, source, profile), daemon=True).start()
+    threading.Thread(target=run, args=(job_id, loader, source, profile, classification), daemon=True).start()
     return {'id':job_id}
 
 @app.get('/api/health')
@@ -237,11 +240,11 @@ async def upload(files: list[UploadFile] = File(...), profile: Literal["fast", "
             warnings += skipped
     except Exception as error:
         raise HTTPException(400, str(error)[:300] if isinstance(error, ValueError) else 'Invalid or unsupported archive.')
-    return submit(lambda: (contents, warnings), 'upload', profile)
+    return submit(lambda: (contents, warnings), 'upload', profile, classification='real')
 
 @app.post('/api/scans/package', status_code=202)
 def package(request: PackageRequest):
-    return submit(lambda: RegistrySession(Budget.from_env(request.profile)).retrieve(request.name, request.version), 'npm registry', request.profile)
+    return submit(lambda: RegistrySession(Budget.from_env(request.profile)).retrieve(request.name, request.version), 'npm registry', request.profile, classification='real')
 
 @app.get('/api/examples')
 def examples():
@@ -252,7 +255,7 @@ def example(example: str):
     available = {p.name:p for p in FIXTURES.iterdir() if p.is_dir()}
     if example not in available:
         raise HTTPException(404, 'Example not found')
-    return submit(lambda: ({str(p.relative_to(available[example])):p.read_text() for p in available[example].rglob('*') if p.is_file()}, ['Synthetic demonstration fixture; this is not a real-world malware sample.']), 'synthetic fixture')
+    return submit(lambda: ({str(p.relative_to(available[example])):p.read_text() for p in available[example].rglob('*') if p.is_file()}, ['Synthetic demonstration fixture; this is not a real-world malware sample.']), 'synthetic fixture', classification='demo')
 
 @app.get('/api/jobs/{job_id}')
 def job(job_id: str):
@@ -387,7 +390,7 @@ def scan_project(request: ProjectIngestRequest):
         raise HTTPException(400, str(err))
 
     try:
-        return submit(lambda: (dict(snapshot.files), []), f"local project: {request.name}", profile=request.profile, job_id=job_id)
+        return submit(lambda: (dict(snapshot.files), []), f"local project: {request.name}", profile=request.profile, job_id=job_id, classification='real')
     except Exception:
         project_manager.discard_snapshot(job_id)
         raise
@@ -510,4 +513,23 @@ def get_plan_verification(plan_id: str):
     if not verification:
         raise HTTPException(404, 'Verification record not found')
     return verification
+
+@app.get('/api/scans/{scan_id}/remediation/plans')
+def get_scan_remediation_plans(scan_id: str):
+    rep = storage.get(scan_id)
+    if not rep:
+        raise HTTPException(404, 'Report not found')
+    return storage.get_plans_for_scan(scan_id)
+
+@app.get('/api/projects/{name}/remediation/history')
+def get_project_remediation_history(name: str):
+    plans = storage.get_plans_for_project(name)
+    history = []
+    for plan in plans:
+        verification = storage.get_verification(plan.plan_id)
+        history.append({
+            'plan': plan,
+            'verification': verification
+        })
+    return history
 
