@@ -598,10 +598,6 @@ export default function Home() {
                 <MoonIcon size={17} className="inline-flex items-center justify-center" />
               )}
             </button>
-
-            <span className="header-avatar" title="Local session">
-              Y
-            </span>
           </div>
         </header>
 
