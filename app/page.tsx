@@ -31,6 +31,7 @@ import {
   Menu,
 } from "lucide-react";
 import { api, Report, ScanJob, Finding } from "@/lib/types";
+import { Sidebar, SidebarBody, SidebarLink } from "@/components/ui/sidebar";
 import { getDependencyAccounting, getFindingBreakdown } from "@/lib/accounting";
 import {
   Brand,
@@ -70,6 +71,7 @@ export default function Home() {
   const [workspaceInitialReport, setWorkspaceInitialReport] =
     useState<Report | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [remediationOpen, setRemediationOpen] = useState(false);
   const [remediationFinding, setRemediationFinding] = useState<string | null>(
     null,
@@ -379,101 +381,94 @@ export default function Home() {
 
   return (
     <div className="app-shell">
-      {/* Mobile Menu Backdrop */}
-      {mobileMenuOpen && (
-        <div
-          className="sidebar-backdrop"
-          onClick={() => setMobileMenuOpen(false)}
-        />
-      )}
+      {/* 21st / Aceternity Animated Collapsible Sidebar */}
+      <Sidebar open={sidebarOpen} setOpen={setSidebarOpen} animate={true}>
+        <SidebarBody className="justify-between h-full">
+          <div className="flex flex-col flex-1 overflow-y-auto overflow-x-hidden">
+            <div className="sidebar-brand-row mb-6 px-1 flex items-center justify-between">
+              <Brand size={sidebarOpen ? "default" : "compact"} />
+            </div>
 
-      {/* Sidebar Navigation */}
-      <aside className={`sidebar ${mobileMenuOpen ? "mobile-open" : ""}`}>
-        <div className="sidebar-brand-row">
-          <Brand />
-          <button
-            type="button"
-            className="mobile-close-btn"
-            onClick={() => setMobileMenuOpen(false)}
-            aria-label="Close menu"
-          >
-            <X size={18} />
-          </button>
-        </div>
-
-        <div className="workspace-label">
-          <span className="workspace-icon">G</span>
-          <div>
-            <span className="workspace-name">Personal Workspace</span>
-            <small>LOCAL EDITION · v3.0</small>
-          </div>
-          <ChevronRight size={14} className="workspace-chevron" />
-        </div>
-
-        <div className="nav-label">COMMAND CENTRE</div>
-        <nav>
-          {[
-            { name: "Overview", icon: LayoutDashboard },
-            { name: "Project workspace", icon: FolderOpen },
-            { name: "Scan history", icon: History },
-            { name: "How it works", icon: BookOpen },
-          ].map(({ name, icon: Icon }) => (
-            <button
-              key={name}
-              className={page === name && !report ? "active" : ""}
-              onClick={() => navigate(name as any)}
+            <div
+              className="workspace-label mb-5 cursor-pointer"
+              onClick={() => navigate("Overview")}
+              title={!sidebarOpen ? "Personal Workspace" : undefined}
             >
-              <Icon size={18} />
-              <span>
-                {name}
-                {name === "Scan history" && (
-                  <span
-                    className={`nav-attention-dot ${reports.length > 0 ? "has-reports" : ""}`}
-                    title={
-                      reports.length > 0
-                        ? `${reports.length} scan${reports.length === 1 ? "" : "s"} in history`
-                        : "Scan history attention prompt"
-                    }
-                  />
-                )}
-              </span>
-            </button>
-          ))}
-        </nav>
+              <span className="workspace-icon">G</span>
+              {sidebarOpen && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ duration: 0.15 }}
+                  className="flex-1 overflow-hidden ml-2.5"
+                >
+                  <span className="workspace-name truncate block">Personal Workspace</span>
+                  <small className="truncate block">Local Workspace</small>
+                </motion.div>
+              )}
+            </div>
 
-        {/* Sidebar trust banner */}
-        <div className="sidebar-note">
-          <div className="tiny-shield">
-            <ShieldCheck size={20} />
+            <div className="flex flex-col gap-1.5 flex-1">
+              {sidebarOpen && (
+                <div className="nav-label px-3 mb-1 text-[10px] uppercase tracking-wider text-[var(--muted)] font-semibold">
+                  Navigation
+                </div>
+              )}
+              {[
+                { name: "Overview", icon: LayoutDashboard },
+                { name: "Project workspace", icon: FolderOpen },
+                { name: "Scan history", icon: History },
+                { name: "How it works", icon: BookOpen },
+              ].map(({ name, icon: Icon }) => (
+                <SidebarLink
+                  key={name}
+                  link={{
+                    label: name,
+                    icon: <Icon size={18} />,
+                    active: page === name && !report,
+                    onClick: () => navigate(name as any),
+                    badge:
+                      name === "Scan history" ? (
+                        <span
+                          className={`nav-attention-dot ${reports.length > 0 ? "has-reports" : ""}`}
+                          title={
+                            reports.length > 0
+                              ? `${reports.length} scan${reports.length === 1 ? "" : "s"} in history`
+                              : "Scan history attention prompt"
+                          }
+                        />
+                      ) : undefined,
+                  }}
+                />
+              ))}
+            </div>
           </div>
-          <h4>Evidence Over Assumptions</h4>
-          <p>
-            Static AST inspection. Transparent coverage boundaries. Grounded AI
-            explanations.
-          </p>
-          <button
-            type="button"
-            onClick={() => navigate("How it works")}
-            className="sidebar-note-link"
+
+          <div
+            className="sidebar-bottom pt-4 border-t border-[var(--line)] flex items-center gap-3 cursor-pointer"
+            title={!sidebarOpen ? "Local User · Local session" : undefined}
           >
-            <span>Methodology</span>
-            <ArrowUpRight size={13} />
-          </button>
-        </div>
-
-        {/* Sidebar footer */}
-        <div className="sidebar-bottom">
-          <span className="avatar">Y</span>
-          <div>
-            <strong className="sidebar-user-name">Local User</strong>
-            <small>Isolated memory · No cloud leakage</small>
+            <span className="avatar flex-shrink-0">Y</span>
+            {sidebarOpen && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.15 }}
+                className="flex-1 overflow-hidden"
+              >
+                <strong className="sidebar-user-name truncate block text-xs">Local User</strong>
+                <small className="truncate block text-[10px] text-[var(--muted)]">Local session</small>
+              </motion.div>
+            )}
+            {sidebarOpen && (
+              <span
+                className="local-dot flex-shrink-0"
+                title="Running in local environment"
+              />
+            )}
           </div>
-          <span
-            className="local-dot"
-            title="Running in local loopback environment"
-          />
-        </div>
-      </aside>
+        </SidebarBody>
+      </Sidebar>
 
       {/* Main Shell */}
       <div className="main-shell">
@@ -483,7 +478,7 @@ export default function Home() {
             <button
               type="button"
               className="mobile-menu-btn"
-              onClick={() => setMobileMenuOpen(true)}
+              onClick={() => setSidebarOpen(true)}
               aria-label="Toggle navigation menu"
             >
               <Menu size={20} />
@@ -497,10 +492,12 @@ export default function Home() {
           </div>
 
           <div className="top-actions">
-            <span className={`service-status ${connected ? "online" : ""}`}>
-              <i className="status-indicator-dot" />
-              <span>{connected ? "Scanner connected" : "Scanner offline"}</span>
-            </span>
+            {!connected && (
+              <span className="service-status offline" title="Scanner backend offline">
+                <i className="status-indicator-dot" />
+                <span>Offline</span>
+              </span>
+            )}
 
             <button
               aria-label={dark ? "Switch to light mode" : "Switch to dark mode"}
@@ -629,17 +626,11 @@ export default function Home() {
               {/* Command Centre Page Header */}
               <div className="page-heading">
                 <div>
-                  <Eyebrow>SUPPLY-CHAIN SECURITY COMMAND CENTRE</Eyebrow>
                   <h1 className="heading-title">
                     {page === "Overview"
-                      ? "Security Command Centre"
+                      ? "Security Overview"
                       : "Inspection History"}
                   </h1>
-                  <p className="heading-subtitle">
-                    {page === "Overview"
-                      ? "Evidence-grounded supply chain security, AST behavioral inspection, and verified advisory tracking."
-                      : "Complete repository of past inspections with full evidence trails preserved."}
-                  </p>
                 </div>
 
                 <div className="page-heading-actions">
@@ -752,69 +743,7 @@ export default function Home() {
                     />
                   </div>
 
-                  {/* Security Assessment Overview: 4 Independent Assessment Domains */}
-                  <section className="command-domains-section">
-                    <div className="section-title-row">
-                      <div>
-                        <Eyebrow>INDEPENDENT ASSESSMENT DOMAINS</Eyebrow>
-                        <h2>Four-Dimensional Security Posture</h2>
-                        <p>
-                          Guardian keeps detection domains decoupled. No
-                          arbitrary combined score.
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="dimension-grid">
-                      <SecurityDimensionCard
-                        title="Behavioral Assessment"
-                        domain="RUNTIME SIGNALS"
-                        status="Static AST Heuristics"
-                        statusTone="info"
-                        headline="Exfiltration & Execution"
-                        description="Inspects AST call chains for child_process spawning, sensitive environment token access, and outbound network sinks without executing code."
-                        metric={`${reports.filter((r) => r.findings.some((f) => (!f.domain || f.domain === "behavior") && f.rule !== "OSV" && f.severity !== "info")).length} scans with signals`}
-                        metricLabel="across history"
-                        icon={<FileCode2 size={18} />}
-                      />
-
-                      <SecurityDimensionCard
-                        title="Known Vulnerabilities"
-                        domain="INTELLIGENCE"
-                        status="OSV Upstream Database"
-                        statusTone="warning"
-                        headline="Exact Version Queries"
-                        description="Cross-references lockfile and manifest versions directly with the Open Source Vulnerabilities database for published CVEs and GHSAs."
-                        metric={`${metrics.criticalAdvisoriesCount} critical matches`}
-                        metricLabel="recorded in history"
-                        icon={<Network size={18} />}
-                      />
-
-                      <SecurityDimensionCard
-                        title="Package Integrity"
-                        domain="PROVENANCE"
-                        status="Digest Verification"
-                        statusTone="success"
-                        headline="Checksum Validation"
-                        description="Calculates SHA-512 and SHA-256 digests on retrieved tarballs against official registry metadata to detect tampered distribution archives."
-                        metric="Active"
-                        metricLabel="verification engine"
-                        icon={<ShieldCheck size={18} />}
-                      />
-
-                      <SecurityDimensionCard
-                        title="Inspection Coverage"
-                        domain="TRANSPARENCY"
-                        status="Decoupled Semantics"
-                        statusTone="purple"
-                        headline="Coverage Boundaries"
-                        description="Explicitly reports skipped packages, recursion limits, and unparsed files. 'No elevated signals' is never presented as an absolute guarantee of safety."
-                        metric="Bounded Depth"
-                        metricLabel="maximum recursion 8"
-                        icon={<Layers size={18} />}
-                      />
-                    </div>
-                  </section>
+                  
 
                   {/* Evidence-Grounded Recommended Actions */}
                   {recommendedActions.length > 0 && (
@@ -857,7 +786,7 @@ export default function Home() {
                     </section>
                   )}
 
-                  {/* Scan Launchpad & Informational Guide */}
+                  {/* Scan Launchpad */}
                   <div className="home-grid">
                     <ScanPanel
                       onStart={startScan}
@@ -865,64 +794,16 @@ export default function Home() {
                       job={job}
                       onConnectFolder={() => navigate("Project workspace")}
                     />
-
-                    {/* Security Philosophy Card */}
-                    <section className="guide-card">
-                      <div className="guide-visual" aria-hidden="true">
-                        <div className="orbit orbit-one" />
-                        <div className="orbit orbit-two" />
-                        <span className="orbit-node node-one">
-                          <Package size={17} />
-                        </span>
-                        <span className="orbit-node node-two">
-                          <FileCode2 size={16} />
-                        </span>
-                        <span className="orbit-node node-three">
-                          <ShieldCheck size={17} />
-                        </span>
-                        <span className="central-shield">
-                          <ShieldCheck size={42} strokeWidth={1.5} />
-                        </span>
-                      </div>
-                      <Eyebrow>EXPLAINABLE SECURITY ARCHITECTURE</Eyebrow>
-                      <h2>
-                        More than a verdict.
-                        <br />
-                        The evidence behind it.
-                      </h2>
-                      <p>
-                        Guardian connects suspicious code patterns directly to
-                        syntax evidence, explains them without jargon, and
-                        surfaces contextual AI guidance.
-                      </p>
-                      <button
-                        type="button"
-                        className="text-link inline-learn-link"
-                        onClick={() => navigate("How it works")}
-                      >
-                        <span>Explore methodology</span>
-                        <ArrowRight size={14} />
-                      </button>
-                      <div className="guide-tags">
-                        <span>Local Static AST</span>
-                        <span>OSV Intelligence</span>
-                        <span>Zero Execution</span>
-                      </div>
-                    </section>
                   </div>
 
                   {/* Synthetic Demonstrations Strip */}
                   <section className="examples-strip">
                     <div className="examples-left">
                       <div className="flask-icon-wrap">
-                        <FlaskConical size={20} />
+                        <FlaskConical size={18} />
                       </div>
                       <div>
-                        <h3>Synthetic Demonstration Benchmarks</h3>
-                        <p>
-                          Execute real scans on safe, inert synthetic test
-                          packages.
-                        </p>
+                        <h3>Quick Benchmarks</h3>
                       </div>
                     </div>
                     <div className="example-actions">
@@ -964,13 +845,9 @@ export default function Home() {
                   <div>
                     <h2>
                       {page === "Overview"
-                        ? "Recent Security Scans"
+                        ? "Recent Scans"
                         : "All Inspections"}
                     </h2>
-                    <p>
-                      Evidence trails and report history across all analyzed
-                      packages.
-                    </p>
                   </div>
 
                   {page === "Overview" ? (
@@ -1003,7 +880,7 @@ export default function Home() {
                     </div>
                   ) : !reports.length ? (
                     <Empty
-                      title="No scans in your evidence trail yet"
+                      title="No scans recorded yet"
                       action={
                         <button
                           type="button"
@@ -1015,12 +892,11 @@ export default function Home() {
                           }}
                         >
                           <Plus size={16} />
-                          <span>Run your first scan</span>
+                          <span>Run scan</span>
                         </button>
                       }
                     >
-                      Upload a project archive or look up an npm package. Every
-                      assessment produces a permanent evidence report.
+                      Upload a project archive or look up an npm package above.
                     </Empty>
                   ) : (
                     <>

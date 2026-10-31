@@ -354,8 +354,9 @@ nav button span {
   margin-left: auto;
 }
 .main-shell {
-  margin-left: 238px;
-  width: calc(100% - 238px);
+  flex: 1;
+  min-width: 0;
+  width: 100%;
 }
 .topbar {
   height: 74px;
@@ -495,7 +496,7 @@ main {
 }
 .home-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.65fr) minmax(240px, 1fr);
+  grid-template-columns: 1fr;
   gap: 24px;
 }
 .card {

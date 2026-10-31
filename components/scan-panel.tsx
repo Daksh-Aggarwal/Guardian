@@ -98,14 +98,8 @@ export default function ScanPanel({
     <section className="card scan-launchpad-card" id="new-scan">
       <div className="launchpad-header">
         <div>
-          <Eyebrow>SECURITY LAUNCHPAD</Eyebrow>
-          <h2 className="launchpad-title">Inspect before you trust.</h2>
-          <p className="launchpad-subtitle">
-            Static inspection of manifests, tarballs, and source code. Zero code
-            execution.
-          </p>
+          <h2 className="launchpad-title">Run Inspection</h2>
         </div>
-        <span className="launchpad-tag">NPM ECOSYSTEM</span>
       </div>
 
       {/* Mode Tabs */}
