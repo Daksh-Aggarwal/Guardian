@@ -10,7 +10,6 @@ import {
   Loader2,
   FileCode2,
   HardDrive,
-  Network,
   Share2,
 } from "lucide-react";
 import {
@@ -18,7 +17,6 @@ import {
   FolderSync,
   Layers,
   Terminal,
-  ShieldCheck,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
@@ -44,7 +42,6 @@ import {
   Note,
   Badge,
   ClassificationBadge,
-  SecurityDimensionCard,
 } from "./ui";
 import RemediationPanel from "./remediation-panel";
 import ReportView from "./report";
@@ -820,167 +817,6 @@ export default function ProjectWorkspace({
               <small style={{ color: "var(--muted)", fontSize: "11px" }}>
                 {deps.skipped} skipped &bull; {deps.unavailable} unavailable
               </small>
-            </div>
-          </div>
-
-          {/* 4 Independent Assessment Dimension Cards */}
-          <div>
-            <div style={{ marginBottom: "10px" }}>
-              <Eyebrow>DECOUPLED SECURITY POSTURE</Eyebrow>
-              <h3 style={{ margin: "2px 0 0", fontSize: "16px" }}>
-                Four Independent Assessment Domains
-              </h3>
-            </div>
-
-            <div className="dimension-grid">
-              <SecurityDimensionCard
-                title="Behavioral Assessment"
-                domain="RUNTIME SIGNALS"
-                status={
-                  breakdown.actionableBehavioral > 0
-                    ? "Signals Detected"
-                    : activeReport.files_analyzed === 0
-                      ? "Unavailable"
-                      : "Clean"
-                }
-                statusTone={
-                  breakdown.actionableBehavioral > 0
-                    ? "warning"
-                    : activeReport.files_analyzed === 0
-                      ? "purple"
-                      : "success"
-                }
-                headline={
-                  breakdown.actionableBehavioral > 0
-                    ? `${breakdown.actionableBehavioral} actionable behavioral signals`
-                    : "No elevated behavioral patterns"
-                }
-                description={activeReport.rationale}
-                metric={breakdown.behavioral}
-                metricLabel="behavioral observations"
-                icon={<FileCode2 size={18} />}
-                onClick={() => setActiveTab("Behavioral Flows")}
-              />
-
-              <SecurityDimensionCard
-                title="Known Vulnerabilities"
-                domain="OSV DATABASE"
-                status={
-                  breakdown.advisories > 0
-                    ? "Matches Detected"
-                    : activeReport.intelligence
-                }
-                statusTone={breakdown.advisories > 0 ? "danger" : "success"}
-                headline={
-                  breakdown.advisories > 0
-                    ? `${breakdown.advisories} upstream OSV advisories`
-                    : "No known vulnerabilities"
-                }
-                description={`Exact-version queries evaluated against ${deps.totalResolved} resolved dependencies.`}
-                metric={breakdown.advisories}
-                metricLabel="advisory matches"
-                icon={<Network size={18} />}
-                onClick={() => setActiveTab("Vulnerabilities")}
-              />
-
-              <SecurityDimensionCard
-                title="Package Integrity"
-                domain="PROVENANCE"
-                status={
-                  breakdown.integrity > 0
-                    ? "Checksum Mismatch"
-                    : activeReport.root_integrity?.status || "Verified/Local"
-                }
-                statusTone={breakdown.integrity > 0 ? "danger" : "success"}
-                headline={
-                  breakdown.integrity > 0
-                    ? `${breakdown.integrity} integrity concerns`
-                    : "Digests verified or local memory"
-                }
-                description="Digest verification establishes byte consistency, never software safety."
-                metric={breakdown.integrity === 0 ? "Verified" : "Concern"}
-                metricLabel="integrity checks"
-                icon={<ShieldCheck size={18} />}
-                onClick={() => setActiveTab("Dependency Graph")}
-              />
-
-              <SecurityDimensionCard
-                title="Inspection Coverage"
-                domain="TRANSPARENCY"
-                status={
-                  deps.inspected === deps.totalResolved
-                    ? "Complete"
-                    : "Bounded Coverage"
-                }
-                statusTone={
-                  deps.inspected === deps.totalResolved ? "success" : "warning"
-                }
-                headline={`${deps.inspected} of ${deps.totalResolved} packages inspected`}
-                description={`${deps.skipped} budget skipped, ${deps.unavailable} unavailable from registry.`}
-                metric={`${deps.inspected}/${deps.totalResolved}`}
-                metricLabel="coverage ratio"
-                icon={<Package size={18} />}
-                onClick={() => setActiveTab("Dependency Graph")}
-              />
-            </div>
-          </div>
-
-          {/* Quick Jump Buttons to specialized explorers */}
-          <div
-            className="card"
-            style={{
-              padding: "18px 20px",
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              flexWrap: "wrap",
-              gap: "12px",
-            }}
-          >
-            <div>
-              <strong style={{ fontSize: "14px" }}>
-                Explore Evidence & Remediation
-              </strong>
-              <p
-                style={{
-                  margin: "2px 0 0",
-                  fontSize: "12px",
-                  color: "var(--muted)",
-                }}
-              >
-                Deep-dive into the interactive graph explorer, vulnerability
-                chains, or source-to-sink data flow paths.
-              </p>
-            </div>
-
-            <div style={{ display: "flex", gap: "10px" }}>
-              <button
-                onClick={() => setActiveTab("Dependency Graph")}
-                className="button secondary compact"
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "6px",
-                  fontSize: "12px",
-                }}
-              >
-                <GitBranch size={14} />
-                <span>Open Dependency Graph</span>
-              </button>
-
-              <button
-                onClick={() => setActiveTab("Behavioral Flows")}
-                className="button secondary compact"
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "6px",
-                  fontSize: "12px",
-                }}
-              >
-                <FileCode2 size={14} />
-                <span>Inspect Data Flows</span>
-              </button>
             </div>
           </div>
         </div>
