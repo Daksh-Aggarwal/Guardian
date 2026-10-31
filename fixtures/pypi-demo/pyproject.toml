@@ -1,0 +1,9 @@
+[project]
+name = "pypi-demo-service"
+version = "1.0.0"
+description = "Demonstration Python service for Guardian PyPI security analysis"
+dependencies = [
+    "requests==2.31.0",
+    "urllib3==1.26.18",
+    "flask==2.3.3"
+]

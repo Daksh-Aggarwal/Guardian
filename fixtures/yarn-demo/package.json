@@ -1,0 +1,11 @@
+{
+  "name": "yarn-demo-service",
+  "version": "1.0.0",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "chalk": "4.1.2",
+    "ms": "2.1.3"
+  }
+}

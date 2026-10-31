@@ -32,6 +32,7 @@ class Dependency(BaseModel):
     version: str
     direct: bool = True
     source: str
+    ecosystem: str = 'npm'
 
 class GitHubMetadata(BaseModel):
     repository_id: int
@@ -156,6 +157,7 @@ class PackageRequest(BaseModel):
     name: str = Field(min_length=1, max_length=214)
     version: str = Field(default='latest', min_length=1, max_length=100)
     profile: Literal['fast', 'deep'] = 'fast'
+    ecosystem: Literal['npm', 'pypi'] = 'npm'
 class Question(BaseModel):
     question: str = Field(min_length=1, max_length=1000)
     finding_id: Optional[str] = None

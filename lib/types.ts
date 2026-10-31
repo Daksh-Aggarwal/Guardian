@@ -69,6 +69,7 @@ export type Report = {
     version: string;
     direct: boolean;
     source: string;
+    ecosystem?: string;
   }[];
   files_analyzed: number;
   coverage: string[];
