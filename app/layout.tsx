@@ -1,8 +1,7 @@
+import MotionPreferences from "@/components/motion-preferences";
 import type { Metadata } from "next";
-import "@fontsource/inter/400.css";
-import "@fontsource/inter/500.css";
-import "@fontsource/inter/600.css";
 import "./globals.css";
+import "./signal-fonts.css";
 export const metadata: Metadata = {
   title: "Guardian — Know what you trust.",
   description:
@@ -15,7 +14,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body><MotionPreferences>{children}</MotionPreferences></body>
     </html>
   );
 }
