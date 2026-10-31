@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { api, ScanJob } from "@/lib/types";
-import { Note, Eyebrow } from "./ui";
+import { Note } from "./ui";
 import GitHubConnectPanel from "./github-connect-panel";
 
 export type { ScanJob };
@@ -110,15 +110,7 @@ export default function ScanPanel({
   return (
     <section className="card scan-launchpad-card" id="new-scan">
       <div className="launchpad-header">
-        <div>
-          <Eyebrow>SECURITY LAUNCHPAD</Eyebrow>
-          <h2 className="launchpad-title">Inspect before you trust.</h2>
-          <p className="launchpad-subtitle">
-            Static inspection of manifests, tarballs, and source code. Zero code
-            execution.
-          </p>
-        </div>
-        <span className="launchpad-tag">NPM &amp; PYPI ECOSYSTEMS</span>
+        <h2 className="launchpad-title">Begin Investigation</h2>
       </div>
 
       {/* Mode Tabs */}

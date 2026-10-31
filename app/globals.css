@@ -6343,19 +6343,41 @@ h1,h2,h3,h4,h5,h6 {line-height:1.2 !important;}
 }
 .main-overview .heatmap-hero-card {
   padding: 0 !important;
-  margin: 0 auto 18px auto !important;
+  margin: 0 auto 16px auto !important;
 }
 .main-overview .heatmap-header {
   margin-bottom: 12px !important;
 }
 .main-overview .scan-launchpad-section {
   margin-bottom: 20px !important;
+  display: flex;
+  justify-content: center;
+  width: 100%;
 }
 .main-overview .scan-launchpad-card {
+  width: 65% !important;
+  max-width: 960px !important;
+  min-width: min(100%, 640px);
+  margin: 0 auto !important;
   padding: 22px 28px !important;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+}
+@media (max-width: 768px) {
+  .main-overview .scan-launchpad-card {
+    width: 100% !important;
+    min-width: 0;
+  }
 }
 .main-overview .launchpad-header {
   margin-bottom: 14px !important;
+  display: flex;
+  align-items: center;
+}
+.main-overview .launchpad-title {
+  font-size: 18px !important;
+  font-weight: 600 !important;
+  margin: 0 !important;
+  letter-spacing: -0.01em;
 }
 .main-overview .launchpad-tabs {
   margin-bottom: 16px !important;
