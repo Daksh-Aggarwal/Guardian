@@ -936,3 +936,106 @@ def test_token_retrieval_enforces_session_authorization(github_env):
     with pytest.raises(PermissionError):
         github.get_installation_access_token(9999, session_id=sess_B)
 
+def test_teammate_session_isolation_and_no_preloaded_account(github_env, test_client):
+    """Verifies that a teammate's fresh session does not see or inherit a teammate's pre-loaded account."""
+    sess_daksh = "sess_daksh_001"
+    sess_teammate = "sess_teammate_002"
+
+    # Daksh has an account installed
+    storage.save_github_installation({
+        "id": 177208222,
+        "account_login": "Daksh-Aggarwal",
+        "account_type": "User"
+    }, make_active=True)
+    github.session_manager.authorize_installation(sess_daksh, 177208222)
+
+    # Teammate opens app: status should show not connected, no installations
+    status_resp = test_client.get("/api/github/status", headers={"x-guardian-session": sess_teammate})
+    assert status_resp.status_code == 200
+    status_data = status_resp.json()
+    assert status_data["connected"] is False
+    assert status_data["installation"] is None
+    assert len(status_data["installations"]) == 0
+
+    # Teammate attempts sync when multiple installations exist on App: does not hijack Daksh's account
+    mock_gh_installations = [
+        {"id": 177208222, "account": {"id": 101, "login": "Daksh-Aggarwal", "type": "User"}, "created_at": "2026-01-01T00:00:00Z"},
+        {"id": 999888, "account": {"id": 102, "login": "teammate-user", "type": "User"}, "created_at": "2026-02-01T00:00:00Z"}
+    ]
+    with patch("backend.guardian.github._call_app_api", return_value=mock_gh_installations):
+        sync_resp = test_client.post("/api/github/sync", headers={"x-guardian-session": sess_teammate})
+        assert sync_resp.status_code == 200
+        sync_data = sync_resp.json()
+        assert sync_data["connected"] is False
+        assert github.session_manager.is_installation_authorized(sess_teammate, 177208222) is False
+
+def test_adding_account_immediately_active_and_selected(github_env, test_client):
+    """Adding a new account via callback immediately activates and selects it in the session."""
+    sess_user = "sess_user_active_test"
+
+    # Suppose Daksh's account was already in SQLite
+    storage.save_github_installation({
+        "id": 177208222,
+        "account_login": "Daksh-Aggarwal",
+        "account_type": "User"
+    }, make_active=True)
+
+    # User initiates connect
+    connect_resp = test_client.post("/api/github/connect", headers={"x-guardian-session": sess_user})
+    assert connect_resp.status_code == 200
+    state = connect_resp.json()["state"]
+
+    mock_inst = {
+        "id": 999888,
+        "account": {"id": 102, "login": "teammate-new", "type": "User", "avatar_url": None},
+        "repository_selection": "all",
+        "created_at": "2026-11-01T00:00:00Z"
+    }
+    with patch("backend.guardian.github._call_app_api", return_value=mock_inst):
+        cb_resp = test_client.get(
+            f"/api/github/callback?installation_id=999888&state={state}",
+            headers={"x-guardian-session": sess_user},
+            follow_redirects=False
+        )
+        assert cb_resp.status_code == 302
+
+    # Status check for sess_user must immediately show teammate-new as connected and active
+    status_resp = test_client.get("/api/github/status", headers={"x-guardian-session": sess_user})
+    assert status_resp.status_code == 200
+    status_data = status_resp.json()
+    assert status_data["connected"] is True
+    assert status_data["installation"]["id"] == 999888
+    assert status_data["installation"]["account_login"] == "teammate-new"
+
+    # Installations list must ONLY contain teammate-new, not Daksh's account
+    assert len(status_data["installations"]) == 1
+    assert status_data["installations"][0]["id"] == 999888
+
+    # Attempting to select Daksh's account must fail
+    sel_resp = test_client.post(
+        "/api/github/installations/177208222/select",
+        headers={"x-guardian-session": sess_user}
+    )
+    assert sel_resp.status_code in (400, 403, 404)
+
+def test_global_disconnect_removes_installation_from_selection(github_env, test_client):
+    """In global mode, disconnecting an installation deletes it so it cannot be selected again."""
+    storage.save_github_installation({"id": 5551, "account_login": "account-one", "account_type": "User"}, make_active=True)
+    storage.save_github_installation({"id": 5552, "account_login": "account-two", "account_type": "User"}, make_active=False)
+
+    # Disconnect account-one
+    disc_resp = test_client.post("/api/github/installations/5551/disconnect")
+    assert disc_resp.status_code == 200
+
+    # Account-one should be gone from list
+    list_resp = test_client.get("/api/github/installations")
+    assert list_resp.status_code == 200
+    logins = [i["account_login"] for i in list_resp.json()]
+    assert "account-one" not in logins
+    assert "account-two" in logins
+
+    # Attempting to select account-one should fail
+    sel_resp = test_client.post("/api/github/installations/5551/select")
+    assert sel_resp.status_code in (400, 404)
+
+

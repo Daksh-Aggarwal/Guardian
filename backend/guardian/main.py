@@ -445,7 +445,7 @@ def discard_project(scan_id: str):
     return {'status': 'discarded' if discarded else 'not_found'}
 
 def _get_session_id(request: Request) -> Optional[str]:
-    return request.headers.get("x-guardian-session")
+    return request.headers.get("x-guardian-session") or request.cookies.get("guardian_session")
 
 def _verify_scan_access(rep: Report, request: Request) -> None:
     """Ensures GitHub-backed reports respect session installation authorization."""
@@ -701,7 +701,7 @@ def github_callback(
     setup_action: Optional[str] = None,
     code: Optional[str] = None
 ):
-    session_id = _get_session_id(request)
+    session_id = _get_session_id(request) or github.get_state_session_id(state)
     try:
         github.handle_installation_callback(installation_id=installation_id, state=state, session_id=session_id)
         host = request.headers.get("host", "")
@@ -709,7 +709,17 @@ def github_callback(
             redirect_url = os.getenv("GUARDIAN_FRONTEND_URL", "http://localhost:3000").rstrip('/') + "/?github=connected"
         else:
             redirect_url = "/?github=connected"
-        return RedirectResponse(url=redirect_url, status_code=302)
+        response = RedirectResponse(url=redirect_url, status_code=302)
+        if session_id:
+            response.set_cookie(
+                key="guardian_session",
+                value=session_id,
+                max_age=86400,
+                httponly=False,
+                samesite="lax",
+                path="/"
+            )
+        return response
     except Exception as err:
         raise HTTPException(400, f"GitHub installation callback failed: {err}")
 

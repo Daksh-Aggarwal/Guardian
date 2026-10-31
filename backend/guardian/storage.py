@@ -351,7 +351,12 @@ def get_github_installation(installation_id: int) -> Optional[dict]:
 
 def disconnect_github_installation(installation_id: int):
     with connection() as db:
-        db.execute('UPDATE github_installations SET is_active = 0 WHERE installation_id = ?', (installation_id,))
+        was_active = db.execute('SELECT is_active FROM github_installations WHERE installation_id = ?', (installation_id,)).fetchone()
+        db.execute('DELETE FROM github_installations WHERE installation_id = ?', (installation_id,))
+        if was_active and was_active[0] == 1:
+            remaining = db.execute('SELECT installation_id FROM github_installations ORDER BY installation_id DESC LIMIT 1').fetchone()
+            if remaining:
+                db.execute('UPDATE github_installations SET is_active = 1 WHERE installation_id = ?', (remaining[0],))
 
 def get_active_github_installation() -> Optional[dict]:
     with connection() as db:

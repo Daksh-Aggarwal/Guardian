@@ -139,10 +139,35 @@ export type AIStatus = {
   timeout_seconds: number;
   max_turns: number;
 };
+export function getOrCreateSessionId(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    let sid = localStorage.getItem("guardian_session_id");
+    if (!sid) {
+      const cookieMatch = document.cookie.match(/(?:^|;\s*)guardian_session=([^;]+)/);
+      if (cookieMatch && cookieMatch[1]) {
+        sid = decodeURIComponent(cookieMatch[1]);
+      } else {
+        sid = "sess_" + Math.random().toString(36).substring(2) + Date.now().toString(36);
+      }
+      localStorage.setItem("guardian_session_id", sid);
+    }
+    return sid;
+  } catch {
+    return "";
+  }
+}
+
 export async function api<T>(path: string, options?: RequestInit): Promise<T> {
+  const sessionId = getOrCreateSessionId();
+  const headers = new Headers(options?.headers);
+  if (sessionId && !headers.has("x-guardian-session")) {
+    headers.set("x-guardian-session", sessionId);
+  }
   const mergedOptions: RequestInit = {
     credentials: "include",
     ...options,
+    headers,
   };
   const res = await fetch("/api" + path, mergedOptions);
   if (!res.ok) {

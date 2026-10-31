@@ -60,18 +60,7 @@ export default function GitHubConnectPanel({
     setLoading(true);
     setError(null);
     try {
-      let res = await api<GitHubStatus>("/github/status");
-      // If configured but not marked connected, attempt automatic sync with GitHub App API
-      if (res.configured && !res.connected) {
-        try {
-          const syncRes = await api<GitHubStatus>("/github/sync", { method: "POST" });
-          if (syncRes.connected) {
-            res = syncRes;
-          }
-        } catch {
-          // ignore auto-sync failure and fallback to base status
-        }
-      }
+      const res = await api<GitHubStatus>("/github/status");
       setStatus(res);
       if (res.connected) {
         fetchRepos();

@@ -219,7 +219,8 @@ class SessionManager:
                 session = self._sessions[session_id]
                 session["authorized_installations"].discard(installation_id)
                 if session.get("selected_installation_id") == installation_id:
-                    session["selected_installation_id"] = None
+                    remaining = sorted(list(session["authorized_installations"]))
+                    session["selected_installation_id"] = remaining[0] if remaining else None
 
 session_manager = SessionManager()
 
@@ -496,6 +497,18 @@ def create_install_state(session_id: Optional[str] = None) -> str:
         _state_store[state] = (now, session_id)
     return state
 
+def get_state_session_id(state: Optional[str]) -> Optional[str]:
+    """Retrieves session_id bound to state without consuming it."""
+    if not state or not isinstance(state, str) or not state.strip():
+        return None
+    state = state.strip()
+    with _state_lock:
+        val = _state_store.get(state)
+        if val:
+            if isinstance(val, (tuple, list)):
+                return val[1]
+    return None
+
 def verify_and_consume_state(state: Optional[str], session_id: Optional[str] = None) -> bool:
     """Validates state existence, single-use unconsumed status, unexpired TTL, and session binding."""
     if not state or not isinstance(state, str) or not state.strip():
@@ -569,8 +582,38 @@ def sync_installations(session_id: Optional[str] = None) -> Dict[str, Any]:
             "installed_at": inst.get("created_at", datetime.now(timezone.utc).isoformat())
         }
         storage.save_github_installation(inst_record, make_active=False)
-        if session_id:
-            session_manager.authorize_installation(session_id, inst_record["id"])
+
+    if session_id:
+        existing_auth = session_manager.get_authorized_installation_ids(session_id)
+        if len(installations) == 1:
+            only_id = installations[0].get("id")
+            session_manager.authorize_installation(session_id, only_id)
+            session_manager.select_installation(session_id, only_id)
+        elif existing_auth:
+            # Re-authorize only those installations already belonging to this session
+            for inst in installations:
+                iid = inst.get("id")
+                if iid in existing_auth:
+                    session_manager.authorize_installation(session_id, iid)
+        else:
+            return {
+                "configured": True,
+                "connected": False,
+                "installation": None,
+                "installations": [],
+                "reason": "Multiple installations found for this GitHub App. Please click 'Install / Connect GitHub App' to authorize your account."
+            }
+
+        selected_id = session_manager.get_selected_installation_id(session_id)
+        active = storage.get_github_installation(selected_id) if selected_id else None
+        all_insts = list_installations(session_id)
+        return {
+            "configured": True,
+            "connected": bool(active),
+            "installation": active,
+            "installations": all_insts,
+            "reason": None
+        }
 
     # If no active installation in SQLite, activate the most recently updated one
     active = storage.get_active_github_installation()
@@ -584,10 +627,7 @@ def sync_installations(session_id: Optional[str] = None) -> Dict[str, Any]:
         storage.set_active_github_installation(first_id)
         active = storage.get_github_installation(first_id)
 
-    if session_id and active:
-        session_manager.select_installation(session_id, active["id"])
-
-    all_insts = list_installations(session_id)
+    all_insts = list_installations(None)
     return {
         "configured": True,
         "connected": True,
@@ -814,15 +854,12 @@ def handle_installation_callback(
         "installed_at": inst_data.get("created_at", datetime.now(timezone.utc).isoformat())
     }
 
-    # Save to SQLite; if first installation, make active
-    has_active = storage.get_active_github_installation()
-    make_active = not bool(has_active)
-    storage.save_github_installation(inst_record, make_active=make_active)
+    # Save to SQLite and make active
+    storage.save_github_installation(inst_record, make_active=True)
 
     if session_id:
         session_manager.authorize_installation(session_id, installation_id)
-        if make_active:
-            session_manager.select_installation(session_id, installation_id)
+        session_manager.select_installation(session_id, installation_id)
 
     logger.info(f"Successfully connected GitHub installation {installation_id} for {inst_record['account_login']}")
     return inst_record
