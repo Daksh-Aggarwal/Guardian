@@ -53,7 +53,7 @@ function analyzeProject(files, overrides = {}) {
   };
   const modules = new Map(),
     warnings = new Set(),
-    projectStagedFiles = new Set();
+    projectStagedArtifacts = [];
   let nodes = 0,
     steps = 0,
     calls = 0,
@@ -198,6 +198,140 @@ function analyzeProject(files, overrides = {}) {
       }),
     };
   }
+  function matchesExecutionTarget(cmdText, stagedPath) {
+    if (!cmdText || !stagedPath) return false;
+    const trimmed = cmdText.trim();
+    if (trimmed === stagedPath) return true;
+    const segments = trimmed.split(/&&|;|\|\|/);
+    for (const seg of segments) {
+      const s = seg.trim();
+      if (s === stagedPath) return true;
+      const tokens = s.split(/\s+/).map((t) => t.replace(/^["']|["']$/g, ""));
+      if (!tokens.length) continue;
+      if (tokens.includes(stagedPath)) {
+        const idx = tokens.indexOf(stagedPath);
+        if (idx === 0) return true;
+        const prev = tokens[idx - 1];
+        if (
+          /^(sh|bash|zsh|dash|python|python3|node|chmod|\.\/)$/i.test(prev) ||
+          prev.startsWith("-")
+        ) {
+          return true;
+        }
+        if (stagedPath.includes("/") || stagedPath.includes("\\")) {
+          return true;
+        }
+      }
+      const norm = stagedPath.replace(/^\.\//, "");
+      if (
+        norm.length >= 3 &&
+        (stagedPath.includes("/") || stagedPath.includes("\\"))
+      ) {
+        if (tokens.some((t) => t.replace(/^\.\//, "") === norm)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  function areTraceablyRelated(mA, mB) {
+    if (!mA || !mB) return false;
+    if (mA.file === mB.file) return true;
+    if (mA.resolvedImports?.has(mB.file) || mB.resolvedImports?.has(mA.file))
+      return true;
+    if (mA.importedBy?.has(mB.file) || mB.importedBy?.has(mA.file)) return true;
+    const specA =
+      "./" + posix.relative(posix.dirname(mA.file), mB.file).replace(/\\/g, "/");
+    const specAWithoutExt = specA.replace(/\.[^/.]+$/, "");
+    if (mA.imports?.has(specA) || mA.imports?.has(specAWithoutExt)) return true;
+    const specB =
+      "./" + posix.relative(posix.dirname(mB.file), mA.file).replace(/\\/g, "/");
+    const specBWithoutExt = specB.replace(/\.[^/.]+$/, "");
+    if (mB.imports?.has(specB) || mB.imports?.has(specBWithoutExt)) return true;
+    return false;
+  }
+
+  function deriveConfidence(m, kind, n, detail, extras = {}) {
+    if (extras.confidence) return extras.confidence;
+
+    // Data-flow traces (e.g. exfiltration)
+    if (extras.flows && Array.isArray(extras.flows)) {
+      if (extras.context === "authentication") return "medium";
+      const hasUnknown = extras.flows.some(
+        (f) =>
+          f.unknown ||
+          f.steps?.some(
+            (s) =>
+              s.kind === "unknown-call" ||
+              (typeof s.detail === "string" && s.detail.includes("Unmodeled")),
+          ),
+      );
+      return hasUnknown ? "low" : "medium";
+    }
+
+    // Direct AST stream-linkage or reverse-shell signature
+    if (kind === "reverse-shell") {
+      return "high";
+    }
+
+    // Staged payload dropper with verified artifact identity
+    if (kind === "staged-dropper") {
+      return "high";
+    }
+
+    // Remote code execution C2
+    if (kind === "c2-execution") {
+      return extras.hasUnknownCall ? "low" : "high";
+    }
+
+    // DNS tunneling
+    if (kind === "dns-tunneling") {
+      return extras.hasSecret ? "high" : "medium";
+    }
+
+    // Direct high-confidence indicators
+    if (
+      [
+        "cloud-metadata",
+        "cryptomining",
+        "defense-impairment",
+        "destructive-fs",
+        "self-propagation",
+      ].includes(kind)
+    ) {
+      return "high";
+    }
+
+    // Direct syntactic observations (info / low severity)
+    if (
+      [
+        "credential",
+        "network",
+        "filesystem",
+        "execution",
+        "dynamic",
+        "encoding",
+      ].includes(kind)
+    ) {
+      return "high";
+    }
+
+    if (
+      [
+        "persistence",
+        "info-exfiltration",
+        "remote",
+        "conditional-evasion",
+      ].includes(kind)
+    ) {
+      return "medium";
+    }
+
+    // Unclassified detections must NEVER default to high confidence
+    return "medium";
+  }
+
   function emit(m, kind, n, detail, extras = {}) {
     const key = `${kind}:${n.start}:${extras.context || ""}`;
     if (m.seen.has(key)) return;
@@ -206,7 +340,14 @@ function analyzeProject(files, overrides = {}) {
       warn(m, "Observation limit reached.");
       return;
     }
-    m.events.push({ ...loc(m, n, "observation", detail), kind, ...extras });
+    const confidence =
+      extras.confidence || deriveConfidence(m, kind, n, detail, extras);
+    m.events.push({
+      ...loc(m, n, "observation", detail),
+      kind,
+      confidence,
+      ...extras,
+    });
   }
   function source(m, n, detail, context = "secret") {
     emit(m, "credential", n, detail);
@@ -478,7 +619,12 @@ function analyzeProject(files, overrides = {}) {
       );
       return { ...empty(), unknown: true };
     }
-    initialize(modules.get(file));
+    m.resolvedImports.add(file);
+    const resolvedMod = modules.get(file);
+    if (resolvedMod) {
+      resolvedMod.importedBy.add(m.file);
+      initialize(resolvedMod);
+    }
     return { ...empty(), ns: file };
   }
   function fn(node, scope, m) {
@@ -923,6 +1069,10 @@ function analyzeProject(files, overrides = {}) {
             [...prior.flows.map((f) => f.steps), ...flows.map((f) => f.steps)],
             m,
           ).map((s) => ({ ...flows[0], steps: s }));
+          prior.confidence = deriveConfidence(m, "exfiltration", n, "", {
+            context,
+            flows: prior.flows,
+          });
         } else
           emit(
             m,
@@ -999,9 +1149,11 @@ function analyzeProject(files, overrides = {}) {
         m.hasStagedDownload = true;
         if (dest.filePath) {
           m.stagedFiles.add(dest.filePath);
-          projectStagedFiles.add(dest.filePath);
+          const artifact = { path: dest.filePath, module: m.file };
+          m.stagedArtifacts.set(dest.filePath, artifact);
+          projectStagedArtifacts.push(artifact);
         }
-        return { ...dest, stagedArtifact: true };
+        return { ...dest, stagedArtifact: true, stagedPath: dest.filePath };
       }
       return args[0] || empty();
     }
@@ -1054,11 +1206,21 @@ function analyzeProject(files, overrides = {}) {
       const paths = allPaths(mergedArgs, m);
       const hPaths = allHostPaths(mergedArgs, m);
       if (paths.length || hPaths.length || mergedArgs.encoded) {
+        const hasSecret = paths.length > 0;
+        const hasUnknown = paths.some((p) =>
+          p.some(
+            (s) =>
+              s.kind === "unknown-call" ||
+              (typeof s.detail === "string" && s.detail.includes("Unmodeled")),
+          ),
+        );
+        const conf = hasUnknown ? "low" : (hasSecret ? "high" : "medium");
         emit(
           m,
           "dns-tunneling",
           n,
           `Host or credential data passed to DNS query (${ref})`,
+          { confidence: conf, hasSecret },
         );
       }
       const dnsRes = {
@@ -1082,9 +1244,15 @@ function analyzeProject(files, overrides = {}) {
       runCallbacks(n, args, scope, m, [{ ...empty(), remoteData: true }]);
       return { ...empty(), ref: "net-socket", socketRef: true };
     }
-    if (/^(net-socket|shell-process|shell-stream)\.pipe$/.test(ref)) {
-      const isSocketCaller = /^net-socket/.test(ref);
-      const isShellCaller = /^(shell-process|shell-stream)/.test(ref);
+    if (
+      /^(net-socket|shell-process|shell-stream|shell-stdio).*\.pipe$/.test(ref) ||
+      callee.socketRef ||
+      callee.shellProcess
+    ) {
+      const isSocketCaller = /^net-socket/.test(ref) || callee.socketRef;
+      const isShellCaller =
+        /^(shell-process|shell-stream|shell-stdio)/.test(ref) ||
+        callee.shellProcess;
       const hasSocketArg = args.some(
         (a) => a.socketRef || a.ref === "net-socket",
       );
@@ -1092,7 +1260,9 @@ function analyzeProject(files, overrides = {}) {
         (a) =>
           a.shellProcess ||
           a.ref === "shell-process" ||
-          a.ref === "shell-stream",
+          a.ref === "shell-stream" ||
+          a.ref === "shell-stdio" ||
+          a.ref?.startsWith("shell-stdio."),
       );
       if ((isSocketCaller && hasShellArg) || (isShellCaller && hasSocketArg)) {
         emit(
@@ -1100,6 +1270,7 @@ function analyzeProject(files, overrides = {}) {
           "reverse-shell",
           n,
           "Process stream piped directly to or from network socket",
+          { confidence: "high" },
         );
       }
       return args[0] || empty();
@@ -1165,29 +1336,63 @@ function analyzeProject(files, overrides = {}) {
         );
       }
       if (args.some((v) => v.remoteData)) {
+        const hasUnknown = args.some(
+          (v) =>
+            v.unknown ||
+            (v.paths &&
+              v.paths.some((p) =>
+                p.some((s) => s.kind === "unknown-call"),
+              )),
+        );
         emit(
           m,
           "c2-execution",
           n,
           "Remote network response executed via child_process",
+          { confidence: hasUnknown ? "low" : "high" },
         );
       }
-      const isStagedTarget =
-        args.some((v) => v.stagedArtifact) ||
-        (m.hasStagedDownload && args.some((v) => v.remoteData)) ||
-        (projectStagedFiles.size > 0 &&
-          args.some((v) => {
-            if (typeof v.literal !== "string") return false;
-            return [...projectStagedFiles].some(
-              (f) => f && (v.literal === f || v.literal.includes(f)),
-            );
-          }));
-      if (isStagedTarget) {
+      // Direct artifact object taint
+      const hasDirectArtifactArg = args.some((v) => v.stagedArtifact);
+
+      // Path-based execution matching with explicit provenance
+      let matchingArtifact = null;
+      if (hasDirectArtifactArg) {
+        matchingArtifact = { direct: true };
+      } else {
+        // 1. Same-module staged artifact match
+        for (const [stagedPath, art] of m.stagedArtifacts.entries()) {
+          if (
+            matchesExecutionTarget(cmdLit, stagedPath) ||
+            matchesExecutionTarget(combinedCmd, stagedPath)
+          ) {
+            matchingArtifact = art;
+            break;
+          }
+        }
+        // 2. Cross-module match ONLY if there is an explicit, traceable module relationship
+        if (!matchingArtifact && projectStagedArtifacts.length > 0) {
+          for (const art of projectStagedArtifacts) {
+            const stagerMod = modules.get(art.module);
+            if (stagerMod && areTraceablyRelated(m, stagerMod)) {
+              if (
+                matchesExecutionTarget(cmdLit, art.path) ||
+                matchesExecutionTarget(combinedCmd, art.path)
+              ) {
+                matchingArtifact = art;
+                break;
+              }
+            }
+          }
+        }
+      }
+      if (matchingArtifact) {
         emit(
           m,
           "staged-dropper",
           n,
           "Downloaded file written to disk and executed via child_process",
+          { confidence: "high" },
         );
       }
       if (
@@ -1262,6 +1467,16 @@ function analyzeProject(files, overrides = {}) {
         ref: "shell-stream",
         shellProcess: true,
       };
+      const stdioObj = {
+        ...empty(),
+        ref: "shell-stdio",
+        shellProcess: true,
+        props: new Map([
+          ["0", streamObj],
+          ["1", streamObj],
+          ["2", streamObj],
+        ]),
+      };
       return {
         ...empty(),
         ref: "shell-process",
@@ -1270,6 +1485,7 @@ function analyzeProject(files, overrides = {}) {
           ["stdin", streamObj],
           ["stdout", streamObj],
           ["stderr", streamObj],
+          ["stdio", stdioObj],
         ]),
       };
     }
@@ -1288,7 +1504,9 @@ function analyzeProject(files, overrides = {}) {
           m.hasStagedDownload = true;
           if (targetLit) {
             m.stagedFiles.add(targetLit);
-            projectStagedFiles.add(targetLit);
+            const artifact = { path: targetLit, module: m.file };
+            m.stagedArtifacts.set(targetLit, artifact);
+            projectStagedArtifacts.push(artifact);
           }
         }
         if (targetArg.persistenceTarget || PERSISTENCE_PATH.test(targetLit)) {
@@ -1610,7 +1828,10 @@ function analyzeProject(files, overrides = {}) {
       warnings: new Set(),
       exports: new Map(),
       imports: new Set(),
+      resolvedImports: new Set(),
+      importedBy: new Set(),
       stagedFiles: new Set(),
+      stagedArtifacts: new Map(),
       hasNetworkDownload: false,
       hasFileWrite: false,
       hasStagedDownload: false,
