@@ -28,11 +28,9 @@ export function Brand({ size = "default" }: { size?: "default" | "compact" }) {
       >
         <ShieldCheck size={size === "compact" ? 20 : 24} strokeWidth={2.2} />
       </motion.span>
-      {size !== "compact" && (
-        <span className="brand-text">
-          guardian<span className="brand-dot">.</span>
-        </span>
-      )}
+      <span className="brand-text">
+        guardian<span className="brand-dot">.</span>
+      </span>
     </div>
   );
 }
