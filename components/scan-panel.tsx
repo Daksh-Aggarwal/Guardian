@@ -198,10 +198,6 @@ export default function ScanPanel({
                 <span>
                   Supports project .ZIP, package.json, package-lock.json, pnpm-lock.yaml, or yarn.lock
                 </span>
-                <small>
-                  Bounded local memory inspection · Up to 10 MB · Code is never
-                  executed
-                </small>
               </div>
             ) : (
               <div className="dropzone-selected-files">
@@ -369,31 +365,7 @@ export default function ScanPanel({
         />
       )}
 
-      {/* Budget Selector (for Upload and Package tabs) */}
-      {tab !== "github" && (
-        <div className="budget-selection-bar">
-          <div className="budget-label-row">
-            <label htmlFor="budget-select" className="budget-label">
-              <Sliders size={14} />
-              <span>Dependency Inspection Depth</span>
-            </label>
-            <select
-              id="budget-select"
-              value={profile}
-              onChange={(e) => setProfile(e.target.value as "fast" | "deep")}
-              disabled={disabled}
-              className="budget-select"
-            >
-              <option value="fast">Fast · Up to 6 packages / 2 levels</option>
-              <option value="deep">Deep · Up to 20 packages / 4 levels</option>
-            </select>
-          </div>
-          <small className="budget-hint">
-            Inspects resolved exact dependencies under recursive bounded depth.
-            Limits are transparently reported in coverage.
-          </small>
-        </div>
-      )}
+      
 
       {error && (
         <div role="alert" className="launchpad-error">
@@ -484,12 +456,25 @@ export default function ScanPanel({
         </div>
       ) : (
         <div className="launchpad-footer">
-          <div className="guarantee-text">
-            <ShieldCheck size={16} className="guarantee-icon" />
-            <span>
-              Deterministic static inspection · Evidence before assumptions
-            </span>
-          </div>
+          {tab !== "github" ? (
+            <label
+              className="deeper-analysis-toggle"
+              title="Toggle deep dependency analysis (up to 20 packages / 4 levels)"
+            >
+              <input
+                type="checkbox"
+                checked={profile === "deep"}
+                onChange={(e) => setProfile(e.target.checked ? "deep" : "fast")}
+                disabled={disabled}
+              />
+              <span className="toggle-switch">
+                <span className="toggle-thumb" />
+              </span>
+              <span className="toggle-label">Deeper analysis</span>
+            </label>
+          ) : (
+            <div />
+          )}
 
           {tab !== "github" && (
             <button

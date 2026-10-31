@@ -3707,15 +3707,65 @@ select {
   gap: 16px;
   margin-top: 18px;
 }
-.guarantee-text {
+.deeper-analysis-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+  transition: color 0.15s ease;
+}
+.deeper-analysis-toggle:hover {
+  color: var(--foreground);
+}
+.deeper-analysis-toggle input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+  width: 0;
+  height: 0;
+}
+.deeper-analysis-toggle .toggle-switch {
+  position: relative;
+  width: 38px;
+  height: 22px;
+  background: var(--surface-2, rgba(255, 255, 255, 0.08));
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.15));
+  border-radius: 9999px;
+  transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--muted);
+  padding: 2px;
 }
-.guarantee-icon {
-  color: var(--success);
+.deeper-analysis-toggle input:checked + .toggle-switch {
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 12px var(--accent-bloom, rgba(197, 244, 103, 0.45));
+}
+.deeper-analysis-toggle .toggle-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.2s ease;
+  transform: translateX(0);
+}
+.deeper-analysis-toggle input:checked + .toggle-switch .toggle-thumb {
+  transform: translateX(16px);
+  background: var(--on-accent, #111c08);
+}
+.deeper-analysis-toggle .toggle-label {
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  transition: color 0.15s ease;
+}
+.deeper-analysis-toggle input:checked ~ .toggle-label {
+  color: var(--foreground);
+  font-weight: 600;
 }
 .btn-primary-large {
   display: inline-flex;
@@ -6280,4 +6330,53 @@ h1,h2,h3,h4,h5,h6 {line-height:1.2 !important;}
 }
 .btn-get-started:active {
   transform: translateY(0);
+}
+
+
+/* Overview Single-Page Viewport Constraints (Strictly Non-Scrollable) */
+.main-overview {
+  padding: 8px 32px 0 !important;
+  overflow: hidden;
+  max-height: calc(100vh - 64px);
+}
+.main-overview .heatmap-hero-card {
+  padding: 0 !important;
+  margin: 0 auto 8px auto !important;
+}
+.main-overview .heatmap-header {
+  margin-bottom: 6px !important;
+}
+.main-overview .scan-launchpad-section {
+  margin-bottom: 10px !important;
+}
+.main-overview .scan-launchpad-card {
+  padding: 14px 22px !important;
+}
+.main-overview .launchpad-header {
+  margin-bottom: 8px !important;
+}
+.main-overview .launchpad-tabs {
+  margin-bottom: 10px !important;
+}
+.main-overview .dropzone-box {
+  padding: 10px 16px !important;
+  margin-bottom: 6px !important;
+}
+.main-overview .dropzone-icon-wrap {
+  width: 34px !important;
+  height: 34px !important;
+  margin-bottom: 2px !important;
+}
+.main-overview .connect-folder-hint {
+  margin-top: 4px !important;
+}
+.main-overview .launchpad-footer {
+  margin-top: 10px !important;
+}
+.main-overview .metrics-grid {
+  margin-bottom: 8px !important;
+  gap: 10px !important;
+}
+.main-overview .metric-card {
+  padding: 10px 16px !important;
 }

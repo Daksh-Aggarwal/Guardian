@@ -140,12 +140,12 @@ export function CalendarHeatmap({
   // Available width accounting for left labels with minimal buffer
   const available = Math.max(120, width - LABEL_W - 8);
   const numWeeks = Math.max(weeks.length, 1);
-  const targetMax = cell ?? 18.75;
+  const targetMax = cell ?? 15;
   // Allow cells to scale naturally with available width, targeting ~25% enlarged default
   const colPitch = available / numWeeks;
   const autoCell = Math.floor((colPitch / 1.18) * 2) / 2;
   const size = Math.max(10, Math.min(targetMax, Math.max(11, autoCell)));
-  const gap = Math.max(2.5, Math.round(size * 0.18 * 2) / 2);
+  const gap = Math.max(2, Math.round(size * 0.16 * 2) / 2);
   const gapped = size + gap;
 
   const gridW = weeks.length * gapped;
@@ -358,7 +358,7 @@ export function CalendarHeatmap({
       </ChartState>
 
       <p
-        className="mt-3.5 h-5 text-center font-mono text-[13px] tabular-nums text-neutral-600 transition-opacity duration-150 dark:text-neutral-300"
+        className="mt-1 h-4 text-center font-mono text-[13px] tabular-nums text-neutral-600 transition-opacity duration-150 dark:text-neutral-300"
         style={{ opacity: hovered ? 1 : 0 }}
         aria-live="polite"
       >

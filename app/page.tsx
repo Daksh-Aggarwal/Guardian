@@ -591,7 +591,7 @@ export default function Home() {
         </header>
 
         {/* Main Content Viewport */}
-        <main>
+        <main className={page === "Overview" ? "main-overview" : ""}>
           {error && (
             <div className="global-error" role="alert">
               <AlertCircle size={18} />
@@ -891,106 +891,21 @@ export default function Home() {
                       </div>
                     </section>
                   )}
-
-                  {/* Synthetic Demonstrations Strip */}
-                  <section className="examples-strip">
-                    <div className="examples-left">
-                      <div className="flask-icon-wrap">
-                        <FlaskConical size={20} />
-                      </div>
-                      <div>
-                        <h3>Synthetic Demonstration Benchmarks</h3>
-                        <p>
-                          Execute real scans on safe, inert synthetic test
-                          packages.
-                        </p>
-                      </div>
-                    </div>
-                    <div className="example-actions">
-                      <button
-                        type="button"
-                        disabled={!!busy}
-                        onClick={() => runExample("benign")}
-                        title="Scan everyday clean npm package with dependencies"
-                      >
-                        <span>Everyday package</span>
-                        <ArrowUpRight size={14} />
-                      </button>
-                      <button
-                        type="button"
-                        disabled={!!busy}
-                        onClick={() => runExample("exfiltration")}
-                        title="Scan AST exfiltration payload tracking sensitive tokens to outbound request"
-                      >
-                        <span>Sensitive data flow</span>
-                        <ArrowUpRight size={14} />
-                      </button>
-                      <button
-                        type="button"
-                        disabled={!!busy}
-                        onClick={() => runExample("correlated")}
-                        title="Scan suspicious lifecycle script downloading remote executable"
-                      >
-                        <span>Suspicious installer</span>
-                        <ArrowUpRight size={14} />
-                      </button>
-                      <button
-                        type="button"
-                        disabled={!!busy}
-                        onClick={() => runExample("pypi-demo")}
-                        title="Scan Python PyPI project with requirements.txt, pyproject.toml, and Python AST data-flow"
-                      >
-                        <span>PyPI Python</span>
-                        <ArrowUpRight size={14} />
-                      </button>
-                      <button
-                        type="button"
-                        disabled={!!busy}
-                        onClick={() => runExample("pnpm-demo")}
-                        title="Scan project with pnpm-lock.yaml manifest and dependency resolution"
-                      >
-                        <span>pnpm project</span>
-                        <ArrowUpRight size={14} />
-                      </button>
-                      <button
-                        type="button"
-                        disabled={!!busy}
-                        onClick={() => runExample("yarn-demo")}
-                        title="Scan project with modern Yarn Berry yarn.lock manifest"
-                      >
-                        <span>Yarn project</span>
-                        <ArrowUpRight size={14} />
-                      </button>
-                    </div>
-                  </section>
                 </>
               )}
 
-              {/* Recent Scans Explorer / All Scans Table */}
-              <section className="recent-section">
-                <div className="section-heading">
-                  <div>
-                    <h2>
-                      {page === "Overview"
-                        ? "Recent Security Scans"
-                        : "All Inspections"}
-                    </h2>
-                    <p>
-                      Evidence trails and report history across all analyzed
-                      packages.
-                    </p>
-                  </div>
+              {/* All Scans Table (dedicated to Scan history page) */}
+              {page === "Scan history" && (
+                <section className="recent-section">
+                  <div className="section-heading">
+                    <div>
+                      <h2>All Inspections</h2>
+                      <p>
+                        Evidence trails and report history across all analyzed
+                        packages.
+                      </p>
+                    </div>
 
-                  {page === "Overview" ? (
-                    <button
-                      type="button"
-                      className="text-link"
-                      onClick={() => navigate("Scan history")}
-                    >
-                      <span>View complete history</span>
-                      <ArrowRight size={14} />
-                    </button>
-                  ) : (
                     <div className="history-search">
                       <Search size={15} />
                       <input
@@ -1000,8 +915,7 @@ export default function Home() {
                         onChange={(e) => setSearch(e.target.value)}
                       />
                     </div>
-                  )}
-                </div>
+                  </div>
 
                 <div className="card scan-table">
                   {loading ? (
@@ -1049,7 +963,7 @@ export default function Home() {
                             r.source.toLowerCase().includes(q)
                           );
                         })
-                        .slice(0, page === "Overview" ? 6 : 50)
+                        .slice(0, 50)
                         .map((r) => {
                           const hasElevated = r.findings.some((f) =>
                             ["critical", "high"].includes(f.severity),
@@ -1191,19 +1105,22 @@ export default function Home() {
                   )}
                 </div>
               </section>
+              )}
             </motion.div>
           )}
 
           {/* Footer */}
-          <footer>
-            <span>
-              <ShieldCheck size={14} />
-              Guardian 3.0 · Software Supply-Chain Intelligence
-            </span>
-            <span>
-              Static inspection. Transparent coverage. Grounded AI reasoning.
-            </span>
-          </footer>
+          {page !== "Overview" && (
+            <footer>
+              <span>
+                <ShieldCheck size={14} />
+                Guardian 3.0 · Software Supply-Chain Intelligence
+              </span>
+              <span>
+                Static inspection. Transparent coverage. Grounded AI reasoning.
+              </span>
+            </footer>
+          )}
         </main>
       </div>
     </div>
