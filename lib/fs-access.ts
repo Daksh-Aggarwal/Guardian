@@ -371,8 +371,10 @@ export async function applyPlanToFileSystem(
     createdFiles,
   });
 
-  // 4. Sequentially write modified and created files
+  // 4. Sequentially write modified and created files with touched-file tracking
   const modifiedFiles: string[] = [];
+  const touchedFiles = new Set<string>();
+
   try {
     for (const change of plan.proposed_changes) {
       if (change.operation === "update") {
@@ -396,10 +398,16 @@ export async function applyPlanToFileSystem(
           updatedText = updatedText.replace(edit.old_text, edit.new_text);
         }
 
-        // Write to file
+        // Open writable and perform write
         const writable = await (handle as any).createWritable();
-        await writable.write(updatedText);
-        await writable.close();
+        try {
+          await writable.write(updatedText);
+          await writable.close();
+          touchedFiles.add(change.file_path);
+        } catch (writeErr) {
+          touchedFiles.add(change.file_path);
+          throw writeErr;
+        }
 
         // Verify written hash
         const writtenFile = await handle.getFile();
@@ -422,8 +430,14 @@ export async function applyPlanToFileSystem(
         const content = change.created_content || "";
 
         const writable = await (handle as any).createWritable();
-        await writable.write(content);
-        await writable.close();
+        try {
+          await writable.write(content);
+          await writable.close();
+          touchedFiles.add(change.file_path);
+        } catch (createErr) {
+          touchedFiles.add(change.file_path);
+          throw createErr;
+        }
 
         const writtenFile = await handle.getFile();
         const writtenText = await writtenFile.text();
@@ -441,10 +455,11 @@ export async function applyPlanToFileSystem(
 
     return { success: true, modifiedFiles };
   } catch (err) {
-    // 5. Rollback on failure: restore modified files from backup and remove created files
-    let rollbackSuccess = true;
+    // 5. Rollback on failure: restore touched files from backup and remove created files
+    const failedRestoreFiles: string[] = [];
+
     for (const entry of backupEntries) {
-      if (modifiedFiles.includes(entry.path)) {
+      if (touchedFiles.has(entry.path)) {
         try {
           const handle = await resolveFileHandle(
             directoryHandle,
@@ -454,25 +469,34 @@ export async function applyPlanToFileSystem(
           const writable = await (handle as any).createWritable();
           await writable.write(entry.content);
           await writable.close();
+
+          // Verify exact restored hash
+          const rFile = await handle.getFile();
+          const rText = await rFile.text();
+          const rHash = await computeBrowserSHA256(rText);
+          if (rHash !== entry.sha256) {
+            failedRestoreFiles.push(entry.path);
+          }
         } catch {
-          rollbackSuccess = false;
+          failedRestoreFiles.push(entry.path);
         }
       }
     }
 
     for (const createdPath of createdFiles) {
-      if (modifiedFiles.includes(createdPath)) {
+      if (touchedFiles.has(createdPath)) {
         try {
           await removeFileHandle(directoryHandle, createdPath);
         } catch {
-          rollbackSuccess = false;
+          failedRestoreFiles.push(createdPath);
         }
       }
     }
 
+    const rollbackSuccess = failedRestoreFiles.length === 0;
     const rollbackMsg = rollbackSuccess
       ? "All modified and created files were successfully restored to their original state."
-      : "CRITICAL: Some files could not be restored automatically. Review local backups in IndexedDB.";
+      : `CRITICAL: Some files could not be restored automatically: [${failedRestoreFiles.join(", ")}]. Review local backups in IndexedDB.`;
 
     throw new Error(
       `Application failed midway (${(err as Error).message}). ${rollbackMsg}`,
@@ -547,22 +571,34 @@ export async function undoPlanFromFileSystem(
     }
   }
 
-  // Restore originals
+  // Restore originals with strict hash verification
   const restoredFiles: string[] = [];
+  const failedUndoFiles: string[] = [];
+
   for (const entry of backup.files) {
-    const handle = await resolveFileHandle(directoryHandle, entry.path, false);
-    const writable = await (handle as any).createWritable();
-    await writable.write(entry.content);
-    await writable.close();
+    try {
+      const handle = await resolveFileHandle(
+        directoryHandle,
+        entry.path,
+        false,
+      );
+      const writable = await (handle as any).createWritable();
+      await writable.write(entry.content);
+      await writable.close();
 
-    const file = await handle.getFile();
-    const text = await file.text();
-    const restoredHash = await computeBrowserSHA256(text);
-    if (restoredHash !== entry.sha256) {
-      throw new Error(`Restoration verification failed for '${entry.path}'.`);
+      const file = await handle.getFile();
+      const text = await file.text();
+      const restoredHash = await computeBrowserSHA256(text);
+      if (restoredHash !== entry.sha256) {
+        failedUndoFiles.push(
+          `${entry.path} (hash mismatch: expected ${entry.sha256.substring(0, 8)}, got ${restoredHash.substring(0, 8)})`,
+        );
+      } else {
+        restoredFiles.push(entry.path);
+      }
+    } catch (err) {
+      failedUndoFiles.push(`${entry.path} (${(err as Error).message})`);
     }
-
-    restoredFiles.push(entry.path);
   }
 
   // Remove newly created files
@@ -580,10 +616,18 @@ export async function undoPlanFromFileSystem(
         restoredFiles.push(createdPath);
       }
     } catch (err) {
-      throw new Error(
-        `Failed to remove created file '${createdPath}' during undo: ${(err as Error).message}`,
+      failedUndoFiles.push(
+        `${createdPath} (removal failed: ${(err as Error).message})`,
       );
     }
+  }
+
+  if (failedUndoFiles.length > 0) {
+    throw new Error(
+      `Undo failed for files: [${failedUndoFiles.join(", ")}]. ` +
+        `Partial undo restored: [${restoredFiles.join(", ")}]. ` +
+        `Raw backup snapshot is preserved in IndexedDB under plan ID '${plan.plan_id}'.`,
+    );
   }
 
   return { success: true, restoredFiles };

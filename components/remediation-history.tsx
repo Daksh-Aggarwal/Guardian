@@ -41,8 +41,9 @@ export default function RemediationHistory({
       setLoading(true);
       setError(null);
       try {
+        const projectKey = report.project_id || report.name;
         const data = await api<RemediationEvent[]>(
-          `/projects/${encodeURIComponent(report.name)}/remediation/history`,
+          `/projects/${encodeURIComponent(projectKey)}/remediation/history`,
         );
         if (!cancelled) setHistory(data);
       } catch {

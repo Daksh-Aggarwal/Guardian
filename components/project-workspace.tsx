@@ -69,6 +69,7 @@ export default function ProjectWorkspace({
   onDirectoryHandleChange,
   initialReport,
   initialProjectName,
+  initialProjectId,
   allReports = [],
   onOpenReportView,
 }: {
@@ -77,26 +78,61 @@ export default function ProjectWorkspace({
   onDirectoryHandleChange?: (handle: FileSystemDirectoryHandle | null) => void;
   initialReport?: Report | null;
   initialProjectName?: string | null;
+  initialProjectId?: string | null;
   allReports?: Report[];
   onOpenReportView?: (report: Report) => void;
 }) {
-  // Current active project name
-  const [selectedProjectName, setSelectedProjectName] = useState<string>(
-    initialProjectName ||
-      initialReport?.name ||
-      allReports[0]?.name ||
-      "Local Project",
+  // Stable project identity helper (preserves backward compatibility with legacy reports)
+  const getProjectKey = (r: Report) => r.project_id || r.name;
+
+  // Unique projects deduplicated by stable project key
+  const uniqueProjects = useMemo(() => {
+    const map = new Map<
+      string,
+      { id: string; name: string; latestScan: Report }
+    >();
+    for (const r of allReports) {
+      const key = getProjectKey(r);
+      if (!map.has(key)) {
+        map.set(key, { id: key, name: r.name, latestScan: r });
+      }
+    }
+    return Array.from(map.values());
+  }, [allReports]);
+
+  // Current active project key
+  const [selectedProjectId, setSelectedProjectId] = useState<string>(
+    initialProjectId ||
+      (initialReport ? getProjectKey(initialReport) : "") ||
+      (initialProjectName
+        ? allReports.find((r) => r.name === initialProjectName)?.project_id ||
+          initialProjectName
+        : "") ||
+      uniqueProjects[0]?.id ||
+      "",
   );
 
-  // Scans belonging to this project
+  // Reconcile selectedProjectId when allReports changes (e.g. dataset filter switches)
+  useEffect(() => {
+    if (uniqueProjects.length > 0) {
+      if (!uniqueProjects.some((p) => p.id === selectedProjectId)) {
+        setSelectedProjectId(uniqueProjects[0].id);
+      }
+    } else {
+      setSelectedProjectId("");
+    }
+  }, [uniqueProjects, selectedProjectId]);
+
+  // Scans belonging to this project identity
   const projectScans = useMemo(() => {
+    if (!selectedProjectId) return [];
     return allReports
-      .filter((r) => r.name === selectedProjectName)
+      .filter((r) => getProjectKey(r) === selectedProjectId)
       .sort(
         (a, b) =>
           new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
       );
-  }, [allReports, selectedProjectName]);
+  }, [allReports, selectedProjectId]);
 
   // Active scan report (defaults to latest scan of this project or initialReport)
   const [activeReportId, setActiveReportId] = useState<string>(
@@ -106,11 +142,10 @@ export default function ProjectWorkspace({
   const activeReport = useMemo(() => {
     return (
       projectScans.find((s) => s.id === activeReportId) ||
-      initialReport ||
       projectScans[0] ||
       null
     );
-  }, [projectScans, activeReportId, initialReport]);
+  }, [projectScans, activeReportId]);
 
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("Overview");
   const [graphFocusPackage, setGraphFocusPackage] = useState<
@@ -121,6 +156,9 @@ export default function ProjectWorkspace({
   const [projectData, setProjectData] = useState<ProjectDirectoryResult | null>(
     null,
   );
+  const [localFolderProjectId, setLocalFolderProjectId] = useState<
+    string | null
+  >(null);
   const [job, setJob] = useState<ScanJob | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -164,7 +202,12 @@ export default function ProjectWorkspace({
     try {
       const result = await openProjectDirectory();
       setProjectData(result);
-      setSelectedProjectName(result.projectName);
+      const existingProj = allReports.find(
+        (r) => r.name === result.projectName,
+      );
+      setSelectedProjectId(
+        existingProj ? getProjectKey(existingProj) : result.projectName,
+      );
       if (onDirectoryHandleChange) {
         onDirectoryHandleChange(result.directoryHandle);
       }
@@ -194,6 +237,14 @@ export default function ProjectWorkspace({
     setLoading(true);
 
     try {
+      const stableId =
+        activeReport?.project_id ||
+        localFolderProjectId ||
+        `proj_${Math.random().toString(36).substring(2, 10)}`;
+      if (!localFolderProjectId) {
+        setLocalFolderProjectId(stableId);
+      }
+
       const res = await api<{ id: string }>("/scans/project", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -201,6 +252,7 @@ export default function ProjectWorkspace({
           name: projectData.projectName,
           profile: profile,
           files: projectData.files,
+          project_id: stableId,
         }),
       });
 
@@ -216,6 +268,7 @@ export default function ProjectWorkspace({
             if (state.status === "complete") {
               clearInterval(interval);
               const rep = await api<Report>(`/scans/${jobId}`);
+              setSelectedProjectId(rep.project_id || rep.name);
               setActiveReportId(rep.id);
               if (onReportGenerated) onReportGenerated(rep);
               setLoading(false);
@@ -266,11 +319,6 @@ export default function ProjectWorkspace({
     setActiveTab("Dependency Graph");
   }
 
-  // Unique project names from all reports for switching
-  const uniqueProjectNames = useMemo(() => {
-    return Array.from(new Set(allReports.map((r) => r.name))).filter(Boolean);
-  }, [allReports]);
-
   return (
     <div className="project-workspace-container">
       {/* Top Workspace Header */}
@@ -280,7 +328,9 @@ export default function ProjectWorkspace({
 
           <div className="workspace-project-title-row">
             <h1 className="workspace-project-title">
-              {activeReport?.name || selectedProjectName}
+              {activeReport?.name ||
+                uniqueProjects.find((p) => p.id === selectedProjectId)?.name ||
+                "Local Project"}
             </h1>
 
             {activeReport && (
@@ -345,14 +395,14 @@ export default function ProjectWorkspace({
           }}
         >
           {/* Project Switcher */}
-          {uniqueProjectNames.length > 1 && (
+          {uniqueProjects.length > 1 && (
             <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
               <span style={{ fontSize: "11px", color: "var(--muted)" }}>
                 Project:
               </span>
               <select
-                value={selectedProjectName}
-                onChange={(e) => setSelectedProjectName(e.target.value)}
+                value={selectedProjectId}
+                onChange={(e) => setSelectedProjectId(e.target.value)}
                 style={{
                   padding: "6px 10px",
                   borderRadius: "6px",
@@ -362,11 +412,20 @@ export default function ProjectWorkspace({
                   fontSize: "12px",
                 }}
               >
-                {uniqueProjectNames.map((name) => (
-                  <option key={name} value={name}>
-                    {name}
-                  </option>
-                ))}
+                {uniqueProjects.map((p) => {
+                  const duplicates = uniqueProjects.filter(
+                    (x) => x.name === p.name,
+                  );
+                  const label =
+                    duplicates.length > 1
+                      ? `${p.name} (${p.id.slice(0, 8)})`
+                      : p.name;
+                  return (
+                    <option key={p.id} value={p.id}>
+                      {label}
+                    </option>
+                  );
+                })}
               </select>
             </div>
           )}

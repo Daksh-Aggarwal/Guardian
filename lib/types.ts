@@ -76,6 +76,8 @@ export type Report = {
   duration_ms: number;
   engine_version?: string;
   classification?: "real" | "demo";
+  project_id?: string | null;
+  source_metadata?: GitHubMetadata | null;
   inspections?: Inspection[];
   inspection_summary?: InspectionSummary | null;
   root_integrity?: Integrity | null;
@@ -249,6 +251,71 @@ export type RemediationPlan = {
     | "failed"
     | "stale";
   created_at: string;
+  repository_id?: number | null;
+  branch?: string | null;
+  commit_sha?: string | null;
+  pr_number?: number | null;
+  pr_url?: string | null;
+  remediation_branch?: string | null;
+  remediation_commit_sha?: string | null;
+  pr_state?: string | null;
+};
+
+export type GitHubMetadata = {
+  repository_id: number;
+  repo_name: string;
+  owner: string;
+  repo_url: string;
+  branch: string;
+  commit_sha: string;
+  default_branch: string;
+  source_type: "github";
+};
+
+export type GitHubInstallation = {
+  id: number;
+  account_id: number;
+  account_login: string;
+  account_type: string;
+  avatar_url?: string | null;
+  repository_selection: string;
+  installed_at?: string | null;
+};
+
+export type GitHubStatus = {
+  configured: boolean;
+  connected: boolean;
+  installation?: GitHubInstallation | null;
+  reason?: string | null;
+};
+
+export type GitHubRepository = {
+  id: number;
+  name: string;
+  full_name: string;
+  owner: string;
+  owner_avatar?: string | null;
+  private: boolean;
+  html_url: string;
+  description?: string | null;
+  default_branch: string;
+  updated_at?: string | null;
+  permissions?: Record<string, boolean>;
+};
+
+export type GitHubBranch = {
+  name: string;
+  commit_sha: string;
+  is_default: boolean;
+};
+
+export type GitHubRemediationResponse = {
+  plan_id: string;
+  pr_number: number;
+  pr_url: string;
+  remediation_branch: string;
+  commit_sha: string;
+  status: string;
 };
 
 export type PlanGenerationRequest = {
@@ -299,3 +366,4 @@ export type ProjectMetadata = {
 
 export type { DependencyAccounting, FindingBreakdown } from "./accounting";
 export { getDependencyAccounting, getFindingBreakdown } from "./accounting";
+export * from "./package-utils";

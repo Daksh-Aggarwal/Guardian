@@ -54,6 +54,17 @@ def connection():
             result_json TEXT NOT NULL
         )
     ''')
+    db.execute('''
+        CREATE TABLE IF NOT EXISTS github_installations (
+            installation_id INTEGER PRIMARY KEY,
+            account_login TEXT NOT NULL,
+            account_type TEXT NOT NULL,
+            account_avatar TEXT,
+            repository_selection TEXT,
+            installed_at TEXT NOT NULL,
+            is_active INTEGER NOT NULL DEFAULT 1
+        )
+    ''')
     return db
 
 def save(report: Report):
@@ -212,15 +223,21 @@ def get_plans_for_scan(scan_id: str) -> List[RemediationPlan]:
         rows = db.execute('SELECT plan_json FROM remediation_plans WHERE scan_id = ? ORDER BY created_at DESC', (scan_id,)).fetchall()
     return [RemediationPlan.model_validate_json(r[0]) for r in rows]
 
-def get_plans_for_project(project_name: str) -> List[RemediationPlan]:
+def get_plans_for_project(project_identifier: str) -> List[RemediationPlan]:
     with connection() as db:
         all_scans = db.execute('SELECT id, report FROM scans').fetchall()
         matching_scan_ids = []
         for sid, rep_json in all_scans:
             try:
                 rep_data = json.loads(rep_json)
-                if rep_data.get('name') == project_name:
-                    matching_scan_ids.append(sid)
+                rep_proj_id = rep_data.get('project_id')
+                rep_name = rep_data.get('name')
+                if rep_proj_id:
+                    if rep_proj_id == project_identifier:
+                        matching_scan_ids.append(sid)
+                else:
+                    if rep_name == project_identifier:
+                        matching_scan_ids.append(sid)
             except Exception:
                 pass
         if not matching_scan_ids:
@@ -274,3 +291,45 @@ def get_verification(plan_id: str) -> Optional[VerificationResult]:
     if row:
         return VerificationResult.model_validate_json(row[0])
     return None
+
+def save_github_installation(installation: dict):
+    now = datetime.now(timezone.utc).isoformat()
+    with connection() as db:
+        # Mark other installations inactive for single-active-installation mode
+        db.execute('UPDATE github_installations SET is_active = 0')
+        db.execute(
+            '''INSERT OR REPLACE INTO github_installations
+               (installation_id, account_login, account_type, account_avatar, repository_selection, installed_at, is_active)
+               VALUES (?, ?, ?, ?, ?, ?, 1)''',
+            (
+                installation['id'],
+                installation['account_login'],
+                installation['account_type'],
+                installation.get('avatar_url'),
+                installation.get('repository_selection', 'all'),
+                installation.get('installed_at', now)
+            )
+        )
+
+def get_active_github_installation() -> Optional[dict]:
+    with connection() as db:
+        row = db.execute(
+            '''SELECT installation_id, account_login, account_type, account_avatar, repository_selection, installed_at
+               FROM github_installations WHERE is_active = 1 ORDER BY installation_id DESC LIMIT 1'''
+        ).fetchone()
+    if row:
+        return {
+            'id': row[0],
+            'account_id': row[0],
+            'account_login': row[1],
+            'account_type': row[2],
+            'avatar_url': row[3],
+            'repository_selection': row[4],
+            'installed_at': row[5],
+        }
+    return None
+
+def deactivate_github_installations():
+    with connection() as db:
+        db.execute('UPDATE github_installations SET is_active = 0')
+

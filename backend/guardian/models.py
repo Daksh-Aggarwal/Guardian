@@ -32,6 +32,17 @@ class Dependency(BaseModel):
     version: str
     direct: bool = True
     source: str
+
+class GitHubMetadata(BaseModel):
+    repository_id: int
+    repo_name: str
+    owner: str
+    repo_url: str
+    branch: str
+    commit_sha: str
+    default_branch: str
+    source_type: Literal['github'] = 'github'
+
 class Report(BaseModel):
     id: str
     name: str
@@ -48,6 +59,8 @@ class Report(BaseModel):
     duration_ms: int
     engine_version: str = "1"
     classification: Literal['real', 'demo'] = 'real'
+    project_id: Optional[str] = None
+    source_metadata: Optional[GitHubMetadata] = None
     inspections: List[PackageInspection] = Field(default_factory=list)
     inspection_summary: Optional[InspectionSummary] = None
     root_integrity: Optional[IntegrityResult] = None

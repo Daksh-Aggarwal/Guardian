@@ -35,7 +35,12 @@ import {
   Eye,
   Info,
 } from "lucide-react";
-import { Report, Finding, Inspection } from "@/lib/types";
+import {
+  Report,
+  Finding,
+  Inspection,
+  normalizeFindingPackage,
+} from "@/lib/types";
 import { Eyebrow, Badge } from "./ui";
 
 export type DependencyNodeData = {
@@ -297,11 +302,7 @@ export default function DependencyGraph({
     const behMap = new Map<string, Finding[]>();
 
     report.findings.forEach((f) => {
-      const pkgName = f.package
-        ? f.package.split("@")[0]
-        : f.evidence[0]?.file.includes("node_modules/")
-          ? f.evidence[0].file.split("node_modules/").pop()?.split("/")[0]
-          : null;
+      const pkgName = normalizeFindingPackage(f);
 
       if (!pkgName) return;
 

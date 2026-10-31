@@ -15,7 +15,7 @@ import {
   CheckCircle2,
   Package,
 } from "lucide-react";
-import { Report, Finding } from "@/lib/types";
+import { Report, Finding, parsePackageSpecifier } from "@/lib/types";
 import { Eyebrow, Badge } from "./ui";
 
 export default function VulnerabilitiesExplorer({
@@ -57,15 +57,14 @@ export default function VulnerabilitiesExplorer({
     > = {};
 
     osvFindings.forEach((f) => {
-      const rawPkg = f.package || "Unknown Package";
-      const [name, ver] = rawPkg.includes("@")
-        ? [rawPkg.split("@")[0], rawPkg.split("@")[1]]
-        : [rawPkg, report.version];
+      const parsed = parsePackageSpecifier(f.package);
+      const name = parsed.name || f.package || "Unknown Package";
+      const ver = parsed.version || "resolved";
 
       if (!groups[name]) {
         groups[name] = {
           packageName: name,
-          version: ver || "resolved",
+          version: ver,
           findings: [],
           highestSeverity: "low",
         };

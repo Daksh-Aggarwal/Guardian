@@ -15,7 +15,7 @@ import {
   AlertTriangle,
   Info,
 } from "lucide-react";
-import { Report } from "@/lib/types";
+import { Report, getFindingSignature, compareSemver } from "@/lib/types";
 import { getDependencyAccounting, getFindingBreakdown } from "@/lib/accounting";
 import { Eyebrow, Badge } from "./ui";
 
@@ -71,36 +71,108 @@ export default function SecurityTimeline({
     const baseFindingIds = new Set(baseReport.findings.map((f) => f.id));
     const targetFindingIds = new Set(targetReport.findings.map((f) => f.id));
 
-    // Also compare by title / rule for cross-scan tracking
+    // Stable finding signatures for cross-scan tracking
     const baseSignatures = new Set(
-      baseReport.findings.map((f) => `${f.rule}:${f.title}`),
+      baseReport.findings.map(getFindingSignature),
     );
     const targetSignatures = new Set(
-      targetReport.findings.map((f) => `${f.rule}:${f.title}`),
+      targetReport.findings.map(getFindingSignature),
     );
 
     const resolvedFindings = baseReport.findings.filter(
-      (f) => !targetSignatures.has(`${f.rule}:${f.title}`),
+      (f) => !targetSignatures.has(getFindingSignature(f)),
     );
     const newFindings = targetReport.findings.filter(
-      (f) => !baseSignatures.has(`${f.rule}:${f.title}`),
+      (f) => !baseSignatures.has(getFindingSignature(f)),
     );
     const persistentFindings = targetReport.findings.filter((f) =>
-      baseSignatures.has(`${f.rule}:${f.title}`),
+      baseSignatures.has(getFindingSignature(f)),
     );
 
-    // Dependency diffs
-    const baseDepNames = new Set(baseReport.dependencies.map((d) => d.name));
-    const targetDepNames = new Set(
-      targetReport.dependencies.map((d) => d.name),
+    // Dependency diffs: separate identity from version
+    const baseDepMap = new Map<string, { version: string; direct: boolean }>();
+    baseReport.dependencies.forEach((d) =>
+      baseDepMap.set(d.name, { version: d.version, direct: d.direct }),
+    );
+    const targetDepMap = new Map<
+      string,
+      { version: string; direct: boolean }
+    >();
+    targetReport.dependencies.forEach((d) =>
+      targetDepMap.set(d.name, { version: d.version, direct: d.direct }),
     );
 
-    const addedDependencies = targetReport.dependencies.filter(
-      (d) => !baseDepNames.has(d.name),
-    );
-    const removedDependencies = baseReport.dependencies.filter(
-      (d) => !targetDepNames.has(d.name),
-    );
+    const addedDependencies: Array<{
+      name: string;
+      version: string;
+      direct: boolean;
+    }> = [];
+    const removedDependencies: Array<{
+      name: string;
+      version: string;
+      direct: boolean;
+    }> = [];
+    const upgradedDependencies: Array<{
+      name: string;
+      fromVersion: string;
+      toVersion: string;
+      direct: boolean;
+    }> = [];
+    const downgradedDependencies: Array<{
+      name: string;
+      fromVersion: string;
+      toVersion: string;
+      direct: boolean;
+    }> = [];
+    const unchangedDependencies: Array<{
+      name: string;
+      version: string;
+      direct: boolean;
+    }> = [];
+
+    targetDepMap.forEach((targetInfo, name) => {
+      const baseInfo = baseDepMap.get(name);
+      if (!baseInfo) {
+        addedDependencies.push({
+          name,
+          version: targetInfo.version,
+          direct: targetInfo.direct,
+        });
+      } else {
+        const cmp = compareSemver(targetInfo.version, baseInfo.version);
+        if (cmp > 0) {
+          upgradedDependencies.push({
+            name,
+            fromVersion: baseInfo.version,
+            toVersion: targetInfo.version,
+            direct: targetInfo.direct,
+          });
+        } else if (cmp < 0) {
+          downgradedDependencies.push({
+            name,
+            fromVersion: baseInfo.version,
+            toVersion: targetInfo.version,
+            direct: targetInfo.direct,
+          });
+        } else {
+          unchangedDependencies.push({
+            name,
+            version: targetInfo.version,
+            direct: targetInfo.direct,
+          });
+        }
+      }
+    });
+
+    baseDepMap.forEach((baseInfo, name) => {
+      if (!targetDepMap.has(name)) {
+        removedDependencies.push({
+          name,
+          version: baseInfo.version,
+          direct: baseInfo.direct,
+        });
+      }
+    });
 
     return {
       resolvedFindings,
@@ -108,6 +180,9 @@ export default function SecurityTimeline({
       persistentFindings,
       addedDependencies,
       removedDependencies,
+      upgradedDependencies,
+      downgradedDependencies,
+      unchangedDependencies,
       actionableDiff: targetBreakdown.actionable - baseBreakdown.actionable,
       advisoryDiff: targetBreakdown.advisories - baseBreakdown.advisories,
       behavioralDiff: targetBreakdown.behavioral - baseBreakdown.behavioral,
@@ -569,6 +644,32 @@ export default function SecurityTimeline({
                 }}
               >
                 <span style={{ fontSize: "11px", color: "var(--muted)" }}>
+                  Upgraded Packages
+                </span>
+                <strong
+                  style={{
+                    display: "block",
+                    fontSize: "16px",
+                    color:
+                      comparison.upgradedDependencies.length > 0
+                        ? "#10b981"
+                        : "var(--text)",
+                    marginTop: "2px",
+                  }}
+                >
+                  {comparison.upgradedDependencies.length} upgraded
+                </strong>
+              </div>
+
+              <div
+                style={{
+                  padding: "12px",
+                  borderRadius: "8px",
+                  background: "var(--surface-muted, rgba(255,255,255,0.03))",
+                  border: "1px solid var(--line)",
+                }}
+              >
+                <span style={{ fontSize: "11px", color: "var(--muted)" }}>
                   Dependency Net Change
                 </span>
                 <strong
@@ -661,6 +762,158 @@ export default function SecurityTimeline({
                     >
                       <span>{f.advisory?.summary || f.title}</span>
                       <Badge severity={f.severity} size="sm" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Dependency Lifecycle Changes */}
+            {(comparison.upgradedDependencies.length > 0 ||
+              comparison.downgradedDependencies.length > 0 ||
+              comparison.addedDependencies.length > 0 ||
+              comparison.removedDependencies.length > 0) && (
+              <div style={{ marginTop: "6px" }}>
+                <strong
+                  style={{
+                    fontSize: "12px",
+                    color: "var(--text)",
+                    display: "block",
+                    marginBottom: "8px",
+                  }}
+                >
+                  📦 Dependency Lifecycle Transitions:
+                </strong>
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "4px",
+                  }}
+                >
+                  {comparison.upgradedDependencies.map((d) => (
+                    <div
+                      key={"upg-" + d.name}
+                      style={{
+                        padding: "6px 10px",
+                        borderRadius: "6px",
+                        background: "rgba(16, 185, 129, 0.08)",
+                        fontSize: "11px",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                      }}
+                    >
+                      <span>
+                        <strong style={{ color: "#10b981" }}>↑ Upgraded</strong>{" "}
+                        <code>{d.name}</code>{" "}
+                        {d.direct ? "(direct)" : "(transitive)"}
+                      </span>
+                      <span
+                        style={{
+                          fontFamily: "var(--font-mono, monospace)",
+                          color: "var(--muted)",
+                        }}
+                      >
+                        {d.fromVersion} →{" "}
+                        <strong style={{ color: "var(--text)" }}>
+                          {d.toVersion}
+                        </strong>
+                      </span>
+                    </div>
+                  ))}
+
+                  {comparison.downgradedDependencies.map((d) => (
+                    <div
+                      key={"down-" + d.name}
+                      style={{
+                        padding: "6px 10px",
+                        borderRadius: "6px",
+                        background: "rgba(245, 158, 11, 0.08)",
+                        fontSize: "11px",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                      }}
+                    >
+                      <span>
+                        <strong style={{ color: "#f59e0b" }}>
+                          ↓ Downgraded
+                        </strong>{" "}
+                        <code>{d.name}</code>{" "}
+                        {d.direct ? "(direct)" : "(transitive)"}
+                      </span>
+                      <span
+                        style={{
+                          fontFamily: "var(--font-mono, monospace)",
+                          color: "var(--muted)",
+                        }}
+                      >
+                        {d.fromVersion} →{" "}
+                        <strong style={{ color: "var(--text)" }}>
+                          {d.toVersion}
+                        </strong>
+                      </span>
+                    </div>
+                  ))}
+
+                  {comparison.addedDependencies.map((d) => (
+                    <div
+                      key={"add-" + d.name}
+                      style={{
+                        padding: "6px 10px",
+                        borderRadius: "6px",
+                        background: "rgba(99, 102, 241, 0.08)",
+                        fontSize: "11px",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                      }}
+                    >
+                      <span>
+                        <strong style={{ color: "#818cf8" }}>+ Added</strong>{" "}
+                        <code>{d.name}</code>{" "}
+                        {d.direct ? "(direct)" : "(transitive)"}
+                      </span>
+                      <span
+                        style={{
+                          fontFamily: "var(--font-mono, monospace)",
+                          color: "var(--muted)",
+                        }}
+                      >
+                        v{d.version}
+                      </span>
+                    </div>
+                  ))}
+
+                  {comparison.removedDependencies.map((d) => (
+                    <div
+                      key={"rem-" + d.name}
+                      style={{
+                        padding: "6px 10px",
+                        borderRadius: "6px",
+                        background: "rgba(100, 116, 139, 0.08)",
+                        fontSize: "11px",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                      }}
+                    >
+                      <span>
+                        <strong style={{ color: "var(--muted)" }}>
+                          - Removed
+                        </strong>{" "}
+                        <code>{d.name}</code>{" "}
+                        {d.direct ? "(direct)" : "(transitive)"}
+                      </span>
+                      <span
+                        style={{
+                          fontFamily: "var(--font-mono, monospace)",
+                          color: "var(--muted)",
+                        }}
+                      >
+                        was v{d.version}
+                      </span>
                     </div>
                   ))}
                 </div>

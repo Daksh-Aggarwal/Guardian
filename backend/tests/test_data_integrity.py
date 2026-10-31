@@ -12,6 +12,7 @@ from backend.guardian.models import (
 )
 from backend.guardian.storage import get_plans_for_project, save_plan, save
 from backend.guardian.remediation_models import RemediationPlan
+from backend.guardian.projects import parse_package_specifier
 
 def test_legacy_report_without_classification_defaults_appropriately():
     raw_synthetic = {
@@ -228,3 +229,120 @@ def test_dependency_accounting_reconciliation():
         acct.not_attempted
     ) == acct.total_resolved
     assert acct.unique_names == 6
+
+def test_stable_project_id_isolates_same_named_projects():
+    # Two distinct repositories that happen to share the same display name
+    rep_a = Report(
+        id="scan_same_name_a",
+        name="common-microservice",
+        version="1.0.0",
+        created_at="2026-10-31T01:00:00Z",
+        source="local project",
+        classification="real",
+        project_id="proj_alpha_111",
+        risk="No elevated signals",
+        rationale="Service A",
+        findings=[],
+        dependencies=[],
+        files_analyzed=5,
+        coverage=[],
+        intelligence="checked",
+        duration_ms=100
+    )
+    rep_b = Report(
+        id="scan_same_name_b",
+        name="common-microservice",
+        version="2.0.0",
+        created_at="2026-10-31T02:00:00Z",
+        source="local project",
+        classification="real",
+        project_id="proj_beta_222",
+        risk="Elevated signals",
+        rationale="Service B",
+        findings=[],
+        dependencies=[],
+        files_analyzed=8,
+        coverage=[],
+        intelligence="checked",
+        duration_ms=120
+    )
+    save(rep_a)
+    save(rep_b)
+
+    plan_a = RemediationPlan(
+        plan_id="plan_same_a",
+        scan_id="scan_same_name_a",
+        title="Fix Plan A",
+        summary="Plan for Alpha",
+        expected_outcome="Alpha secured",
+        status="approved",
+        created_at="2026-10-31T01:10:00Z"
+    )
+    plan_b = RemediationPlan(
+        plan_id="plan_same_b",
+        scan_id="scan_same_name_b",
+        title="Fix Plan B",
+        summary="Plan for Beta",
+        expected_outcome="Beta secured",
+        status="proposed",
+        created_at="2026-10-31T02:10:00Z"
+    )
+    save_plan(plan_a)
+    save_plan(plan_b)
+
+    plans_alpha = get_plans_for_project("proj_alpha_111")
+    plans_beta = get_plans_for_project("proj_beta_222")
+
+    # They have identical name "common-microservice", but distinct project_ids
+    assert len(plans_alpha) == 1
+    assert plans_alpha[0].plan_id == "plan_same_a"
+
+    assert len(plans_beta) == 1
+    assert plans_beta[0].plan_id == "plan_same_b"
+
+def test_legacy_project_history_fallback_by_name():
+    rep_legacy = Report(
+        id="scan_legacy_project_no_id",
+        name="legacy-monorepo",
+        version="1.0.0",
+        created_at="2026-10-31T00:30:00Z",
+        source="upload",
+        classification="real",
+        project_id=None,  # Legacy report without project_id
+        risk="No elevated signals",
+        rationale="Legacy",
+        findings=[],
+        dependencies=[],
+        files_analyzed=15,
+        coverage=[],
+        intelligence="checked",
+        duration_ms=90
+    )
+    save(rep_legacy)
+
+    plan_legacy = RemediationPlan(
+        plan_id="plan_legacy_1",
+        scan_id="scan_legacy_project_no_id",
+        title="Legacy Plan",
+        summary="Plan for Legacy",
+        expected_outcome="Secured",
+        status="approved",
+        created_at="2026-10-31T00:35:00Z"
+    )
+    save_plan(plan_legacy)
+
+    # Retrieval falls back to name for legacy reports
+    plans = get_plans_for_project("legacy-monorepo")
+    assert len(plans) >= 1
+    assert any(p.plan_id == "plan_legacy_1" for p in plans)
+
+def test_python_scoped_package_parsing():
+    assert parse_package_specifier("@babel/core@7.26.0") == ("@babel/core", "7.26.0")
+    assert parse_package_specifier("@types/node@22.0.0") == ("@types/node", "22.0.0")
+    assert parse_package_specifier("@tanstack/react-query@5.0.0-beta@2") == ("@tanstack/react-query", "5.0.0-beta@2")
+    assert parse_package_specifier("@scope/pkg") == ("@scope/pkg", None)
+    assert parse_package_specifier("lodash@4.17.21") == ("lodash", "4.17.21")
+    assert parse_package_specifier("express") == ("express", None)
+    assert parse_package_specifier("") == ("", None)
+    assert parse_package_specifier(None) == ("", None)
+

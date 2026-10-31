@@ -214,6 +214,21 @@ export default function Home() {
     });
   }, [reports, datasetFilter]);
 
+  // Reconcile workspace initial selections when dataset filter changes
+  useEffect(() => {
+    if (workspaceInitialReport) {
+      const cls =
+        workspaceInitialReport.classification ||
+        (workspaceInitialReport.source === "synthetic fixture"
+          ? "demo"
+          : "real");
+      if (datasetFilter !== "all" && cls !== datasetFilter) {
+        setWorkspaceInitialReport(null);
+        setWorkspaceProjectName(null);
+      }
+    }
+  }, [datasetFilter, workspaceInitialReport]);
+
   const realReportsCount = useMemo(
     () =>
       reports.filter(
@@ -588,7 +603,8 @@ export default function Home() {
               onDirectoryHandleChange={setConnectedDirectoryHandle}
               initialReport={workspaceInitialReport}
               initialProjectName={workspaceProjectName}
-              allReports={reports}
+              initialProjectId={workspaceInitialReport?.project_id || undefined}
+              allReports={filteredReports}
               onOpenReportView={(r) => openReport(r)}
             />
           ) : page === "How it works" ? (

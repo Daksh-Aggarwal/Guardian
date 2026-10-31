@@ -1,4 +1,4 @@
-import { Report, Finding } from "./types";
+import type { Report, Finding } from "./types";
 
 export type DependencyAccounting = {
   declaredDirect: number;
