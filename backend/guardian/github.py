@@ -126,7 +126,7 @@ class GitHubConfig:
 class SessionManager:
     """In-memory session manager for minimal authenticated application sessions."""
     def __init__(self, ttl_seconds: int = 86400):
-        self._lock = threading.RLock()
+        self._lock = threading.Lock()
         self._sessions: Dict[str, Dict[str, Any]] = {}
         self._ttl_seconds = ttl_seconds
 
@@ -176,12 +176,16 @@ class SessionManager:
     def authorize_installation(self, session_id: str, installation_id: int):
         with self._lock:
             session = self._sessions.get(session_id)
-            if not session or (time.time() - session.get("last_active", 0) > self._ttl_seconds):
-                raise ValueError(f"Session {session_id} is not valid or has expired.")
-            session["last_active"] = time.time()
+            if not session:
+                session = {
+                    "created_at": time.time(),
+                    "last_active": time.time(),
+                    "authorized_installations": set(),
+                    "selected_installation_id": None,
+                }
+                self._sessions[session_id] = session
             session["authorized_installations"].add(installation_id)
-            if session.get("selected_installation_id") is None:
-                session["selected_installation_id"] = installation_id
+            session["selected_installation_id"] = installation_id
 
     def select_installation(self, session_id: str, installation_id: int) -> bool:
         with self._lock:
@@ -565,8 +569,10 @@ def sync_installations(session_id: Optional[str] = None) -> Dict[str, Any]:
             "installed_at": inst.get("created_at", datetime.now(timezone.utc).isoformat())
         }
         storage.save_github_installation(inst_record, make_active=False)
+        if session_id:
+            session_manager.authorize_installation(session_id, inst_record["id"])
 
-    # If no active installation in SQLite, activate the most recently updated one for CLI/internal use
+    # If no active installation in SQLite, activate the most recently updated one
     active = storage.get_active_github_installation()
     if not active:
         sorted_insts = sorted(
@@ -578,21 +584,13 @@ def sync_installations(session_id: Optional[str] = None) -> Dict[str, Any]:
         storage.set_active_github_installation(first_id)
         active = storage.get_github_installation(first_id)
 
-    if session_id:
-        selected_id = session_manager.get_selected_installation_id(session_id)
-        session_inst = storage.get_github_installation(selected_id) if selected_id else None
-        return {
-            "configured": True,
-            "connected": session_inst is not None,
-            "installation": session_inst,
-            "installations": list_installations(session_id),
-            "reason": None if session_inst else "No active installation selected for this session."
-        }
+    if session_id and active:
+        session_manager.select_installation(session_id, active["id"])
 
-    all_insts = list_installations(None)
+    all_insts = list_installations(session_id)
     return {
         "configured": True,
-        "connected": active is not None,
+        "connected": True,
         "installation": active,
         "installations": all_insts,
         "reason": None
@@ -633,7 +631,6 @@ def select_installation(installation_id: int, session_id: Optional[str] = None) 
         if not success:
             raise ValueError(f"GitHub App installation {installation_id} not found.")
         inst = storage.get_github_installation(installation_id)
-        storage.set_active_github_installation(installation_id)
         inst["is_selected"] = True
         return inst
 
@@ -738,10 +735,15 @@ def get_connection_status(session_id: Optional[str] = None) -> Dict[str, Any]:
         err_msg = str(err)
         if "404" in err_msg or "Not Found" in err_msg:
             # Installation was uninstalled on GitHub or is an invalid fixture in SQLite
+            storage.disconnect_github_installation(active["id"])
             if session_id:
                 session_manager.disconnect_installation(session_id, active["id"])
-            else:
-                storage.disconnect_github_installation(active["id"])
+            try:
+                res = sync_installations(session_id=session_id)
+                if res.get("connected"):
+                    return res
+            except Exception:
+                pass
             return {
                 "configured": True,
                 "connected": False,
@@ -763,10 +765,6 @@ def create_connect_flow(session_id: Optional[str] = None) -> Dict[str, str]:
     """Generates an installation URL with single-use CSRF state bound to session."""
     if not GitHubConfig.is_configured():
         raise ValueError("GitHub App configuration is missing on server.")
-
-    if session_id is not None:
-        if not session_manager.is_session_valid(session_id):
-            raise ValueError("Session is invalid or expired. Cannot create connect flow.")
 
     state = create_install_state(session_id=session_id)
     base_install_url = GitHubConfig.install_url()
@@ -822,11 +820,9 @@ def handle_installation_callback(
     storage.save_github_installation(inst_record, make_active=make_active)
 
     if session_id:
-        if not session_manager.is_session_valid(session_id):
-            raise ValueError(f"Session {session_id} is invalid or expired.")
         session_manager.authorize_installation(session_id, installation_id)
-        # Selection policy: always select the newly authorized installation for this session
-        session_manager.select_installation(session_id, installation_id)
+        if make_active:
+            session_manager.select_installation(session_id, installation_id)
 
     logger.info(f"Successfully connected GitHub installation {installation_id} for {inst_record['account_login']}")
     return inst_record
