@@ -45,7 +45,9 @@ import {
   StatusChip,
   SecurityDimensionCard,
   SectionHeader,
+  ClassificationBadge,
 } from "./ui";
+import { getDependencyAccounting, getFindingBreakdown } from "@/lib/accounting";
 import IntelligencePanel from "./intelligence-panel";
 import {
   IntelligenceOverview,
@@ -59,10 +61,12 @@ export default function ReportView({
   report,
   onBack,
   onPrepareFix,
+  onInvestigateProject,
 }: {
   report: Report;
   onBack: () => void;
   onPrepareFix?: (finding: Finding) => void;
+  onInvestigateProject?: (report: Report) => void;
 }) {
   const [advanced, setAdvanced] = useState(false);
   const [tab, setTab] = useState<
@@ -79,6 +83,13 @@ export default function ReportView({
   const [groupByPackage, setGroupByPackage] = useState(true);
   const [copilotOpen, setCopilotOpen] = useState(false);
   const [copilotFindingId, setCopilotFindingId] = useState<string | null>(null);
+
+  // Exact dependency & finding accounting reconciliation
+  const deps = useMemo(() => getDependencyAccounting(report), [report]);
+  const breakdown = useMemo(
+    () => getFindingBreakdown(report.findings),
+    [report.findings],
+  );
 
   // Findings breakdown
   const elevatedFindings = report.findings.filter((f) => f.severity !== "info");
@@ -239,6 +250,18 @@ export default function ReportView({
         </div>
 
         <div className="report-action-right">
+          {onInvestigateProject && (
+            <button
+              type="button"
+              className="btn-secondary-subtle"
+              onClick={() => onInvestigateProject(report)}
+              title="Open project in Investigation Workspace"
+            >
+              <GitBranch size={14} />
+              <span>Investigate Project</span>
+            </button>
+          )}
+
           <button
             type="button"
             className="copilot-toggle-btn"
@@ -289,7 +312,15 @@ export default function ReportView({
       {/* Main Report Header */}
       <header className="report-main-header">
         <div className="report-title-area">
-          <Eyebrow>SECURITY ASSESSMENT REPORT</Eyebrow>
+          <div className="report-title-top-row">
+            <Eyebrow>SECURITY ASSESSMENT REPORT</Eyebrow>
+            <ClassificationBadge
+              classification={
+                report.classification ||
+                (report.source === "synthetic fixture" ? "demo" : "real")
+              }
+            />
+          </div>
           <h1 className="report-title">
             {report.name}
             <span className="version-chip">{report.version}</span>
@@ -313,8 +344,11 @@ export default function ReportView({
             <span className="meta-separator">·</span>
             <span className="meta-item">
               <Network size={13} />
-              {report.dependencies.length}{" "}
-              {report.dependencies.length === 1 ? "dependency" : "dependencies"}
+              {deps.totalResolved}{" "}
+              {deps.totalResolved === 1 ? "dependency" : "dependencies"}
+              <span style={{ opacity: 0.75, marginLeft: 4 }}>
+                ({deps.declaredDirect} direct, {deps.transitive} transitive)
+              </span>
             </span>
             <span className="meta-separator">·</span>
             <span className="meta-item duration">
@@ -487,7 +521,7 @@ export default function ReportView({
             description={
               osvFindings.length > 0
                 ? `${osvFindings.filter((f) => f.severity === "critical").length} critical, ${osvFindings.filter((f) => f.severity === "high").length} high priority vulnerabilities found in resolved dependency versions.`
-                : `Queried the OSV advisory database against ${report.dependencies.length} declared dependency versions.`
+                : `Queried the OSV advisory database against ${deps.totalResolved} resolved dependency ${deps.totalResolved === 1 ? "version" : "versions"}.`
             }
             metric={osvFindings.length}
             metricLabel="upstream advisories"
@@ -552,17 +586,17 @@ export default function ReportView({
             }
             headline={
               report.inspection_summary
-                ? `${report.inspection_summary.inspected} / ${report.inspection_summary.total} dependencies inspected`
+                ? `${deps.inspected} / ${deps.totalResolved} dependencies inspected`
                 : `${report.files_analyzed} source files inspected`
             }
             description={
               report.inspection_summary
-                ? `${report.inspection_summary.skipped || 0} skipped by budget profile, ${report.inspection_summary.unavailable || 0} unavailable.`
+                ? `${deps.skipped} skipped by budget profile, ${deps.unavailable + deps.unresolved} unavailable or unretrieved.`
                 : "Deep syntax analysis executed under bounded recursion without executing untrusted code."
             }
             metric={
               report.inspection_summary
-                ? `${report.inspection_summary.inspected}/${report.inspection_summary.total}`
+                ? `${deps.inspected}/${deps.totalResolved}`
                 : `${report.files_analyzed}`
             }
             metricLabel={
@@ -600,7 +634,7 @@ export default function ReportView({
               onClick={() => setTab("Dependencies")}
             >
               <span>Dependencies</span>
-              <span className="tab-badge">{report.dependencies.length}</span>
+              <span className="tab-badge">{deps.totalResolved}</span>
             </button>
 
             <button
@@ -1307,7 +1341,7 @@ function FindingItemCard({
                 }}
               >
                 <Sparkles size={13} />
-                <span>Ask Copilot about this</span>
+                <span>Ask Guardian Intelligence</span>
               </button>
 
               {onPrepareFix && (
@@ -1320,7 +1354,7 @@ function FindingItemCard({
                   }}
                 >
                   <Wrench size={13} />
-                  <span>Prepare fix with Guardian</span>
+                  <span>Prepare fix with Guardian Autopilot</span>
                 </button>
               )}
             </div>

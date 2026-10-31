@@ -479,7 +479,7 @@ export default function IntelligencePanel({
             animate={{ x: 0, opacity: 1 }}
             exit={{ x: "100%", opacity: 0 }}
             transition={{ type: "spring", stiffness: 350, damping: 30 }}
-            aria-label="Guardian Intelligence Copilot"
+            aria-label="Guardian Intelligence Panel"
           >
             {/* Header */}
             <div className="copilot-header">

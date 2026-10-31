@@ -49,6 +49,14 @@ class RemediationPlan(BaseModel):
     limitations: List[str] = Field(default_factory=list)
     status: PlanStatus = 'proposed'
     created_at: str
+    repository_id: Optional[int] = None
+    branch: Optional[str] = None
+    commit_sha: Optional[str] = None
+    pr_number: Optional[int] = None
+    pr_url: Optional[str] = None
+    remediation_branch: Optional[str] = None
+    remediation_commit_sha: Optional[str] = None
+    pr_state: Optional[str] = None
 
 class PlanGenerationRequest(BaseModel):
     finding_ids: Optional[List[str]] = None
@@ -88,10 +96,12 @@ class ProjectIngestRequest(BaseModel):
     name: str = Field(min_length=1, max_length=214)
     profile: Literal['fast', 'deep'] = 'fast'
     files: Dict[str, str] = Field(description="Dictionary of project-relative paths to text file contents.")
+    project_id: Optional[str] = None
 
 class ProjectMetadata(BaseModel):
     scan_id: str
     name: str
+    project_id: Optional[str] = None
     framework: Optional[str] = None
     runtime: Optional[str] = None
     language: Optional[str] = None

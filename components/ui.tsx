@@ -92,6 +92,27 @@ export function Eyebrow({ children }: { children: React.ReactNode }) {
   return <div className="eyebrow">{children}</div>;
 }
 
+export function ClassificationBadge({
+  classification,
+  size = "default",
+}: {
+  classification?: "real" | "demo" | string;
+  size?: "default" | "sm";
+}) {
+  const isDemo = classification === "demo";
+  return (
+    <span
+      className={`classification-badge ${isDemo ? "demo" : "real"} ${size === "sm" ? "badge-sm" : ""}`}
+      title={
+        isDemo ? "Synthetic demonstration fixture" : "Real project / package"
+      }
+    >
+      <i className="classification-dot" />
+      {isDemo ? "Demo Fixture" : "Real Project"}
+    </span>
+  );
+}
+
 export function Empty({
   title,
   children,

@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 
 from .advisor import get_ai_config, DEFAULT_MODEL
 from .models import Report, Finding, Advisory
-from .projects import ProjectSnapshot, compute_sha256, is_secret_file, project_manager
+from .projects import ProjectSnapshot, compute_sha256, is_secret_file, project_manager, parse_package_specifier
 from .redact import redact_text, redact_data
 from .remediation_models import (
     RemediationPlan,
@@ -291,9 +291,9 @@ class RemediationPlanner:
         for f in target_findings:
             # Case 1: OSV advisory with fixed_versions in package.json
             if f.rule == "OSV" and f.advisory and f.advisory.fixed_versions and pkg_json_content:
-                pkg_name = f.package
-                if pkg_name and "@" in pkg_name:
-                    pkg_name = pkg_name.split("@")[0]
+                pkg_name, _ = parse_package_specifier(f.package)
+                if not pkg_name:
+                    pkg_name = f.package or ""
                 target_version = f.advisory.fixed_versions[0]
                 # Look for package in package.json
                 pattern = rf'("{re.escape(pkg_name)}"\s*:\s*")([^"]+)(")'

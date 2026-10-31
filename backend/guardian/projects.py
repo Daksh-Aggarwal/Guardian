@@ -9,6 +9,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Tuple
+from uuid import uuid4
 
 from .remediation_models import ProjectMetadata
 
@@ -36,6 +37,28 @@ SECRET_FILE_PATTERNS = [
 def compute_sha256(content: str) -> str:
     """Computes SHA-256 hash of UTF-8 encoded text content."""
     return hashlib.sha256(content.encode('utf-8')).hexdigest()
+
+def parse_package_specifier(raw: Optional[str]) -> Tuple[str, Optional[str]]:
+    """
+    Parses npm package specifier into (name, version).
+    Correctly supports scoped packages like '@babel/core@7.26.0' -> ('@babel/core', '7.26.0').
+    """
+    if not raw or not isinstance(raw, str):
+        return ("", None)
+    trimmed = raw.strip()
+    if not trimmed:
+        return ("", None)
+    if trimmed.startswith("@"):
+        slash_idx = trimmed.find("/")
+        if slash_idx != -1:
+            at_idx = trimmed.find("@", slash_idx + 1)
+            if at_idx != -1:
+                return (trimmed[:at_idx], trimmed[at_idx + 1:] or None)
+            return (trimmed, None)
+    at_idx = trimmed.find("@")
+    if at_idx > 0:
+        return (trimmed[:at_idx], trimmed[at_idx + 1:] or None)
+    return (trimmed, None)
 
 def is_secret_file(filename: str) -> bool:
     """Detects secret-bearing or private credential filenames."""
@@ -76,7 +99,7 @@ def validate_and_normalize_path(path: str) -> str:
 
     return normalized
 
-def detect_project_metadata(files: Dict[str, str], scan_id: str, name: str) -> ProjectMetadata:
+def detect_project_metadata(files: Dict[str, str], scan_id: str, name: str, project_id: Optional[str] = None) -> ProjectMetadata:
     """Deterministically identifies framework, runtime, language, and test runner from manifests."""
     framework: Optional[str] = None
     runtime: Optional[str] = None
@@ -161,6 +184,7 @@ def detect_project_metadata(files: Dict[str, str], scan_id: str, name: str) -> P
     return ProjectMetadata(
         scan_id=scan_id,
         name=name,
+        project_id=project_id,
         framework=framework,
         runtime=runtime,
         language=language,
@@ -179,6 +203,7 @@ class ProjectSnapshot:
     files: Dict[str, str]                          # normalized path -> text content
     file_hashes: Dict[str, str]                    # normalized path -> sha256
     metadata: ProjectMetadata
+    project_id: Optional[str] = None
     created_at_time: float = field(default_factory=time.monotonic)
     last_accessed_at: float = field(default_factory=time.monotonic)
 
@@ -194,7 +219,7 @@ class ProjectSnapshotManager:
         self._lock = threading.Lock()
         self._snapshots: Dict[str, ProjectSnapshot] = {}
 
-    def save_snapshot(self, scan_id: str, name: str, raw_files: Dict[str, str]) -> ProjectSnapshot:
+    def save_snapshot(self, scan_id: str, name: str, raw_files: Dict[str, str], project_id: Optional[str] = None) -> ProjectSnapshot:
         with self._lock:
             self._cleanup_expired_locked()
 
@@ -232,13 +257,15 @@ class ProjectSnapshotManager:
                 normalized_files[norm_path] = content
                 file_hashes[norm_path] = compute_sha256(content)
 
-            meta = detect_project_metadata(normalized_files, scan_id, name)
+            stable_project_id = project_id or f"proj_{uuid4().hex[:12]}"
+            meta = detect_project_metadata(normalized_files, scan_id, name, project_id=stable_project_id)
             snapshot = ProjectSnapshot(
                 scan_id=scan_id,
                 name=name,
                 files=normalized_files,
                 file_hashes=file_hashes,
                 metadata=meta,
+                project_id=stable_project_id,
                 created_at_time=time.monotonic(),
                 last_accessed_at=time.monotonic()
             )

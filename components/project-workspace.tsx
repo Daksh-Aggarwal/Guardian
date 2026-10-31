@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   FolderOpen,
@@ -23,11 +23,31 @@ import {
   ArrowRight,
   HardDrive,
   Upload,
+  GitBranch,
+  Network,
+  Clock,
+  Eye,
+  FileText,
+  Search,
+  Package,
 } from "lucide-react";
-import { api, Report, ScanJob, ProjectMetadata } from "@/lib/types";
-import { Eyebrow, Note, Badge } from "./ui";
+import { api, Report, ScanJob, ProjectMetadata, Finding } from "@/lib/types";
+import { getDependencyAccounting, getFindingBreakdown } from "@/lib/accounting";
+import {
+  Eyebrow,
+  Note,
+  Badge,
+  ClassificationBadge,
+  SecurityDimensionCard,
+} from "./ui";
 import RemediationPanel from "./remediation-panel";
 import ReportView from "./report";
+import DependencyGraph from "./dependency-graph";
+import VulnerabilitiesExplorer from "./vulnerabilities-explorer";
+import BehavioralFlowExplorer from "./behavioral-flow-explorer";
+import RemediationHistory from "./remediation-history";
+import SecurityTimeline from "./security-timeline";
+import IntelligencePanel from "./intelligence-panel";
 import {
   openProjectDirectory,
   isFileSystemAccessSupported,
@@ -35,19 +55,110 @@ import {
   ExcludedFileEntry,
 } from "@/lib/fs-access";
 
+export type WorkspaceTab =
+  | "Overview"
+  | "Dependency Graph"
+  | "Vulnerabilities"
+  | "Behavioral Flows"
+  | "Remediation History"
+  | "Security Timeline";
+
 export default function ProjectWorkspace({
   onBack,
   onReportGenerated,
   onDirectoryHandleChange,
+  initialReport,
+  initialProjectName,
+  initialProjectId,
+  allReports = [],
+  onOpenReportView,
 }: {
   onBack: () => void;
   onReportGenerated?: (report: Report) => void;
   onDirectoryHandleChange?: (handle: FileSystemDirectoryHandle | null) => void;
+  initialReport?: Report | null;
+  initialProjectName?: string | null;
+  initialProjectId?: string | null;
+  allReports?: Report[];
+  onOpenReportView?: (report: Report) => void;
 }) {
+  // Stable project identity helper (preserves backward compatibility with legacy reports)
+  const getProjectKey = (r: Report) => r.project_id || r.name;
+
+  // Unique projects deduplicated by stable project key
+  const uniqueProjects = useMemo(() => {
+    const map = new Map<
+      string,
+      { id: string; name: string; latestScan: Report }
+    >();
+    for (const r of allReports) {
+      const key = getProjectKey(r);
+      if (!map.has(key)) {
+        map.set(key, { id: key, name: r.name, latestScan: r });
+      }
+    }
+    return Array.from(map.values());
+  }, [allReports]);
+
+  // Current active project key
+  const [selectedProjectId, setSelectedProjectId] = useState<string>(
+    initialProjectId ||
+      (initialReport ? getProjectKey(initialReport) : "") ||
+      (initialProjectName
+        ? allReports.find((r) => r.name === initialProjectName)?.project_id ||
+          initialProjectName
+        : "") ||
+      uniqueProjects[0]?.id ||
+      "",
+  );
+
+  // Reconcile selectedProjectId when allReports changes (e.g. dataset filter switches)
+  useEffect(() => {
+    if (uniqueProjects.length > 0) {
+      if (!uniqueProjects.some((p) => p.id === selectedProjectId)) {
+        setSelectedProjectId(uniqueProjects[0].id);
+      }
+    } else {
+      setSelectedProjectId("");
+    }
+  }, [uniqueProjects, selectedProjectId]);
+
+  // Scans belonging to this project identity
+  const projectScans = useMemo(() => {
+    if (!selectedProjectId) return [];
+    return allReports
+      .filter((r) => getProjectKey(r) === selectedProjectId)
+      .sort(
+        (a, b) =>
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+      );
+  }, [allReports, selectedProjectId]);
+
+  // Active scan report (defaults to latest scan of this project or initialReport)
+  const [activeReportId, setActiveReportId] = useState<string>(
+    initialReport?.id || projectScans[0]?.id || "",
+  );
+
+  const activeReport = useMemo(() => {
+    return (
+      projectScans.find((s) => s.id === activeReportId) ||
+      projectScans[0] ||
+      null
+    );
+  }, [projectScans, activeReportId]);
+
+  const [activeTab, setActiveTab] = useState<WorkspaceTab>("Overview");
+  const [graphFocusPackage, setGraphFocusPackage] = useState<
+    string | undefined
+  >(undefined);
+
+  // Local filesystem directory connection state
   const [projectData, setProjectData] = useState<ProjectDirectoryResult | null>(
     null,
   );
-  const [report, setReport] = useState<Report | null>(null);
+  const [localFolderProjectId, setLocalFolderProjectId] = useState<
+    string | null
+  >(null);
   const [job, setJob] = useState<ScanJob | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -56,7 +167,33 @@ export default function ProjectWorkspace({
   const [targetFindingId, setTargetFindingId] = useState<string | null>(null);
   const [profile, setProfile] = useState<"fast" | "deep">("fast");
 
+  // Guardian Intelligence drawer state
+  const [intelligenceOpen, setIntelligenceOpen] = useState(false);
+  const [intelligenceFindingId, setIntelligenceFindingId] = useState<
+    string | null
+  >(null);
+
   const supported = isFileSystemAccessSupported();
+
+  // Keep activeReportId in sync when project changes
+  useEffect(() => {
+    if (projectScans.length > 0) {
+      if (!projectScans.some((s) => s.id === activeReportId)) {
+        setActiveReportId(projectScans[0].id);
+      }
+    }
+  }, [projectScans, activeReportId]);
+
+  // Derived metrics
+  const breakdown = useMemo(
+    () => (activeReport ? getFindingBreakdown(activeReport.findings) : null),
+    [activeReport],
+  );
+
+  const deps = useMemo(
+    () => (activeReport ? getDependencyAccounting(activeReport) : null),
+    [activeReport],
+  );
 
   // Connect local folder via File System Access API
   async function handleConnectProject() {
@@ -65,9 +202,15 @@ export default function ProjectWorkspace({
     try {
       const result = await openProjectDirectory();
       setProjectData(result);
-      if (onDirectoryHandleChange)
+      const existingProj = allReports.find(
+        (r) => r.name === result.projectName,
+      );
+      setSelectedProjectId(
+        existingProj ? getProjectKey(existingProj) : result.projectName,
+      );
+      if (onDirectoryHandleChange) {
         onDirectoryHandleChange(result.directoryHandle);
-      setReport(null);
+      }
     } catch (err) {
       if ((err as Error).name !== "AbortError") {
         setError((err as Error).message);
@@ -78,12 +221,11 @@ export default function ProjectWorkspace({
   }
 
   function handleDisconnect() {
-    if (projectData && report) {
-      api(`/projects/${report.id}`, { method: "DELETE" }).catch(() => {});
+    if (projectData && activeReport) {
+      api(`/projects/${activeReport.id}`, { method: "DELETE" }).catch(() => {});
     }
     if (onDirectoryHandleChange) onDirectoryHandleChange(null);
     setProjectData(null);
-    setReport(null);
     setJob(null);
     setError(null);
   }
@@ -95,6 +237,14 @@ export default function ProjectWorkspace({
     setLoading(true);
 
     try {
+      const stableId =
+        activeReport?.project_id ||
+        localFolderProjectId ||
+        `proj_${Math.random().toString(36).substring(2, 10)}`;
+      if (!localFolderProjectId) {
+        setLocalFolderProjectId(stableId);
+      }
+
       const res = await api<{ id: string }>("/scans/project", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -102,13 +252,13 @@ export default function ProjectWorkspace({
           name: projectData.projectName,
           profile: profile,
           files: projectData.files,
+          project_id: stableId,
         }),
       });
 
       const jobId = res.id;
       setJob({ id: jobId, status: "queued", stage: "Queued" });
 
-      // Poll until scan completes
       return new Promise<Report>((resolve, reject) => {
         const interval = setInterval(async () => {
           try {
@@ -118,7 +268,8 @@ export default function ProjectWorkspace({
             if (state.status === "complete") {
               clearInterval(interval);
               const rep = await api<Report>(`/scans/${jobId}`);
-              setReport(rep);
+              setSelectedProjectId(rep.project_id || rep.name);
+              setActiveReportId(rep.id);
               if (onReportGenerated) onReportGenerated(rep);
               setLoading(false);
               resolve(rep);
@@ -146,10 +297,8 @@ export default function ProjectWorkspace({
     }
   }
 
-  // Rescan modified project (called after remediation)
   async function handleRescan(): Promise<Report | void> {
     if (!projectData) return;
-    // Re-read changed files from local directory handle
     const reloaded = await openProjectDirectory();
     setProjectData(reloaded);
     return await runProjectScan();
@@ -160,49 +309,226 @@ export default function ProjectWorkspace({
     setRemediationOpen(true);
   }
 
+  function openIntelligenceForFinding(findingId?: string) {
+    setIntelligenceFindingId(findingId || null);
+    setIntelligenceOpen(true);
+  }
+
+  function handleNavigateToGraph(packageName: string) {
+    setGraphFocusPackage(packageName);
+    setActiveTab("Dependency Graph");
+  }
+
   return (
-    <div
-      className="project-workspace-container"
-      style={{ display: "flex", flexDirection: "column", gap: "24px" }}
-    >
-      {/* Top Banner & Navigation */}
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          flexWrap: "wrap",
-          gap: "12px",
-        }}
-      >
-        <div>
-          <Eyebrow>GUARDIAN AUTOPILOT / LOCAL WORKSPACE</Eyebrow>
-          <h1 style={{ fontSize: "24px", margin: "4px 0 0" }}>
-            Local Project Remediation
-          </h1>
+    <div className="project-workspace-container">
+      {/* Top Workspace Header */}
+      <div className="workspace-top-bar">
+        <div className="workspace-project-info">
+          <Eyebrow>GUARDIAN 3.1 / PROJECT INVESTIGATION WORKSPACE</Eyebrow>
+
+          <div className="workspace-project-title-row">
+            <h1 className="workspace-project-title">
+              {activeReport?.name ||
+                uniqueProjects.find((p) => p.id === selectedProjectId)?.name ||
+                "Local Project"}
+            </h1>
+
+            {activeReport && (
+              <ClassificationBadge
+                classification={
+                  activeReport.classification ||
+                  (activeReport.source === "synthetic fixture"
+                    ? "demo"
+                    : "real")
+                }
+              />
+            )}
+
+            {activeReport && (
+              <span
+                style={{
+                  fontSize: "12px",
+                  color: "var(--muted)",
+                  fontFamily: "var(--font-mono, monospace)",
+                }}
+              >
+                v{activeReport.version}
+              </span>
+            )}
+          </div>
+
           <p
             style={{
+              margin: 0,
+              fontSize: "12px",
               color: "var(--muted)",
-              margin: "4px 0 0",
-              fontSize: "13px",
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              flexWrap: "wrap",
             }}
           >
-            Connect an existing local codebase, detect supply chain
-            vulnerabilities, generate precision diffs, and apply approved fixes.
+            {activeReport && (
+              <>
+                <span>Source: {activeReport.source}</span>
+                <span>&bull;</span>
+                <span>{activeReport.files_analyzed} files analyzed</span>
+                <span>&bull;</span>
+                <span>{deps?.totalResolved || 0} dependencies mapped</span>
+                <span>&bull;</span>
+                <span>
+                  Last scanned:{" "}
+                  {new Date(activeReport.created_at).toLocaleDateString()}
+                </span>
+              </>
+            )}
           </p>
         </div>
 
-        <div style={{ display: "flex", gap: "10px" }}>
-          {projectData && (
+        {/* Workspace Actions & Selectors */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "10px",
+            flexWrap: "wrap",
+          }}
+        >
+          {/* Project Switcher */}
+          {uniqueProjects.length > 1 && (
+            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <span style={{ fontSize: "11px", color: "var(--muted)" }}>
+                Project:
+              </span>
+              <select
+                value={selectedProjectId}
+                onChange={(e) => setSelectedProjectId(e.target.value)}
+                style={{
+                  padding: "6px 10px",
+                  borderRadius: "6px",
+                  background: "var(--surface)",
+                  border: "1px solid var(--line)",
+                  color: "var(--text)",
+                  fontSize: "12px",
+                }}
+              >
+                {uniqueProjects.map((p) => {
+                  const duplicates = uniqueProjects.filter(
+                    (x) => x.name === p.name,
+                  );
+                  const label =
+                    duplicates.length > 1
+                      ? `${p.name} (${p.id.slice(0, 8)})`
+                      : p.name;
+                  return (
+                    <option key={p.id} value={p.id}>
+                      {label}
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+          )}
+
+          {/* Historical Scan Version Switcher */}
+          {projectScans.length > 1 && (
+            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <span style={{ fontSize: "11px", color: "var(--muted)" }}>
+                Scan:
+              </span>
+              <select
+                value={activeReportId}
+                onChange={(e) => setActiveReportId(e.target.value)}
+                style={{
+                  padding: "6px 10px",
+                  borderRadius: "6px",
+                  background: "var(--surface)",
+                  border: "1px solid var(--line)",
+                  color: "var(--text)",
+                  fontSize: "12px",
+                }}
+              >
+                {projectScans.map((s, idx) => (
+                  <option key={s.id} value={s.id}>
+                    #{projectScans.length - idx}: v{s.version} (
+                    {new Date(s.created_at).toLocaleDateString()})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Local folder connect/disconnect */}
+          {projectData ? (
             <button
               onClick={handleDisconnect}
               className="button secondary compact"
+              style={{ fontSize: "12px" }}
             >
-              Disconnect project
+              Disconnect Folder
+            </button>
+          ) : (
+            <button
+              onClick={handleConnectProject}
+              className="button secondary compact"
+              style={{
+                fontSize: "12px",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+              }}
+            >
+              <FolderOpen size={14} />
+              <span>Connect Local Folder</span>
             </button>
           )}
+
+          {/* Remediation trigger */}
+          {activeReport && (
+            <button
+              onClick={() => openRemediationForFinding()}
+              className="button primary compact"
+              style={{
+                fontSize: "12px",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+              }}
+            >
+              <Wrench size={14} />
+              <span>Guardian Autopilot</span>
+            </button>
+          )}
+
+          {/* Intelligence trigger */}
+          {activeReport && (
+            <button
+              onClick={() => openIntelligenceForFinding()}
+              className="button secondary compact"
+              style={{
+                fontSize: "12px",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+              }}
+            >
+              <Sparkles size={14} />
+              <span>Guardian Intelligence</span>
+            </button>
+          )}
+
+          {onOpenReportView && activeReport && (
+            <button
+              onClick={() => onOpenReportView(activeReport)}
+              className="button secondary compact"
+              style={{ fontSize: "12px" }}
+            >
+              Standard Report View
+            </button>
+          )}
+
           <button onClick={onBack} className="button secondary compact">
-            Scan history
+            Dashboard
           </button>
         </div>
       </div>
@@ -240,412 +566,353 @@ export default function ProjectWorkspace({
         </div>
       )}
 
-      {/* Browser compatibility banner if showDirectoryPicker not supported */}
-      {!supported && (
-        <div
-          className="card"
-          style={{
-            padding: "16px 20px",
-            background: "rgba(234, 179, 8, 0.1)",
-            border: "1px solid rgba(234, 179, 8, 0.3)",
-          }}
-        >
-          <div
-            style={{ display: "flex", alignItems: "flex-start", gap: "12px" }}
+      {/* 6 Workspace Navigation Tabs */}
+      <nav className="workspace-nav-bar" role="tablist">
+        {[
+          { name: "Overview" as const, icon: Layers, count: undefined },
+          {
+            name: "Dependency Graph" as const,
+            icon: GitBranch,
+            count: deps?.totalResolved || 0,
+          },
+          {
+            name: "Vulnerabilities" as const,
+            icon: ShieldAlert,
+            count: breakdown?.advisories || 0,
+          },
+          {
+            name: "Behavioral Flows" as const,
+            icon: FileCode2,
+            count: breakdown?.dataFlows || 0,
+          },
+          {
+            name: "Remediation History" as const,
+            icon: Wrench,
+            count: undefined,
+          },
+          {
+            name: "Security Timeline" as const,
+            icon: Clock,
+            count: projectScans.length,
+          },
+        ].map(({ name, icon: Icon, count }) => (
+          <button
+            key={name}
+            role="tab"
+            aria-selected={activeTab === name}
+            className={`workspace-nav-tab ${activeTab === name ? "active" : ""}`}
+            onClick={() => setActiveTab(name as WorkspaceTab)}
           >
-            <Info
-              size={20}
-              color="var(--accent-yellow, #eab308)"
-              style={{ flexShrink: 0, marginTop: "2px" }}
-            />
-            <div>
+            <Icon size={15} />
+            <span>{name}</span>
+            {count !== undefined && count > 0 && (
+              <span className="workspace-tab-badge">{count}</span>
+            )}
+          </button>
+        ))}
+      </nav>
+
+      {/* TAB 1: OVERVIEW */}
+      {activeTab === "Overview" && activeReport && breakdown && deps && (
+        <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+          {/* Quick Metrics Grid */}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+              gap: "14px",
+            }}
+          >
+            <div className="card" style={{ padding: "16px" }}>
+              <span style={{ fontSize: "11px", color: "var(--muted)" }}>
+                TOTAL DEPENDENCIES
+              </span>
+              <strong
+                style={{ display: "block", fontSize: "20px", marginTop: "4px" }}
+              >
+                {deps.totalResolved}
+              </strong>
+              <small style={{ color: "var(--muted)", fontSize: "11px" }}>
+                {deps.declaredDirect} direct declared &bull; {deps.transitive}{" "}
+                transitive
+              </small>
+            </div>
+
+            <div className="card" style={{ padding: "16px" }}>
+              <span style={{ fontSize: "11px", color: "var(--muted)" }}>
+                ACTIONABLE FINDINGS
+              </span>
               <strong
                 style={{
-                  fontSize: "14px",
-                  color: "var(--accent-yellow, #eab308)",
+                  display: "block",
+                  fontSize: "20px",
+                  marginTop: "4px",
+                  color: breakdown.actionable > 0 ? "#f87171" : "#10b981",
                 }}
               >
-                Browser File System Access API Notice
+                {breakdown.actionable}
+              </strong>
+              <small style={{ color: "var(--muted)", fontSize: "11px" }}>
+                {breakdown.informational} informational observations excluded
+              </small>
+            </div>
+
+            <div className="card" style={{ padding: "16px" }}>
+              <span style={{ fontSize: "11px", color: "var(--muted)" }}>
+                KNOWN VULNERABILITIES
+              </span>
+              <strong
+                style={{
+                  display: "block",
+                  fontSize: "20px",
+                  marginTop: "4px",
+                  color: breakdown.advisories > 0 ? "#f87171" : "#10b981",
+                }}
+              >
+                {breakdown.advisories}
+              </strong>
+              <small style={{ color: "var(--muted)", fontSize: "11px" }}>
+                {breakdown.criticalAdvisories} critical &bull;{" "}
+                {breakdown.highAdvisories} high
+              </small>
+            </div>
+
+            <div className="card" style={{ padding: "16px" }}>
+              <span style={{ fontSize: "11px", color: "var(--muted)" }}>
+                SOURCE INSPECTION
+              </span>
+              <strong
+                style={{ display: "block", fontSize: "20px", marginTop: "4px" }}
+              >
+                {deps.inspected} / {deps.totalResolved}
+              </strong>
+              <small style={{ color: "var(--muted)", fontSize: "11px" }}>
+                {deps.skipped} skipped &bull; {deps.unavailable} unavailable
+              </small>
+            </div>
+          </div>
+
+          {/* 4 Independent Assessment Dimension Cards */}
+          <div>
+            <div style={{ marginBottom: "10px" }}>
+              <Eyebrow>DECOUPLED SECURITY POSTURE</Eyebrow>
+              <h3 style={{ margin: "2px 0 0", fontSize: "16px" }}>
+                Four Independent Assessment Domains
+              </h3>
+            </div>
+
+            <div className="dimension-grid">
+              <SecurityDimensionCard
+                title="Behavioral Assessment"
+                domain="RUNTIME SIGNALS"
+                status={
+                  breakdown.actionableBehavioral > 0
+                    ? "Signals Detected"
+                    : activeReport.files_analyzed === 0
+                      ? "Unavailable"
+                      : "Clean"
+                }
+                statusTone={
+                  breakdown.actionableBehavioral > 0
+                    ? "warning"
+                    : activeReport.files_analyzed === 0
+                      ? "purple"
+                      : "success"
+                }
+                headline={
+                  breakdown.actionableBehavioral > 0
+                    ? `${breakdown.actionableBehavioral} actionable behavioral signals`
+                    : "No elevated behavioral patterns"
+                }
+                description={activeReport.rationale}
+                metric={breakdown.behavioral}
+                metricLabel="behavioral observations"
+                icon={<FileCode2 size={18} />}
+                onClick={() => setActiveTab("Behavioral Flows")}
+              />
+
+              <SecurityDimensionCard
+                title="Known Vulnerabilities"
+                domain="OSV DATABASE"
+                status={
+                  breakdown.advisories > 0
+                    ? "Matches Detected"
+                    : activeReport.intelligence
+                }
+                statusTone={breakdown.advisories > 0 ? "danger" : "success"}
+                headline={
+                  breakdown.advisories > 0
+                    ? `${breakdown.advisories} upstream OSV advisories`
+                    : "No known vulnerabilities"
+                }
+                description={`Exact-version queries evaluated against ${deps.totalResolved} resolved dependencies.`}
+                metric={breakdown.advisories}
+                metricLabel="advisory matches"
+                icon={<Network size={18} />}
+                onClick={() => setActiveTab("Vulnerabilities")}
+              />
+
+              <SecurityDimensionCard
+                title="Package Integrity"
+                domain="PROVENANCE"
+                status={
+                  breakdown.integrity > 0
+                    ? "Checksum Mismatch"
+                    : activeReport.root_integrity?.status || "Verified/Local"
+                }
+                statusTone={breakdown.integrity > 0 ? "danger" : "success"}
+                headline={
+                  breakdown.integrity > 0
+                    ? `${breakdown.integrity} integrity concerns`
+                    : "Digests verified or local memory"
+                }
+                description="Digest verification establishes byte consistency, never software safety."
+                metric={breakdown.integrity === 0 ? "Verified" : "Concern"}
+                metricLabel="integrity checks"
+                icon={<ShieldCheck size={18} />}
+                onClick={() => setActiveTab("Dependency Graph")}
+              />
+
+              <SecurityDimensionCard
+                title="Inspection Coverage"
+                domain="TRANSPARENCY"
+                status={
+                  deps.inspected === deps.totalResolved
+                    ? "Complete"
+                    : "Bounded Coverage"
+                }
+                statusTone={
+                  deps.inspected === deps.totalResolved ? "success" : "warning"
+                }
+                headline={`${deps.inspected} of ${deps.totalResolved} packages inspected`}
+                description={`${deps.skipped} budget skipped, ${deps.unavailable} unavailable from registry.`}
+                metric={`${deps.inspected}/${deps.totalResolved}`}
+                metricLabel="coverage ratio"
+                icon={<Package size={18} />}
+                onClick={() => setActiveTab("Dependency Graph")}
+              />
+            </div>
+          </div>
+
+          {/* Quick Jump Buttons to specialized explorers */}
+          <div
+            className="card"
+            style={{
+              padding: "18px 20px",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              flexWrap: "wrap",
+              gap: "12px",
+            }}
+          >
+            <div>
+              <strong style={{ fontSize: "14px" }}>
+                Explore Evidence & Remediation
               </strong>
               <p
                 style={{
-                  margin: "4px 0 8px",
+                  margin: "2px 0 0",
                   fontSize: "12px",
-                  lineHeight: "1.6",
-                  color: "var(--foreground)",
-                  opacity: 0.85,
+                  color: "var(--muted)",
                 }}
               >
-                Direct local folder access and in-place file application require
-                a browser supporting the File System Access API (such as Google
-                Chrome, Microsoft Edge, or Chromium). In Firefox and Safari,
-                direct disk modification is unsupported by design.
-              </p>
-              <p style={{ margin: 0, fontSize: "12px", color: "var(--muted)" }}>
-                You can still inspect projects via ZIP upload and download
-                unified <code>.patch</code> bundles to apply manually with{" "}
-                <code>git apply</code>.
+                Deep-dive into the interactive graph explorer, vulnerability
+                chains, or source-to-sink data flow paths.
               </p>
             </div>
-          </div>
-        </div>
-      )}
 
-      {/* Empty State: Prompt to Connect Local Directory */}
-      {!projectData && (
-        <div
-          className="card"
-          style={{
-            padding: "48px 24px",
-            textAlign: "center",
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: "16px",
-            border: "1px dashed var(--border)",
-          }}
-        >
-          <div
-            style={{
-              width: "56px",
-              height: "56px",
-              borderRadius: "16px",
-              background: "rgba(59, 130, 246, 0.15)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "var(--accent-blue, #3b82f6)",
-            }}
-          >
-            <FolderOpen size={28} />
-          </div>
-
-          <div style={{ maxWidth: "480px" }}>
-            <h3 style={{ fontSize: "18px", margin: "0 0 6px" }}>
-              Connect a local software project
-            </h3>
-            <p
-              style={{
-                fontSize: "13px",
-                color: "var(--muted)",
-                margin: 0,
-                lineHeight: "1.6",
-              }}
-            >
-              Select an existing folder on your computer. Guardian indexes
-              manifests, dependencies, and eligible source files locally. No
-              source files are uploaded or stored in cloud databases.
-            </p>
-          </div>
-
-          <div
-            style={{
-              display: "flex",
-              gap: "12px",
-              marginTop: "8px",
-              flexWrap: "wrap",
-              justifyContent: "center",
-            }}
-          >
-            <button
-              onClick={handleConnectProject}
-              disabled={loading}
-              className="button primary"
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "8px",
-                padding: "10px 20px",
-              }}
-            >
-              {loading ? (
-                <Loader2 size={16} className="animate-spin" />
-              ) : (
-                <FolderOpen size={16} />
-              )}
-              <span>
-                {loading ? "Reading folder..." : "Select local project folder"}
-              </span>
-            </button>
-          </div>
-
-          <div
-            style={{
-              display: "flex",
-              gap: "16px",
-              marginTop: "16px",
-              fontSize: "11px",
-              color: "var(--muted)",
-            }}
-          >
-            <span>✓ Safe loopback execution</span>
-            <span>✓ Redacts secret files & .env</span>
-            <span>✓ Read-only permission initially</span>
-          </div>
-        </div>
-      )}
-
-      {/* Connected Project Dashboard */}
-      {projectData && (
-        <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-          {/* Project Summary Card */}
-          <div className="card" style={{ padding: "20px" }}>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "flex-start",
-                flexWrap: "wrap",
-                gap: "14px",
-              }}
-            >
-              <div>
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "8px",
-                    marginBottom: "4px",
-                  }}
-                >
-                  <HardDrive size={16} color="var(--accent-blue, #3b82f6)" />
-                  <span
-                    style={{
-                      fontSize: "11px",
-                      textTransform: "uppercase",
-                      letterSpacing: "0.06em",
-                      color: "var(--muted)",
-                      fontWeight: 600,
-                    }}
-                  >
-                    CONNECTED LOCAL PROJECT
-                  </span>
-                </div>
-                <h2 style={{ margin: "0 0 4px", fontSize: "20px" }}>
-                  {projectData.projectName}
-                </h2>
-                <p
-                  style={{ margin: 0, fontSize: "12px", color: "var(--muted)" }}
-                >
-                  {projectData.stats.eligible} eligible text files analyzed
-                  &bull; {(projectData.stats.totalBytes / 1024).toFixed(1)} KB
-                  snapshot &bull; {projectData.stats.excluded} items excluded
-                </p>
-              </div>
-
-              <div
-                style={{ display: "flex", alignItems: "center", gap: "10px" }}
-              >
-                <div className="mode-switch" style={{ margin: 0 }}>
-                  <button
-                    className={profile === "fast" ? "active" : ""}
-                    onClick={() => setProfile("fast")}
-                  >
-                    Fast
-                  </button>
-                  <button
-                    className={profile === "deep" ? "active" : ""}
-                    onClick={() => setProfile("deep")}
-                  >
-                    Deep
-                  </button>
-                </div>
-
-                <button
-                  onClick={runProjectScan}
-                  disabled={loading}
-                  className="button primary"
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "8px",
-                  }}
-                >
-                  {loading ? (
-                    <Loader2 size={16} className="animate-spin" />
-                  ) : (
-                    <FolderSync size={16} />
-                  )}
-                  <span>
-                    {loading
-                      ? job?.stage || "Scanning..."
-                      : report
-                        ? "Rescan project"
-                        : "Inspect project"}
-                  </span>
-                </button>
-
-                {report && (
-                  <button
-                    onClick={() => openRemediationForFinding()}
-                    className="button primary"
-                    style={{
-                      background: "var(--accent-green, #10b981)",
-                      borderColor: "var(--accent-green, #10b981)",
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "6px",
-                    }}
-                  >
-                    <Wrench size={16} />
-                    <span>Autopilot remediation</span>
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Excluded files collapsible accordion */}
-            <div
-              style={{
-                marginTop: "16px",
-                paddingTop: "14px",
-                borderTop: "1px solid var(--border)",
-              }}
-            >
+            <div style={{ display: "flex", gap: "10px" }}>
               <button
-                onClick={() => setShowExclusions(!showExclusions)}
+                onClick={() => setActiveTab("Dependency Graph")}
+                className="button secondary compact"
                 style={{
-                  background: "none",
-                  border: "none",
-                  color: "var(--muted)",
-                  fontSize: "12px",
-                  cursor: "pointer",
-                  display: "flex",
+                  display: "inline-flex",
                   alignItems: "center",
                   gap: "6px",
-                  padding: 0,
+                  fontSize: "12px",
                 }}
               >
-                {showExclusions ? (
-                  <ChevronDown size={14} />
-                ) : (
-                  <ChevronRight size={14} />
-                )}
-                <span>
-                  View {projectData.stats.excluded} excluded files & standard
-                  safety filters
-                </span>
+                <GitBranch size={14} />
+                <span>Open Dependency Graph</span>
               </button>
 
-              {showExclusions && (
-                <div
-                  style={{
-                    marginTop: "10px",
-                    maxHeight: "180px",
-                    overflowY: "auto",
-                    background: "var(--surface-muted, rgba(255,255,255,0.02))",
-                    borderRadius: "6px",
-                    padding: "10px 14px",
-                    fontSize: "11px",
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: "6px",
-                  }}
-                >
-                  {projectData.stats.excludedList.map((exc, i) => (
-                    <div
-                      key={i}
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        color: "var(--muted)",
-                      }}
-                    >
-                      <span
-                        style={{ fontFamily: "var(--font-mono, monospace)" }}
-                      >
-                        {exc.path}
-                      </span>
-                      <span>{exc.reason}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
+              <button
+                onClick={() => setActiveTab("Behavioral Flows")}
+                className="button secondary compact"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  fontSize: "12px",
+                }}
+              >
+                <FileCode2 size={14} />
+                <span>Inspect Data Flows</span>
+              </button>
             </div>
           </div>
-
-          {/* Active Job Progress */}
-          {loading && job && (
-            <div
-              className="card"
-              style={{ padding: "18px", textAlign: "center" }}
-            >
-              <Loader2
-                size={24}
-                className="animate-spin"
-                color="var(--accent-blue, #3b82f6)"
-                style={{ margin: "0 auto 10px" }}
-              />
-              <strong style={{ fontSize: "14px" }}>
-                Scanning local project...
-              </strong>
-              <p
-                style={{
-                  margin: "4px 0 0",
-                  fontSize: "12px",
-                  color: "var(--muted)",
-                }}
-              >
-                {job.stage}
-              </p>
-            </div>
-          )}
-
-          {/* Report View after scan */}
-          {report && !loading && (
-            <div>
-              <div
-                style={{
-                  padding: "12px 18px",
-                  background: "var(--surface-muted, rgba(255,255,255,0.03))",
-                  borderRadius: "8px",
-                  border: "1px solid var(--border)",
-                  marginBottom: "16px",
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  flexWrap: "wrap",
-                  gap: "10px",
-                }}
-              >
-                <div
-                  style={{ display: "flex", alignItems: "center", gap: "8px" }}
-                >
-                  <ShieldCheck size={18} color="var(--accent-green, #10b981)" />
-                  <span style={{ fontSize: "13px" }}>
-                    Scan complete:{" "}
-                    <strong>{report.findings.length} findings</strong> detected
-                    across <strong>{report.files_analyzed} files</strong>.
-                  </span>
-                </div>
-                <button
-                  onClick={() => openRemediationForFinding()}
-                  className="button primary compact"
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "6px",
-                  }}
-                >
-                  <Wrench size={14} />
-                  Prepare a fix with Guardian
-                </button>
-              </div>
-
-              <ReportView
-                report={report}
-                onBack={onBack}
-                onPrepareFix={(f) => openRemediationForFinding(f.id)}
-              />
-            </div>
-          )}
         </div>
       )}
 
-      {/* Remediation Workspace Overlay */}
-      {remediationOpen && report && (
+      {/* TAB 2: DEPENDENCY GRAPH */}
+      {activeTab === "Dependency Graph" && activeReport && (
+        <DependencyGraph
+          report={activeReport}
+          selectedPackageName={graphFocusPackage}
+          onSelectFinding={(fid) => {
+            if (onOpenReportView) onOpenReportView(activeReport);
+          }}
+          onAskIntelligence={(fid) => openIntelligenceForFinding(fid)}
+          onRemediate={(fid) => openRemediationForFinding(fid)}
+        />
+      )}
+
+      {/* TAB 3: VULNERABILITIES */}
+      {activeTab === "Vulnerabilities" && activeReport && (
+        <VulnerabilitiesExplorer
+          report={activeReport}
+          onSelectGraphPackage={handleNavigateToGraph}
+          onAskIntelligence={openIntelligenceForFinding}
+          onRemediateFinding={openRemediationForFinding}
+          onViewFindingEvidence={(fid) => {
+            if (onOpenReportView) onOpenReportView(activeReport);
+          }}
+        />
+      )}
+
+      {/* TAB 4: BEHAVIORAL FLOWS */}
+      {activeTab === "Behavioral Flows" && activeReport && (
+        <BehavioralFlowExplorer
+          report={activeReport}
+          onSelectFinding={(fid) => {
+            if (onOpenReportView) onOpenReportView(activeReport);
+          }}
+          onAskIntelligence={openIntelligenceForFinding}
+        />
+      )}
+
+      {/* TAB 5: REMEDIATION HISTORY */}
+      {activeTab === "Remediation History" && activeReport && (
+        <RemediationHistory
+          report={activeReport}
+          onOpenPlan={(planId) => openRemediationForFinding()}
+        />
+      )}
+
+      {/* TAB 6: SECURITY TIMELINE */}
+      {activeTab === "Security Timeline" && (
+        <SecurityTimeline
+          projectScans={projectScans}
+          currentReportId={activeReportId}
+          onSelectScan={(sid) => setActiveReportId(sid)}
+        />
+      )}
+
+      {/* Guardian Autopilot Remediation Modal */}
+      {remediationOpen && activeReport && (
         <RemediationPanel
-          report={report}
+          report={activeReport}
           directoryHandle={projectData?.directoryHandle}
           targetFindingId={targetFindingId}
           onClose={() => setRemediationOpen(false)}
@@ -654,13 +921,26 @@ export default function ProjectWorkspace({
           }}
           onFindingClick={(fid) => {
             setRemediationOpen(false);
-            setTimeout(() => {
-              document
-                .getElementById("finding-" + fid)
-                ?.scrollIntoView({ behavior: "smooth", block: "center" });
-            }, 100);
+            if (onOpenReportView) onOpenReportView(activeReport);
           }}
           onRescanRequested={handleRescan}
+        />
+      )}
+
+      {/* Guardian Intelligence Advisor Drawer */}
+      {intelligenceOpen && activeReport && (
+        <IntelligencePanel
+          report={activeReport}
+          isOpen={intelligenceOpen}
+          onClose={() => setIntelligenceOpen(false)}
+          selectedFinding={
+            activeReport.findings.find((f) => f.id === intelligenceFindingId) ||
+            null
+          }
+          onClearSelectedFinding={() => setIntelligenceFindingId(null)}
+          onFocusFinding={(fid: string) => {
+            if (onOpenReportView) onOpenReportView(activeReport);
+          }}
         />
       )}
     </div>

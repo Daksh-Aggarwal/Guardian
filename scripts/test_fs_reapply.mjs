@@ -54,13 +54,21 @@ globalThis.window = {
   },
 };
 
-// Import fs-access utilities
+// Import fs-access utilities and package-utils
 const {
   validatePlanFilesForReapplication,
   applyPlanToFileSystem,
   undoPlanFromFileSystem,
   computeBrowserSHA256,
 } = await import("../lib/fs-access.ts");
+
+const {
+  parsePackageSpecifier,
+  extractPackageFromPath,
+  normalizeFindingPackage,
+  getFindingSignature,
+  compareSemver,
+} = await import("../lib/package-utils.ts");
 
 // Mock FileSystemFileHandle & FileSystemDirectoryHandle
 class MockFileHandle {
@@ -751,4 +759,412 @@ test("10. Reapplication succeeds after undoing a plan containing newly created f
   assert.equal(reapplyRes.success, true);
   assert.equal(dirHandle.files.has("security.js"), true);
   assert.equal(dirHandle.files.get("security.js").content, createdContent);
+});
+
+test("11. Write succeeds but verification fails: touched file is rolled back and hash verified", async () => {
+  const origText = 'const x = 1;';
+  const origHash = await computeBrowserSHA256(origText);
+  // Intentional fake proposed hash to trigger post-write hash verification failure
+  const fakePropHash = "0000000000000000000000000000000000000000000000000000000000000000";
+
+  const plan = {
+    plan_id: "plan_test_verify_fail",
+    scan_id: "scan_verify_fail",
+    title: "Verify fail test",
+    summary: "Verification failure",
+    priority: "medium",
+    expected_outcome: "Rolled back",
+    findings_addressed: [],
+    proposed_changes: [
+      {
+        file_path: "index.js",
+        operation: "update",
+        original_sha256: origHash,
+        proposed_sha256: fakePropHash,
+        edits: [{ old_text: "const x = 1;", new_text: "const x = 2;" }],
+        diff: "diff",
+        rationale: "Update",
+        finding_ids: [],
+        expected_result: "Updated",
+      },
+    ],
+    tradeoffs: [],
+    potential_risks: [],
+    assumptions: [],
+    manual_steps: [],
+    recommended_verification: [],
+    limitations: [],
+    status: "approved",
+    created_at: new Date().toISOString(),
+  };
+
+  const dirHandle = new MockDirectoryHandle();
+  dirHandle.files.set("index.js", new MockFileHandle("index.js", origText));
+
+  await assert.rejects(
+    async () => {
+      await applyPlanToFileSystem(dirHandle, plan);
+    },
+    (err) => {
+      assert.match(err.message, /Hash verification failed/);
+      assert.match(err.message, /All modified and created files were successfully restored/);
+      return true;
+    }
+  );
+
+  // File was written with 'const x = 2;', but verification threw and rollback restored 'const x = 1;'!
+  assert.equal(dirHandle.files.get("index.js").content, origText);
+  const currentHash = await computeBrowserSHA256(dirHandle.files.get("index.js").content);
+  assert.equal(currentHash, origHash);
+});
+
+test("12. Multi-file partial write failure restores all touched files and removes created files", async () => {
+  const orig1 = 'console.log("file1");';
+  const orig2 = 'console.log("file2");';
+  const origHash1 = await computeBrowserSHA256(orig1);
+  const origHash2 = await computeBrowserSHA256(orig2);
+  const prop1 = 'console.log("file1_mod");';
+  const propHash1 = await computeBrowserSHA256(prop1);
+  const createdContent = 'console.log("new_helper");';
+  const createdHash = await computeBrowserSHA256(createdContent);
+
+  const plan = {
+    plan_id: "plan_multi_fail",
+    scan_id: "scan_multi_fail",
+    title: "Multi file apply with middle failure",
+    summary: "Multi-file failure test",
+    priority: "high",
+    expected_outcome: "Full rollback",
+    findings_addressed: [],
+    proposed_changes: [
+      {
+        file_path: "file1.js",
+        operation: "update",
+        original_sha256: origHash1,
+        proposed_sha256: propHash1,
+        edits: [{ old_text: 'console.log("file1");', new_text: 'console.log("file1_mod");' }],
+        diff: "diff1",
+        rationale: "Update 1",
+        finding_ids: [],
+        expected_result: "Updated 1",
+      },
+      {
+        file_path: "helper.js",
+        operation: "create",
+        original_sha256: "",
+        proposed_sha256: createdHash,
+        edits: [],
+        diff: "diff_create",
+        rationale: "Create helper",
+        finding_ids: [],
+        expected_result: "Created",
+        created_content: createdContent,
+      },
+      {
+        file_path: "file2.js",
+        operation: "update",
+        original_sha256: origHash2,
+        proposed_sha256: "some_hash",
+        edits: [{ old_text: 'console.log("file2");', new_text: 'console.log("file2_mod");' }],
+        diff: "diff2",
+        rationale: "Update 2",
+        finding_ids: [],
+        expected_result: "Updated 2",
+      },
+    ],
+    tradeoffs: [],
+    potential_risks: [],
+    assumptions: [],
+    manual_steps: [],
+    recommended_verification: [],
+    limitations: [],
+    status: "approved",
+    created_at: new Date().toISOString(),
+  };
+
+  const dirHandle = new MockDirectoryHandle();
+  dirHandle.files.set("file1.js", new MockFileHandle("file1.js", orig1));
+  // file2 will fail on write
+  dirHandle.files.set("file2.js", new MockFileHandle("file2.js", orig2, true));
+
+  await assert.rejects(
+    async () => {
+      await applyPlanToFileSystem(dirHandle, plan);
+    },
+    (err) => {
+      assert.match(err.message, /Disk write I\/O error on 'file2.js'/);
+      assert.match(err.message, /All modified and created files were successfully restored/);
+      return true;
+    }
+  );
+
+  // file1.js was restored to original content
+  assert.equal(dirHandle.files.get("file1.js").content, orig1);
+  assert.equal(await computeBrowserSHA256(dirHandle.files.get("file1.js").content), origHash1);
+  // helper.js was removed from directory
+  assert.equal(dirHandle.files.has("helper.js"), false);
+  // file2.js is untouched
+  assert.equal(dirHandle.files.get("file2.js").content, orig2);
+});
+
+test("13. Rollback encountering write failure reports incomplete rollback with actionable message", async () => {
+  const origText = 'console.log("safe");';
+  const origHash = await computeBrowserSHA256(origText);
+  const propText = 'console.log("updated");';
+  const propHash = await computeBrowserSHA256(propText);
+  const f2Text = 'console.log("f2");';
+  const f2Hash = await computeBrowserSHA256(f2Text);
+  const f2PropText = 'console.log("f2_mod");';
+  const f2PropHash = await computeBrowserSHA256(f2PropText);
+
+  const plan = {
+    plan_id: "plan_rollback_fail",
+    scan_id: "scan_rollback_fail",
+    title: "Rollback fail test",
+    summary: "Simulate failure during rollback write",
+    priority: "critical",
+    expected_outcome: "Reports critical rollback failure",
+    findings_addressed: [],
+    proposed_changes: [
+      {
+        file_path: "f1.js",
+        operation: "update",
+        original_sha256: origHash,
+        proposed_sha256: propHash,
+        edits: [{ old_text: 'console.log("safe");', new_text: 'console.log("updated");' }],
+        diff: "diff1",
+        rationale: "Update",
+        finding_ids: [],
+        expected_result: "Updated",
+      },
+      {
+        file_path: "f2.js",
+        operation: "update",
+        original_sha256: f2Hash,
+        proposed_sha256: f2PropHash,
+        edits: [{ old_text: 'console.log("f2");', new_text: 'console.log("f2_mod");' }],
+        diff: "diff2",
+        rationale: "Update",
+        finding_ids: [],
+        expected_result: "Updated",
+      },
+    ],
+    tradeoffs: [],
+    potential_risks: [],
+    assumptions: [],
+    manual_steps: [],
+    recommended_verification: [],
+    limitations: [],
+    status: "approved",
+    created_at: new Date().toISOString(),
+  };
+
+  const dirHandle = new MockDirectoryHandle();
+  const f1Handle = new MockFileHandle("f1.js", origText);
+  dirHandle.files.set("f1.js", f1Handle);
+  // f2 triggers failure during apply
+  dirHandle.files.set("f2.js", new MockFileHandle("f2.js", f2Text, true));
+
+  // Now make f1 fail during subsequent rollback write
+  const originalCreateWritable = f1Handle.createWritable.bind(f1Handle);
+  let callCount = 0;
+  f1Handle.createWritable = async function () {
+    callCount++;
+    if (callCount === 2) {
+      // Second call is during rollback!
+      throw new Error("Disk hardware failure during rollback restoration");
+    }
+    return originalCreateWritable();
+  };
+
+  await assert.rejects(
+    async () => {
+      await applyPlanToFileSystem(dirHandle, plan);
+    },
+    (err) => {
+      assert.match(err.message, /CRITICAL: Some files could not be restored automatically/);
+      assert.match(err.message, /f1\.js/);
+      return true;
+    }
+  );
+
+  // Backup snapshot in IndexedDB is still preserved for user recovery!
+  assert.equal(backupStore.has("plan_rollback_fail"), true);
+});
+
+test("14. Failure during multi-file undo reports partial undo and preserves backup", async () => {
+  const orig1 = "orig 1";
+  const orig2 = "orig 2";
+  const prop1 = "prop 1";
+  const prop2 = "prop 2";
+  const propHash1 = await computeBrowserSHA256(prop1);
+  const propHash2 = await computeBrowserSHA256(prop2);
+  const origHash1 = await computeBrowserSHA256(orig1);
+  const origHash2 = await computeBrowserSHA256(orig2);
+
+  const plan = {
+    plan_id: "plan_undo_fail",
+    scan_id: "scan_undo_fail",
+    title: "Undo fail test",
+    summary: "Undo partial write failure",
+    priority: "medium",
+    expected_outcome: "Handles undo failure",
+    findings_addressed: [],
+    proposed_changes: [
+      {
+        file_path: "u1.txt",
+        operation: "update",
+        original_sha256: origHash1,
+        proposed_sha256: propHash1,
+        edits: [{ old_text: orig1, new_text: prop1 }],
+        diff: "d1",
+        rationale: "U1",
+        finding_ids: [],
+        expected_result: "P1",
+      },
+      {
+        file_path: "u2.txt",
+        operation: "update",
+        original_sha256: origHash2,
+        proposed_sha256: propHash2,
+        edits: [{ old_text: orig2, new_text: prop2 }],
+        diff: "d2",
+        rationale: "U2",
+        finding_ids: [],
+        expected_result: "P2",
+      },
+    ],
+    tradeoffs: [],
+    potential_risks: [],
+    assumptions: [],
+    manual_steps: [],
+    recommended_verification: [],
+    limitations: [],
+    status: "applied",
+    created_at: new Date().toISOString(),
+  };
+
+  const dirHandle = new MockDirectoryHandle();
+  dirHandle.files.set("u1.txt", new MockFileHandle("u1.txt", prop1));
+  // u2 will fail when written during undo
+  dirHandle.files.set("u2.txt", new MockFileHandle("u2.txt", prop2, true));
+
+  // Seed backup in IndexedDB
+  backupStore.set("plan_undo_fail", {
+    plan_id: "plan_undo_fail",
+    timestamp: new Date().toISOString(),
+    files: [
+      { path: "u1.txt", content: orig1, sha256: origHash1 },
+      { path: "u2.txt", content: orig2, sha256: origHash2 },
+    ],
+    createdFiles: [],
+  });
+
+  await assert.rejects(
+    async () => {
+      await undoPlanFromFileSystem(dirHandle, plan);
+    },
+    (err) => {
+      assert.match(err.message, /Undo failed for files/);
+      assert.match(err.message, /u2\.txt/);
+      assert.match(err.message, /Partial undo restored: \[u1\.txt\]/);
+      return true;
+    }
+  );
+
+  // u1 was restored
+  assert.equal(dirHandle.files.get("u1.txt").content, orig1);
+});
+
+test("15. Scoped npm package normalization handles all variants", () => {
+  // Scoped with version
+  const p1 = parsePackageSpecifier("@babel/core@7.26.0");
+  assert.equal(p1.name, "@babel/core");
+  assert.equal(p1.version, "7.26.0");
+
+  // Scoped without version
+  const p2 = parsePackageSpecifier("@types/node");
+  assert.equal(p2.name, "@types/node");
+  assert.equal(p2.version, null);
+
+  // Scoped with multiple '@' in version/tag
+  const p3 = parsePackageSpecifier("@tanstack/react-query@5.0.0-beta@2");
+  assert.equal(p3.name, "@tanstack/react-query");
+  assert.equal(p3.version, "5.0.0-beta@2");
+
+  // Unscoped with version
+  const p4 = parsePackageSpecifier("lodash@4.17.21");
+  assert.equal(p4.name, "lodash");
+  assert.equal(p4.version, "4.17.21");
+
+  // Unscoped bare name
+  const p5 = parsePackageSpecifier("express");
+  assert.equal(p5.name, "express");
+  assert.equal(p5.version, null);
+
+  // Path extraction: scoped package in node_modules
+  const fromPath1 = extractPackageFromPath("node_modules/@babel/core/lib/index.js");
+  assert.equal(fromPath1, "@babel/core");
+
+  // Path extraction: nested node_modules
+  const fromPath2 = extractPackageFromPath("node_modules/parent/node_modules/@scope/child/index.js");
+  assert.equal(fromPath2, "@scope/child");
+
+  // Path extraction: unscoped package in nested node_modules
+  const fromPath3 = extractPackageFromPath("a/node_modules/b/node_modules/express/lib/view.js");
+  assert.equal(fromPath3, "express");
+
+  // Finding normalization
+  const fScoped = { package: "@babel/core@7.26.0" };
+  assert.equal(normalizeFindingPackage(fScoped), "@babel/core");
+
+  const fEvidence = { evidence: [{ file: "node_modules/@tanstack/react-query/build/index.js" }] };
+  assert.equal(normalizeFindingPackage(fEvidence), "@tanstack/react-query");
+});
+
+test("16. Security timeline finding signatures and dependency comparison", () => {
+  // Vulnerability finding signature prioritizes advisory ID and package
+  const fVuln = {
+    id: "f_1",
+    rule: "OSV",
+    title: "Arbitrary code execution",
+    package: "@babel/core@7.26.0",
+    advisory: { id: "GHSA-67hx-6x53-jw92", summary: "Title" },
+    evidence: [],
+    references: [],
+    severity: "high",
+    category: "Vulnerability",
+    confidence: "high",
+    observed: "",
+    explanation: "",
+    implication: "",
+    recommendation: "",
+  };
+  const sigVuln = getFindingSignature(fVuln);
+  assert.equal(sigVuln, "vuln:GHSA-67hx-6x53-jw92:@babel/core");
+
+  // Behavioral finding signature uses rule + package + evidence file
+  const fBehav = {
+    id: "f_2",
+    rule: "PROCESS_EXEC",
+    title: "Spawn child process",
+    package: "my-package",
+    evidence: [{ file: "src/installer.js", line: 12, snippet: "" }],
+    references: [],
+    severity: "critical",
+    category: "Behavior",
+    confidence: "high",
+    observed: "",
+    explanation: "",
+    implication: "",
+    recommendation: "",
+  };
+  const sigBehav = getFindingSignature(fBehav);
+  assert.equal(sigBehav, "behavior:PROCESS_EXEC:my-package:src/installer.js");
+
+  // Version comparison
+  assert.equal(compareSemver("4.17.21", "4.17.20"), 1); // upgraded
+  assert.equal(compareSemver("4.17.19", "4.17.20"), -1); // downgraded
+  assert.equal(compareSemver("1.0.0", "1.0.0"), 0); // unchanged
+  assert.equal(compareSemver("2.0.0-beta.2", "2.0.0-beta.1"), 1);
 });
