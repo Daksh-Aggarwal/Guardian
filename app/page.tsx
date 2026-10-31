@@ -568,24 +568,6 @@ export default function Home() {
               {dark ? <Sun size={17} /> : <Moon size={17} />}
             </button>
 
-            <button
-              type="button"
-              className="btn-new-scan-top"
-              onClick={() => {
-                navigate("Overview");
-                setTimeout(
-                  () =>
-                    document
-                      .getElementById("new-scan")
-                      ?.scrollIntoView({ behavior: "smooth", block: "center" }),
-                  50,
-                );
-              }}
-            >
-              <Plus size={15} />
-              <span>New scan</span>
-            </button>
-
             <span className="header-avatar" title="Local session">
               Y
             </span>
@@ -790,17 +772,6 @@ export default function Home() {
                         </button>
                       </div>
 
-                      <button
-                        type="button"
-                        className="btn-scan-hero"
-                        onClick={() => {
-                          document.getElementById("new-scan")?.scrollIntoView({ behavior: "smooth", block: "center" });
-                        }}
-                        title="Jump directly to package scan"
-                      >
-                        <Plus size={15} />
-                        <span>Scan Package</span>
-                      </button>
                     </div>
 
                     <div className="heatmap-body">
