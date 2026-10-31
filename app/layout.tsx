@@ -1,4 +1,5 @@
 import MotionPreferences from "@/components/motion-preferences";
+import SmoothScroll from "@/components/smooth-scroll";
 import type { Metadata } from "next";
 import "./globals.css";
 import "./signal-fonts.css";
@@ -14,7 +15,11 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body><MotionPreferences>{children}</MotionPreferences></body>
+      <body>
+        <MotionPreferences>
+          <SmoothScroll>{children}</SmoothScroll>
+        </MotionPreferences>
+      </body>
     </html>
   );
 }
