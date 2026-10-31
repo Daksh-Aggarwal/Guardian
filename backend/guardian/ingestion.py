@@ -9,12 +9,14 @@ import zipfile
 from pathlib import PurePosixPath
 from urllib.parse import quote, urlparse
 import httpx
+import yaml
 
 MAX_UPLOAD = 10 * 1024 * 1024
 MAX_EXPANDED = 25 * 1024 * 1024
 MAX_FILE = 1024 * 1024
 MAX_FILES = 500
-EXTENSIONS = {'.js', '.cjs', '.mjs', '.jsx', '.ts', '.tsx', '.json'}
+EXTENSIONS = {'.js', '.cjs', '.mjs', '.jsx', '.ts', '.tsx', '.json', '.yaml', '.yml', '.lock'}
+SUPPORTED_MANIFESTS = {'package.json', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock'}
 
 def safe_name(name):
     if not name or not isinstance(name, str):
@@ -92,17 +94,29 @@ def uploaded(name, data):
         raise ValueError('Upload exceeds the 10 MB limit.')
     if name.lower().endswith('.zip'):
         return archive(data)
-    if name not in {'package.json', 'package-lock.json'}:
-        raise ValueError('Upload a project ZIP, package.json, or package-lock.json.')
+    if name not in SUPPORTED_MANIFESTS:
+        raise ValueError('Upload a project ZIP, package.json, package-lock.json, pnpm-lock.yaml, or yarn.lock.')
     if len(data) > MAX_FILE:
         raise ValueError('Manifest exceeds the 1 MB limit.')
     try:
         text = data.decode('utf-8')
-        parsed = json.loads(text)
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        raise ValueError('Manifest must be valid UTF-8 JSON.')
-    if not isinstance(parsed, dict):
-        raise ValueError('Manifest must be a JSON object.')
+    except UnicodeDecodeError:
+        raise ValueError('Manifest must be valid UTF-8.')
+
+    if name.endswith('.json'):
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            raise ValueError('Manifest must be valid UTF-8 JSON.')
+        if not isinstance(parsed, dict):
+            raise ValueError('Manifest must be a JSON object.')
+    elif name in {'pnpm-lock.yaml', 'yarn.lock'}:
+        try:
+            parsed = yaml.safe_load(text)
+        except Exception:
+            raise ValueError(f'Manifest {name} must be valid YAML.')
+        if not isinstance(parsed, dict):
+            raise ValueError(f'Manifest {name} must be a YAML mapping.')
     return {name: text}, []
 
 def download(url, limit=MAX_UPLOAD, timeout=15):
