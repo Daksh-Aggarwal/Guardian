@@ -62,7 +62,6 @@ import { resolveProjectDirectoryId } from "@/lib/project-identity";
 
 export type WorkspaceTab =
   | "Overview"
-  | "Dependency Graph"
   | "Vulnerabilities"
   | "Behavioral Flows"
   | "Remediation History"
@@ -361,7 +360,7 @@ export default function ProjectWorkspace({
 
   function handleNavigateToGraph(packageName: string) {
     setGraphFocusPackage(packageName);
-    setActiveTab("Dependency Graph");
+    setActiveTab("Overview");
   }
 
   return (
@@ -690,13 +689,12 @@ export default function ProjectWorkspace({
         </div>
       )}
 
-      {/* 6 Workspace Navigation Tabs */}
+      {/* 5 Workspace Navigation Tabs */}
       <nav className="workspace-nav-bar" role="tablist">
         {[
-          { name: "Overview" as const, icon: Layers, count: undefined },
           {
-            name: "Dependency Graph" as const,
-            icon: GitBranch,
+            name: "Overview" as const,
+            icon: Layers,
             count: deps?.totalResolved || 0,
           },
           {
@@ -736,9 +734,9 @@ export default function ProjectWorkspace({
         ))}
       </nav>
 
-      {/* TAB 1: OVERVIEW */}
+      {/* TAB 1: OVERVIEW & LIVE DEPENDENCY GRAPH */}
       {activeTab === "Overview" && activeReport && breakdown && deps && (
-        <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
           {/* Quick Metrics Grid */}
           <div
             style={{
@@ -748,11 +746,19 @@ export default function ProjectWorkspace({
             }}
           >
             <div className="card" style={{ padding: "16px" }}>
-              <span style={{ fontSize: "11px", color: "var(--muted)" }}>
+              <span
+                style={{
+                  fontSize: "11px",
+                  color: "var(--muted)",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.05em",
+                  fontWeight: 600,
+                }}
+              >
                 TOTAL DEPENDENCIES
               </span>
               <strong
-                style={{ display: "block", fontSize: "20px", marginTop: "4px" }}
+                style={{ display: "block", fontSize: "22px", marginTop: "4px" }}
               >
                 {deps.totalResolved}
               </strong>
@@ -763,15 +769,26 @@ export default function ProjectWorkspace({
             </div>
 
             <div className="card" style={{ padding: "16px" }}>
-              <span style={{ fontSize: "11px", color: "var(--muted)" }}>
+              <span
+                style={{
+                  fontSize: "11px",
+                  color: "var(--muted)",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.05em",
+                  fontWeight: 600,
+                }}
+              >
                 ACTIONABLE FINDINGS
               </span>
               <strong
                 style={{
                   display: "block",
-                  fontSize: "20px",
+                  fontSize: "22px",
                   marginTop: "4px",
-                  color: breakdown.actionable > 0 ? "#f87171" : "#10b981",
+                  color:
+                    breakdown.actionable > 0
+                      ? "var(--danger, #ffaca1)"
+                      : "var(--accent, #c5f467)",
                 }}
               >
                 {breakdown.actionable}
@@ -782,15 +799,26 @@ export default function ProjectWorkspace({
             </div>
 
             <div className="card" style={{ padding: "16px" }}>
-              <span style={{ fontSize: "11px", color: "var(--muted)" }}>
+              <span
+                style={{
+                  fontSize: "11px",
+                  color: "var(--muted)",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.05em",
+                  fontWeight: 600,
+                }}
+              >
                 KNOWN VULNERABILITIES
               </span>
               <strong
                 style={{
                   display: "block",
-                  fontSize: "20px",
+                  fontSize: "22px",
                   marginTop: "4px",
-                  color: breakdown.advisories > 0 ? "#f87171" : "#10b981",
+                  color:
+                    breakdown.advisories > 0
+                      ? "var(--danger, #ffaca1)"
+                      : "var(--accent, #c5f467)",
                 }}
               >
                 {breakdown.advisories}
@@ -802,11 +830,19 @@ export default function ProjectWorkspace({
             </div>
 
             <div className="card" style={{ padding: "16px" }}>
-              <span style={{ fontSize: "11px", color: "var(--muted)" }}>
+              <span
+                style={{
+                  fontSize: "11px",
+                  color: "var(--muted)",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.05em",
+                  fontWeight: 600,
+                }}
+              >
                 SOURCE INSPECTION
               </span>
               <strong
-                style={{ display: "block", fontSize: "20px", marginTop: "4px" }}
+                style={{ display: "block", fontSize: "22px", marginTop: "4px" }}
               >
                 {deps.inspected} / {deps.totalResolved}
               </strong>
@@ -815,20 +851,18 @@ export default function ProjectWorkspace({
               </small>
             </div>
           </div>
-        </div>
-      )}
 
-      {/* TAB 2: DEPENDENCY GRAPH */}
-      {activeTab === "Dependency Graph" && activeReport && (
-        <DependencyGraph
-          report={activeReport}
-          selectedPackageName={graphFocusPackage}
-          onSelectFinding={(fid) => {
-            if (onOpenReportView) onOpenReportView(activeReport);
-          }}
-          onAskIntelligence={(fid) => openIntelligenceForFinding(fid)}
-          onRemediate={(fid) => openRemediationForFinding(fid)}
-        />
+          {/* Integrated Live Dependency Graph */}
+          <DependencyGraph
+            report={activeReport}
+            selectedPackageName={graphFocusPackage}
+            onSelectFinding={(fid) => {
+              if (onOpenReportView) onOpenReportView(activeReport);
+            }}
+            onAskIntelligence={(fid) => openIntelligenceForFinding(fid)}
+            onRemediate={(fid) => openRemediationForFinding(fid)}
+          />
+        </div>
       )}
 
       {/* TAB 3: VULNERABILITIES */}
