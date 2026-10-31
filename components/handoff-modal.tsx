@@ -117,6 +117,7 @@ export default function HandoffModal({
     null
   );
   const [copied, setCopied] = useState(false);
+  const requestIdRef = React.useRef(0);
 
   // Compute active finding IDs based on scopeType
   const activeFindingIds = useMemo(() => {
@@ -129,9 +130,10 @@ export default function HandoffModal({
     return null; // Entire scan
   }, [scopeType, initialFindingId, initialFindingIds]);
 
-  // Fetch handoff data when target, mode, or finding IDs change
+  // Fetch handoff data when target, mode, or finding IDs change with race-condition guard
   const fetchHandoff = useCallback(async () => {
     if (!isOpen || !report?.id) return;
+    const currentReqId = ++requestIdRef.current;
     setLoading(true);
     setError(null);
 
@@ -148,11 +150,17 @@ export default function HandoffModal({
           }),
         }
       );
-      setExportData(response);
+      if (currentReqId === requestIdRef.current) {
+        setExportData(response);
+      }
     } catch (err) {
-      setError((err as Error).message || "Failed to generate handoff bundle.");
+      if (currentReqId === requestIdRef.current) {
+        setError((err as Error).message || "Failed to generate handoff bundle.");
+      }
     } finally {
-      setLoading(false);
+      if (currentReqId === requestIdRef.current) {
+        setLoading(false);
+      }
     }
   }, [isOpen, report?.id, target, mode, activeFindingIds]);
 

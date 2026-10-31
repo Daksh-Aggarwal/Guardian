@@ -54,9 +54,17 @@
     - [x] Security Timeline: Chronological security posture timeline and side-by-side 2-scan delta comparator.
   - [x] Guardian Autopilot Multi-File Safety Hardening: Pre-flight create collision rejection, operational write journal, automatic removal of newly created files upon write failure, and safe undo removal of created files without touching user edits.
   - [x] Product Terminology Standardization: Guardian, Guardian Intelligence, Guardian Autopilot.
-- [x] Guardian Handoff 1.0 — AI-Agnostic Remediation & Agent Instruction Export:
+- [x] Guardian Handoff 1.0 & 1.0.1 — AI-Agnostic Remediation & Agent Instruction Export Hardening:
   - [x] Shared canonical handoff model (`CanonicalHandoff`, schema v1.0.0) grounding all target formats in identical scan truth.
-  - [x] Two distinct remediation modes: Focused Fix (targeted, minimal safe edits, regression tests) and Deep Security Remediation (transitive paths, shared dependencies, repo-wide pattern search, integrity).
+  - [x] Strict scope enforcement: zero silent fallback, empty selection rejection, duplicate normalization, and exact scope classification.
+  - [x] Substantive remediation mode divergence: Focused Fix (minimal safe edits, unit tests) vs Deep Security Remediation (transitive dependencies, shared package paths, pattern search, blast radius).
+  - [x] Evidence-grounded recommendations: explicit classification, candidate upgrade compatibility disclosures, lifecycle script native binding cautions, and workspace dataflow tracing requirements.
+  - [x] Exact ecosystem-aware package normalization: PEP 503 PyPI normalization, scoped npm package support, elimination of substring matching false positives.
+  - [x] Reconciled coverage accounting across inspected, skipped, unavailable, unresolved, integrity-failed, and not-attempted states.
+  - [x] Evidence-based provenance: accurate scanned commit SHA disclosures, no fabricated staleness.
+  - [x] Adversarial security hardening: context-aware escaping, dynamic code-fence backtick scaling, table cell escaping, and prompt-injection defense directives.
+  - [x] Ecosystem-aware validation guidance (npm, PyPI, and unknown).
+  - [x] API session/installation access boundary enforcement.
   - [x] Five tailored coding agent targets: Universal Markdown, Claude Code, Cursor, OpenAI Codex, and GitHub Copilot.
   - [x] Machine-readable JSON evidence appendix with versioned schema `1.0.0` preserving findings, advisories, CVSS, paths, and provenance.
   - [x] Automatic secret and credential redaction, markdown injection sanitization, and adversarial prompt injection defense.

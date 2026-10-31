@@ -438,6 +438,10 @@ export type ProposedRemediation = {
   action_type: "upgrade_dependency" | "remove_script" | "source_patch" | "investigate_manual";
   description: string;
   rationale: string;
+  affected_version?: string | null;
+  candidate_upgrade?: string | null;
+  compatibility_status?: string;
+  evidence_classification?: Record<string, string>;
   expected_benefits: string[];
   risks_and_tradeoffs: string[];
   alternatives: string[];
@@ -461,6 +465,7 @@ export type FollowUpInvestigation = {
 export type ProjectProvenance = {
   project_id?: string | null;
   name: string;
+  ecosystem?: string;
   framework?: string | null;
   runtime?: string | null;
   language?: string | null;
@@ -472,6 +477,8 @@ export type ProjectProvenance = {
   github_commit_sha?: string | null;
   github_repo_url?: string | null;
   is_snapshot_stale_warning: boolean;
+  snapshot_verification_status?: "verified_match" | "unverified_against_workspace" | "snapshot_expired";
+  staleness_detail?: string;
 };
 
 export type ScanProvenance = {
@@ -491,10 +498,13 @@ export type CoverageProvenance = {
   total_dependencies: number;
   direct_dependencies: number;
   transitive_dependencies: number;
+  unique_names_count?: number;
   inspected_count: number;
   skipped_count: number;
   unavailable_count: number;
+  unresolved_count?: number;
   integrity_failed_count: number;
+  not_attempted_count?: number;
   limitations: string[];
 };
 
