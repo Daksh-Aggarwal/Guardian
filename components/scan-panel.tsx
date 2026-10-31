@@ -156,8 +156,7 @@ export default function ScanPanel({
             disabled={disabled}
             title="Drop project archive or browse files"
             subtitle="Supports project .ZIP, package.json, package-lock.json, pnpm-lock.yaml, or yarn.lock"
-            hint="Bounded local memory inspection · Up to 10 MB · Code is never executed"
-            className="mb-4"
+            className="mb-3 min-h-[248px]"
           />
           {onConnectFolder && (
             <div className="connect-folder-hint">

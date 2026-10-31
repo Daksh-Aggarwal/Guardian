@@ -6476,7 +6476,11 @@ h1,h2,h3,h4,h5,h6 {line-height:1.2 !important;}
   margin-bottom: 16px !important;
 }
 .main-overview .dropzone-box {
-  padding: 22px 24px !important;
+  padding: 44px 24px !important;
+  min-height: 236px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: center !important;
   margin-bottom: 12px !important;
 }
 .main-overview .dropzone-icon-wrap {
@@ -6489,4 +6493,8 @@ h1,h2,h3,h4,h5,h6 {line-height:1.2 !important;}
 }
 .main-overview .launchpad-footer {
   margin-top: 16px !important;
+}
+
+.main-overview .launchpad-upload-area [class*="min-h-"] {
+  min-height: 248px !important;
 }
