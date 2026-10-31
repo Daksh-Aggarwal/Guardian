@@ -7,11 +7,11 @@ from pathlib import Path
 from uuid import uuid4
 from fastapi import FastAPI, File, HTTPException, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
-from . import ingestion, storage
+from . import ingestion, storage, advisor
 from .engine import analyze, assess, RANK, finding
 from .explanations import EvidenceExplainer
 from .intelligence import check_osv
-from .models import Dependency, PackageRequest, Question, Report, Evidence
+from .models import Dependency, PackageRequest, Question, Report, Evidence, AskRequest, AdvisorResponse, FindingCitation, AIStatus
 from .limits import RequestSizeLimit
 from .dependencies import RegistrySession, Retrieved, inspect_dependencies
 from .config import Budget
@@ -91,6 +91,17 @@ def run(job_id, loader, source, profile):
             else ('no dependencies' if (not inspection_summary or inspection_summary.total == 0) else 'incomplete')
         )
 
+        elevated_behavioral = [f for f in findings if f.domain == 'behavior' and f.rule != 'OSV' and f.severity != 'info']
+        if elevated_behavioral:
+            behavior_headline = risk
+        elif count == 0 or is_manifest_only or (inspection_summary and inspection_summary.total > 0 and inspection_summary.inspected == 0 and count == 0):
+            behavior_headline = "Behavioral assessment unavailable."
+            rationale = "No package or dependency source code was inspected. Review coverage and dependency details before making a trust decision."
+        elif source_coverage_incomplete:
+            behavior_headline = "No elevated signals in inspected content."
+        else:
+            behavior_headline = "No elevated behavioral signals."
+
         report = Report(
             id=job_id,
             name=name,
@@ -112,6 +123,7 @@ def run(job_id, loader, source, profile):
             assessments={
                 'behavior': {
                     'risk': risk,
+                    'headline': behavior_headline,
                     'rationale': rationale,
                     'coverage_status': source_coverage_status,
                     'files_inspected': count,
@@ -244,6 +256,88 @@ def report(scan_id: str):
     if not result:
         raise HTTPException(404, 'Report not found')
     return result
+
+@app.get('/api/ai/status')
+def ai_status():
+    return advisor.get_ai_status()
+
+@app.get('/api/scans/{scan_id}/conversation')
+def get_conversation(scan_id: str):
+    rep = storage.get(scan_id)
+    if not rep:
+        raise HTTPException(404, 'Report not found')
+    return storage.get_or_create_conversation(scan_id)
+
+@app.post('/api/scans/{scan_id}/conversation/message')
+def conversation_message(scan_id: str, request: AskRequest):
+    rep = storage.get(scan_id)
+    if not rep:
+        raise HTTPException(404, 'Report not found')
+    if request.finding_id and not any(f.id == request.finding_id for f in rep.findings):
+        raise HTTPException(404, 'Finding not found')
+
+    conv = storage.get_or_create_conversation(scan_id, request.conversation_id)
+    cfg = advisor.get_ai_config()
+    if len(conv.messages) >= cfg['max_turns'] * 2:
+        raise HTTPException(429, f"Conversation limit of {cfg['max_turns']} turns reached for this session. Please start a new conversation.")
+
+    # Save user message locally
+    storage.save_message(
+        scan_id=scan_id,
+        conversation_id=conv.id,
+        role='user',
+        content=request.question
+    )
+
+    # Generate answer from selected advisor (Gemini or Deterministic)
+    adv = advisor.get_advisor(consent=request.consent)
+    ans = adv.answer(
+        report=rep,
+        question=request.question,
+        finding_id=request.finding_id,
+        history=conv.messages,
+        mode=request.mode
+    )
+
+    # Save assistant message locally
+    citations = [FindingCitation.model_validate(c) for c in ans.get('citations', [])]
+    assistant_msg = storage.save_message(
+        scan_id=scan_id,
+        conversation_id=conv.id,
+        role='assistant',
+        content=ans.get('answer', ''),
+        citations=citations,
+        limitations=ans.get('limitations', []),
+        suggested_followups=ans.get('suggested_followups', []),
+        provider=ans.get('provider', 'deterministic'),
+        model=ans.get('model')
+    )
+
+    return AdvisorResponse(
+        answer=ans.get('answer', ''),
+        citations=citations,
+        limitations=ans.get('limitations', []),
+        suggested_followups=ans.get('suggested_followups', []),
+        provider=ans.get('provider', 'deterministic'),
+        model=ans.get('model'),
+        conversation_id=conv.id,
+        message_id=assistant_msg.id
+    )
+
+@app.delete('/api/scans/{scan_id}/conversation')
+def clear_conversation(scan_id: str):
+    rep = storage.get(scan_id)
+    if not rep:
+        raise HTTPException(404, 'Report not found')
+    storage.clear_conversation(scan_id)
+    return {'status': 'cleared'}
+
+@app.post('/api/scans/{scan_id}/conversation/new')
+def new_conversation(scan_id: str):
+    rep = storage.get(scan_id)
+    if not rep:
+        raise HTTPException(404, 'Report not found')
+    return storage.new_conversation(scan_id)
 
 @app.post('/api/scans/{scan_id}/explain')
 def explain(scan_id: str, question: Question):

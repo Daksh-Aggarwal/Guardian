@@ -116,5 +116,56 @@ class Advisory(BaseModel):
     aliases: List[str] = Field(default_factory=list)
     detail_status: str = 'unavailable'
 
+class FindingCitation(BaseModel):
+    finding_id: str
+    title: str
+    text: str
+    evidence_ref: Optional[str] = None
+
+class ConversationMessage(BaseModel):
+    id: str
+    conversation_id: str
+    scan_id: str
+    role: Literal['user', 'assistant']
+    content: str
+    citations: List[FindingCitation] = Field(default_factory=list)
+    limitations: List[str] = Field(default_factory=list)
+    suggested_followups: List[str] = Field(default_factory=list)
+    provider: str
+    model: Optional[str] = None
+    created_at: str
+
+class ConversationSession(BaseModel):
+    id: str
+    scan_id: str
+    messages: List[ConversationMessage] = Field(default_factory=list)
+    created_at: str
+    updated_at: str
+
+class AskRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=1000)
+    finding_id: Optional[str] = None
+    mode: Literal['simple', 'advanced'] = 'simple'
+    consent: bool = False
+    conversation_id: Optional[str] = None
+
+class AdvisorResponse(BaseModel):
+    answer: str
+    citations: List[FindingCitation] = Field(default_factory=list)
+    limitations: List[str] = Field(default_factory=list)
+    suggested_followups: List[str] = Field(default_factory=list)
+    provider: str
+    model: Optional[str] = None
+    conversation_id: str
+    message_id: str
+
+class AIStatus(BaseModel):
+    enabled: bool
+    provider: str
+    model: str
+    has_key: bool
+    timeout_seconds: int
+    max_turns: int
+
 Finding.model_rebuild()
 Report.model_rebuild()

@@ -20,8 +20,11 @@
 - `scripts/static-flow.cjs`: scope-aware lexical bindings, interprocedural parameter propagation, object fields, destructuring, and static ESM/CJS cross-file data-flow tracking.
 - `backend/guardian/intelligence.py`: exact-version OSV batch queries, bounded advisory enrichment (CVSS, ranges, fixes), validation guards, and coverage tracking.
 - `backend/guardian/explanations.py`: `EvidenceExplainer` deterministic provider citing existing findings.
-- `backend/guardian/storage.py`: SQLite report persistence and historical retrieval.
-- `backend/guardian/main.py`: FastAPI application, bounded two-job concurrency semaphore, thread lifecycle with six explicit job states (`queued`, `running`, `cancelling`, `cancelled`, `complete`, `failed`), atomic check-before-save, idempotent cancellation, and API routes.
+- `backend/guardian/advisor.py`: `GeminiAdvisor` provider using `google-genai` SDK, structured output parsing, citation validation, prompt-injection defense fences, and provider factory (`get_advisor`).
+- `backend/guardian/context.py`: privacy-first context builder, duplicate advisory aggregation, relevant finding selection, and bounded conversation history.
+- `backend/guardian/redact.py`: automated secret redaction layer stripping API keys, tokens, JWTs, private keys, passwords, and auth headers before external transmission.
+- `backend/guardian/storage.py`: SQLite report persistence, historical retrieval, and report-scoped multi-turn conversation and message persistence.
+- `backend/guardian/main.py`: FastAPI application, bounded two-job concurrency semaphore, thread lifecycle with six explicit job states (`queued`, `running`, `cancelling`, `cancelled`, `complete`, `failed`), atomic check-before-save, idempotent cancellation, conversational intelligence endpoints, and API routes.
 
 ## Data flow
 
@@ -42,6 +45,7 @@ Workers perform an atomic check under concurrency lock immediately before callin
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/health` | Backend health and engine version |
+| GET | `/api/ai/status` | AI provider configuration and availability status (no secrets) |
 | GET | `/api/scans` | Latest 50 stored reports |
 | POST | `/api/scans/upload` | Multipart `files` (ZIP or manifests) + optional `profile` form parameter (`fast` / `deep`); returns job ID |
 | POST | `/api/scans/package` | JSON `name`, `version`, optional `profile` (`fast` / `deep`); returns job ID |
@@ -50,7 +54,11 @@ Workers perform an atomic check under concurrency lock immediately before callin
 | GET | `/api/jobs/{id}` | Job state (`queued`, `running`, `cancelling`, `cancelled`, `complete`, `failed`) and stage |
 | POST | `/api/jobs/{id}/cancel` | Cancel an active scan job cooperatively and release worker slot |
 | GET | `/api/scans/{id}` | Full immutable report |
-| POST | `/api/scans/{id}/explain` | Contextual grounded explanation query |
+| GET | `/api/scans/{id}/conversation` | Report-scoped conversation messages |
+| POST | `/api/scans/{id}/conversation/message` | Send contextual question to advisor (Gemini/deterministic) |
+| DELETE | `/api/scans/{id}/conversation` | Clear conversation history for report |
+| POST | `/api/scans/{id}/conversation/new` | Start a new conversation session for report |
+| POST | `/api/scans/{id}/explain` | Contextual grounded explanation query (legacy compatibility) |
 
 ## Analysis and risk
 

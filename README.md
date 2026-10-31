@@ -48,6 +48,16 @@
 - ZIP uploads, individual or paired npm manifests, and direct npm registry name/version inspection.
 - SQLite report history, shareable local report URLs (`?scan=<id>`), and complete JSON export.
 - Simple/Advanced modes over identical findings, source evidence, recommendations, coverage gaps, and contextual deterministic explanations.
+- Guardian Cognitive Intelligence 1.0 (LLM-Powered Security Advisor):
+  - Natural-language reasoning grounded strictly in Guardian's deterministic findings and evidence.
+  - Google Gemini API integration using official `google-genai` Python SDK (`from google import genai`) with configurable models (`gemini-3.8-flash` by default).
+  - Explicit privacy consent required before any external inference; transparent disclosure of data shared vs retained locally.
+  - Automated secret redaction layer stripping API keys, tokens, credentials, private keys, and auth headers before context transmission.
+  - Dedicated context minimization and duplicate advisory aggregation (grouping repeated GHSA/CVE advisories across dependencies).
+  - Multi-turn report-scoped conversation sessions with bounded recent history and local SQLite persistence.
+  - Strict citation validation: every citation must reference an existing report finding; fabricated citations are automatically rejected.
+  - Resilient provider fallback: graceful degradation to local deterministic explanations upon missing API key, AI disablement, network failure, or API quota/timeout.
+  - Coverage-aware behavioral presentation distinguishing complete source coverage, partial coverage, and unavailable assessments.
 - Eight synthetic fixtures, including benign HTTP/environment access, sensitive data flow, and installer behaviors. Fixture source is test data: never execute it.
 
 ## Setup
@@ -91,6 +101,23 @@ Operator budget ceilings:
 - `GUARDIAN_DOWNLOAD_MB` (default: 20 fast, 50 deep, max ceiling: 100)
 - `GUARDIAN_EXPANDED_MB` (default: 40 fast, 80 deep, max ceiling: 150)
 - `GUARDIAN_DB` overrides the SQLite path (default: `backend/guardian.sqlite3`).
+
+### Guardian Intelligence (Gemini Advisor) Configuration
+
+Guardian Intelligence is disabled by default and runs entirely deterministically unless explicitly enabled with a configured API key:
+
+- `GUARDIAN_AI_ENABLED`: Set to `true` to enable external LLM reasoning.
+- `GUARDIAN_AI_PROVIDER`: Provider name (default: `gemini`).
+- `GEMINI_API_KEY`: Google Gemini API key (never transmitted to browser or exposed in reports/logs).
+- `GEMINI_MODEL`: Model identifier (default: `gemini-3.8-flash`).
+- `GUARDIAN_AI_TIMEOUT_SECONDS`: Request timeout in seconds (default: `30`).
+- `GUARDIAN_AI_MAX_TURNS`: Max turns per report conversation (default: `30`).
+
+To run with Gemini enabled:
+
+```sh
+GUARDIAN_AI_ENABLED=true GEMINI_API_KEY=your_key .venv/bin/python -m uvicorn backend.guardian.main:app --host 127.0.0.1 --port 8000
+```
 
 Stored evidence snippets may contain sensitive data: the local database and JSON exports should be treated as private.
 

@@ -15,6 +15,7 @@ export type ScanJob = {
 export type ReportAssessments = {
   behavior?: {
     risk: string;
+    headline?: string;
     rationale: string;
     coverage_status?: string;
     files_inspected?: number;
@@ -84,6 +85,55 @@ export type Answer = {
   answer: string;
   citations: { finding_id: string; title: string; text: string }[];
   limitations: string[];
+};
+
+export type FindingCitation = {
+  finding_id: string;
+  title: string;
+  text: string;
+  evidence_ref?: string | null;
+};
+
+export type ConversationMessage = {
+  id: string;
+  conversation_id: string;
+  scan_id: string;
+  role: "user" | "assistant";
+  content: string;
+  citations: FindingCitation[];
+  limitations: string[];
+  suggested_followups: string[];
+  provider: string;
+  model?: string | null;
+  created_at: string;
+};
+
+export type ConversationSession = {
+  id: string;
+  scan_id: string;
+  messages: ConversationMessage[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type AdvisorResponse = {
+  answer: string;
+  citations: FindingCitation[];
+  limitations: string[];
+  suggested_followups: string[];
+  provider: string;
+  model?: string | null;
+  conversation_id: string;
+  message_id: string;
+};
+
+export type AIStatus = {
+  enabled: boolean;
+  provider: string;
+  model: string;
+  has_key: boolean;
+  timeout_seconds: number;
+  max_turns: number;
 };
 export async function api<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch("/api" + path, options);

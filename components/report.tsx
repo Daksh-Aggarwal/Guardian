@@ -48,6 +48,28 @@ export default function ReportView({
     high = report.findings
       .filter((f) => (!f.domain || f.domain === "behavior") && f.rule !== "OSV")
       .some((f) => ["high", "critical"].includes(f.severity));
+  const behavioralHeadline =
+    report.assessments?.behavior?.headline ||
+    (displayElevated.length
+      ? report.risk
+      : report.files_analyzed === 0 ||
+          report.assessments?.behavior?.coverage_status === "manifest_only"
+        ? "Behavioral assessment unavailable."
+        : report.assessments?.behavior?.coverage_status === "incomplete"
+          ? "No elevated signals in inspected content."
+          : "No elevated behavioral signals.");
+  const isBehaviorUnavailable =
+    !displayElevated.length &&
+    (behavioralHeadline.includes("unavailable") ||
+      report.files_analyzed === 0 ||
+      report.assessments?.behavior?.coverage_status === "manifest_only");
+  const verdictClass = high
+    ? "concern"
+    : displayElevated.length
+      ? "review"
+      : isBehaviorUnavailable
+        ? "unavailable"
+        : "calm";
   const visible = report.findings.filter(
     (f) => filter === "all" || f.severity === filter,
   );
@@ -117,12 +139,12 @@ export default function ReportView({
           </button>
         </div>
       </div>
-      <section
-        className={`verdict ${high ? "concern" : displayElevated.length ? "review" : "calm"}`}
-      >
+      <section className={`verdict ${verdictClass}`}>
         <div className="verdict-symbol">
           {displayElevated.length ? (
             <AlertTriangle size={29} />
+          ) : isBehaviorUnavailable ? (
+            <Info size={29} />
           ) : (
             <ShieldCheck size={29} />
           )}
@@ -131,7 +153,7 @@ export default function ReportView({
           <Eyebrow>
             {isV2 ? "BEHAVIORAL ASSESSMENT" : "OVERALL ASSESSMENT"}
           </Eyebrow>
-          <h2>{report.risk}</h2>
+          <h2>{isV2 ? behavioralHeadline : report.risk}</h2>
           <p>{report.rationale}</p>
         </div>
         <div className="verdict-count">
@@ -440,7 +462,12 @@ export default function ReportView({
               </div>
             </div>
           )}
-          <Explainer key={report.id} report={report} onFinding={focus} />
+          <Explainer
+            key={report.id}
+            report={report}
+            onFinding={focus}
+            advanced={advanced}
+          />
         </div>
         <aside className="report-aside">
           <div className="card">

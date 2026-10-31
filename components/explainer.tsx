@@ -1,109 +1,647 @@
 "use client";
-import { useState } from "react";
-import { Sparkles, ArrowUp, Loader2, ChevronRight } from "lucide-react";
-import { api, Answer, Report } from "@/lib/types";
+
+import { useState, useEffect, useRef } from "react";
+import {
+  Sparkles,
+  ArrowUp,
+  Loader2,
+  ChevronRight,
+  Shield,
+  ShieldCheck,
+  RotateCcw,
+  PlusCircle,
+  AlertTriangle,
+  Info,
+  CheckCircle2,
+  ChevronDown,
+} from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  api,
+  Report,
+  Finding,
+  ConversationMessage,
+  ConversationSession,
+  AdvisorResponse,
+  AIStatus,
+} from "@/lib/types";
+
+// Lightweight safe markdown renderer for assistant responses
+function renderMarkdown(text: string) {
+  const lines = text.split("\n");
+  const elements: React.ReactNode[] = [];
+  let inCodeBlock = false;
+  let codeBlockContent: string[] = [];
+  let listItems: string[] = [];
+
+  function flushList() {
+    if (listItems.length > 0) {
+      elements.push(
+        <ul key={`list-${elements.length}`}>
+          {listItems.map((item, idx) => (
+            <li key={idx}>{parseInlineMarkdown(item)}</li>
+          ))}
+        </ul>,
+      );
+      listItems = [];
+    }
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    if (line.startsWith("```")) {
+      if (inCodeBlock) {
+        elements.push(
+          <pre key={`code-${elements.length}`}>
+            <code>{codeBlockContent.join("\n")}</code>
+          </pre>,
+        );
+        codeBlockContent = [];
+        inCodeBlock = false;
+      } else {
+        flushList();
+        inCodeBlock = true;
+      }
+      continue;
+    }
+
+    if (inCodeBlock) {
+      codeBlockContent.push(line);
+      continue;
+    }
+
+    if (line.trim().startsWith("- ") || line.trim().startsWith("* ")) {
+      listItems.push(line.trim().substring(2));
+      continue;
+    } else {
+      flushList();
+    }
+
+    if (!line.trim()) {
+      continue;
+    }
+
+    elements.push(
+      <p key={`p-${elements.length}`}>{parseInlineMarkdown(line)}</p>,
+    );
+  }
+
+  flushList();
+  if (inCodeBlock && codeBlockContent.length > 0) {
+    elements.push(
+      <pre key={`code-${elements.length}`}>
+        <code>{codeBlockContent.join("\n")}</code>
+      </pre>,
+    );
+  }
+
+  return <div className="markdown-content">{elements}</div>;
+}
+
+function parseInlineMarkdown(text: string): React.ReactNode[] {
+  // Simple regex parser for bold **text** and inline `code`
+  const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g);
+  return parts.map((part, index) => {
+    if (part.startsWith("`") && part.endsWith("`")) {
+      return <code key={index}>{part.slice(1, -1)}</code>;
+    }
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return <strong key={index}>{part.slice(2, -2)}</strong>;
+    }
+    return part;
+  });
+}
+
 export default function Explainer({
   report,
   onFinding,
+  advanced = false,
 }: {
   report: Report;
   onFinding: (id: string) => void;
+  advanced?: boolean;
 }) {
-  const [question, setQuestion] = useState(""),
-    [answer, setAnswer] = useState<Answer | null>(null),
-    [busy, setBusy] = useState(false),
-    [error, setError] = useState("");
-  async function ask(q: string) {
-    if (!q.trim()) return;
-    setBusy(true);
-    setError("");
+  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<ConversationMessage[]>([]);
+  const [input, setInput] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [aiStatus, setAiStatus] = useState<AIStatus | null>(null);
+  const [consent, setConsent] = useState(false);
+  const [showPrivacyBanner, setShowPrivacyBanner] = useState(false);
+  const [expandedCitations, setExpandedCitations] = useState<
+    Record<string, boolean>
+  >({});
+
+  const chatBottomRef = useRef<HTMLDivElement>(null);
+
+  // Initialize consent from localStorage and fetch AI status
+  useEffect(() => {
     try {
-      setAnswer(
-        await api(`/scans/${report.id}/explain`, {
+      const stored = localStorage.getItem("guardian_ai_consent");
+      if (stored === "true") {
+        setConsent(true);
+      }
+    } catch {}
+
+    api<AIStatus>("/ai/status")
+      .then((status) => setAiStatus(status))
+      .catch(() => {});
+  }, []);
+
+  // Fetch or create conversation on report load
+  useEffect(() => {
+    let active = true;
+    api<ConversationSession>(`/scans/${report.id}/conversation`)
+      .then((session) => {
+        if (active) {
+          setConversationId(session.id);
+          setMessages(session.messages || []);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [report.id]);
+
+  // Scroll to bottom when messages update
+  useEffect(() => {
+    chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, busy]);
+
+  function handleConsentChange(value: boolean) {
+    setConsent(value);
+    try {
+      localStorage.setItem("guardian_ai_consent", value ? "true" : "false");
+    } catch {}
+  }
+
+  async function sendMessage(questionText: string) {
+    const q = questionText.trim();
+    if (!q || busy) return;
+
+    setBusy(true);
+    setError(null);
+
+    // Optimistic temporary user message
+    const tempUserMsg: ConversationMessage = {
+      id: "temp-" + Date.now(),
+      conversation_id: conversationId || "new",
+      scan_id: report.id,
+      role: "user",
+      content: q,
+      citations: [],
+      limitations: [],
+      suggested_followups: [],
+      provider: aiStatus?.enabled && consent ? "gemini" : "deterministic",
+      created_at: new Date().toISOString(),
+    };
+    setMessages((prev) => [...prev, tempUserMsg]);
+    setInput("");
+
+    try {
+      const response = await api<AdvisorResponse>(
+        `/scans/${report.id}/conversation/message`,
+        {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ question: q }),
-        }),
+          body: JSON.stringify({
+            question: q,
+            consent: consent,
+            conversation_id: conversationId,
+            mode: advanced ? "advanced" : "simple",
+          }),
+        },
       );
-      setQuestion("");
-    } catch (e) {
-      setError((e as Error).message);
+
+      setConversationId(response.conversation_id);
+
+      const assistantMsg: ConversationMessage = {
+        id: response.message_id,
+        conversation_id: response.conversation_id,
+        scan_id: report.id,
+        role: "assistant",
+        content: response.answer,
+        citations: response.citations || [],
+        limitations: response.limitations || [],
+        suggested_followups: response.suggested_followups || [],
+        provider: response.provider,
+        model: response.model,
+        created_at: new Date().toISOString(),
+      };
+
+      setMessages((prev) => [
+        ...prev.filter((m) => m.id !== tempUserMsg.id),
+        tempUserMsg,
+        assistantMsg,
+      ]);
+    } catch (err) {
+      setError((err as Error).message || "Failed to retrieve explanation.");
+      // Roll back optimistic message on failure
+      setMessages((prev) => prev.filter((m) => m.id !== tempUserMsg.id));
+      setInput(q);
     } finally {
       setBusy(false);
     }
   }
+
+  async function handleClearConversation() {
+    try {
+      await api(`/scans/${report.id}/conversation`, { method: "DELETE" });
+      setMessages([]);
+      setError(null);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  async function handleNewConversation() {
+    try {
+      const res = await api<ConversationSession>(
+        `/scans/${report.id}/conversation/new`,
+        { method: "POST" },
+      );
+      setConversationId(res.id);
+      setMessages([]);
+      setError(null);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  // Dynamic suggested prompts derived from current report findings
+  const highFinding = report.findings.find((f) =>
+    ["high", "critical"].includes(f.severity),
+  );
+  const hasAdvisories = report.findings.some(
+    (f) => f.rule === "OSV" || f.advisory,
+  );
+  const dataFlowFinding = report.findings.find(
+    (f) => f.data_flows && f.data_flows.length > 0,
+  );
+
+  const dynamicSuggestions: string[] = [];
+  if (highFinding) {
+    dynamicSuggestions.push(`Why is "${highFinding.title}" dangerous?`);
+  }
+  if (hasAdvisories) {
+    dynamicSuggestions.push(
+      `Does the advisory apply to our version ${report.version}?`,
+    );
+  }
+  if (dataFlowFinding) {
+    dynamicSuggestions.push("Explain the sensitive data-flow path");
+  }
+  dynamicSuggestions.push("What practical steps should we take first?");
+  dynamicSuggestions.push("Is this package safe to use in production?");
+
+  const suggestionsToShow = dynamicSuggestions.slice(0, 3);
+  const activeProvider =
+    aiStatus?.enabled && consent ? "gemini" : "deterministic";
+  const activeModel = aiStatus?.model || "gemini-3.8-flash";
+
   return (
     <section className="card explainer">
-      <div className="section-heading">
+      {/* Header */}
+      <div className="assistant-header">
         <div className="inline">
           <span className="spark-icon">
             <Sparkles size={19} />
           </span>
           <div>
-            <h3>A little more clarity.</h3>
-            <p>Ask about the evidence in this report.</p>
+            <h3 style={{ margin: 0, fontSize: "14px", fontWeight: 600 }}>
+              Guardian Intelligence
+            </h3>
+            <p style={{ margin: 0, fontSize: "11px", color: "var(--muted)" }}>
+              Contextual security advisor grounded in verified findings.
+            </p>
           </div>
         </div>
-        <span className="small-label">GROUNDED EXPLANATIONS</span>
-      </div>
-      <div className="suggestions">
-        {[
-          "Can I trust this package?",
-          "What should I do next?",
-          "Explain the highest risk",
-        ].map((q) => (
-          <button key={q} disabled={busy} onClick={() => ask(q)}>
-            {q}
-            <ChevronRight size={13} />
+
+        <div className="assistant-badges">
+          <span className={`intelligence-badge ${activeProvider}`}>
+            <span
+              className={`status-dot ${activeProvider === "gemini" ? "pulse-dot" : ""}`}
+            />
+            {activeProvider === "gemini" ? activeModel : "Deterministic Engine"}
+          </span>
+
+          <button
+            type="button"
+            className="ghost-btn"
+            onClick={() => setShowPrivacyBanner((prev) => !prev)}
+            title="Inspect privacy boundary and AI consent"
+          >
+            {consent ? (
+              <ShieldCheck size={13} color="#409379" />
+            ) : (
+              <Shield size={13} />
+            )}
+            {consent ? "AI Enabled" : "Privacy / Local"}
           </button>
-        ))}
-      </div>
-      {answer && (
-        <div className="answer" aria-live="polite">
-          <p>{answer.answer}</p>
-          {answer.citations.map((c) => (
-            <div key={c.finding_id}>
+
+          {messages.length > 0 && (
+            <>
               <button
-                className="text-link"
-                onClick={() => onFinding(c.finding_id)}
+                type="button"
+                className="ghost-btn"
+                onClick={handleNewConversation}
+                disabled={busy}
+                title="Start a new conversation"
               >
-                {c.title}
-                <ChevronRight size={14} />
+                <PlusCircle size={13} />
+                New
               </button>
-              <p>{c.text}</p>
-            </div>
+              <button
+                type="button"
+                className="ghost-btn"
+                onClick={handleClearConversation}
+                disabled={busy}
+                title="Clear conversation history"
+              >
+                <RotateCcw size={13} />
+                Clear
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Privacy Consent Disclosure Drawer */}
+      <AnimatePresence>
+        {showPrivacyBanner && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="privacy-banner"
+          >
+            <h4>
+              <Shield size={14} /> Privacy-First Intelligence Boundary
+            </h4>
+            <p style={{ color: "var(--muted)", margin: "4px 0" }}>
+              Guardian uses local-first static analysis. When AI is enabled,
+              contextual findings are analyzed using Google Gemini:
+            </p>
+            <ul>
+              <li>
+                Package identifiers, assessment summaries, and finding IDs are
+                included.
+              </li>
+              <li>
+                Relevant code snippets are redacted for API keys, tokens, and
+                private secrets.
+              </li>
+              <li>
+                Uploaded project archives and complete source trees are{" "}
+                <strong>never</strong> transmitted.
+              </li>
+              <li>
+                Local deterministic explanations remain fully available without
+                cloud inference.
+              </li>
+            </ul>
+
+            <label className="privacy-consent-toggle">
+              <input
+                type="checkbox"
+                checked={consent}
+                onChange={(e) => handleConsentChange(e.target.checked)}
+              />
+              <span>
+                I consent to sending selected report findings to Google Gemini (
+                {activeModel})
+              </span>
+            </label>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Suggested prompts on empty chat */}
+      {messages.length === 0 && (
+        <div className="suggestions">
+          {suggestionsToShow.map((q) => (
+            <button key={q} disabled={busy} onClick={() => sendMessage(q)}>
+              {q}
+              <ChevronRight size={13} />
+            </button>
           ))}
         </div>
       )}
+
+      {/* Conversation Thread */}
+      {messages.length > 0 && (
+        <div className="conversation-feed" aria-live="polite">
+          {messages.map((msg, index) => (
+            <motion.div
+              key={msg.id || index}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className={`msg-row ${msg.role}`}
+            >
+              <div className="msg-meta">
+                <span>
+                  {msg.role === "user" ? "You" : "Guardian Intelligence"}
+                </span>
+                {msg.role === "assistant" && (
+                  <span style={{ opacity: 0.7 }}>
+                    ·{" "}
+                    {msg.provider === "gemini"
+                      ? msg.model || "Gemini"
+                      : "Deterministic"}
+                  </span>
+                )}
+              </div>
+
+              <div className={`msg-bubble ${msg.role}`}>
+                {msg.role === "user" ? (
+                  <p style={{ margin: 0 }}>{msg.content}</p>
+                ) : (
+                  <>
+                    {renderMarkdown(msg.content)}
+
+                    {/* Grounded Citations */}
+                    {msg.citations && msg.citations.length > 0 && (
+                      <div className="citations-group">
+                        <span>Report Evidence Citations:</span>
+                        <div className="citation-chips">
+                          {msg.citations.map((c, ci) => {
+                            const isExpanded =
+                              expandedCitations[`${msg.id}-${ci}`];
+                            return (
+                              <div
+                                key={ci}
+                                style={{
+                                  display: "flex",
+                                  flexDirection: "column",
+                                }}
+                              >
+                                <button
+                                  type="button"
+                                  className="citation-chip"
+                                  onClick={() => onFinding(c.finding_id)}
+                                  title="Click to locate finding in report"
+                                >
+                                  <CheckCircle2 size={12} color="#409379" />
+                                  <span>{c.title}</span>
+                                  <ChevronRight size={12} />
+                                </button>
+                                {c.text && (
+                                  <div
+                                    className="citation-text"
+                                    onClick={() =>
+                                      setExpandedCitations((prev) => ({
+                                        ...prev,
+                                        [`${msg.id}-${ci}`]: !isExpanded,
+                                      }))
+                                    }
+                                  >
+                                    {isExpanded
+                                      ? c.text
+                                      : c.text.slice(0, 120) +
+                                        (c.text.length > 120 ? "..." : "")}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Uncertainty & Limitations */}
+                    {msg.limitations && msg.limitations.length > 0 && (
+                      <div className="limitations-box">
+                        <strong>Analysis Uncertainty:</strong>{" "}
+                        {msg.limitations.join(" ")}
+                      </div>
+                    )}
+
+                    {/* Contextual Follow-Up Suggestions */}
+                    {msg.suggested_followups &&
+                      msg.suggested_followups.length > 0 &&
+                      index === messages.length - 1 &&
+                      !busy && (
+                        <div className="followups-group">
+                          {msg.suggested_followups.map((fQ, fi) => (
+                            <button
+                              key={fi}
+                              type="button"
+                              className="followup-btn"
+                              onClick={() => sendMessage(fQ)}
+                            >
+                              <span>{fQ}</span>
+                              <ChevronRight size={11} />
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                  </>
+                )}
+              </div>
+            </motion.div>
+          ))}
+
+          {busy && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="msg-row assistant"
+            >
+              <div className="msg-meta">
+                <span>Guardian Intelligence is reasoning...</span>
+              </div>
+              <div className="msg-bubble assistant">
+                <div className="typing-dots">
+                  <span />
+                  <span />
+                  <span />
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          <div ref={chatBottomRef} />
+        </div>
+      )}
+
+      {/* Multiline Input Box */}
       <form
-        className="ask-input"
+        className="multiline-input-wrapper"
         onSubmit={(e) => {
           e.preventDefault();
-          ask(question);
+          sendMessage(input);
         }}
       >
-        <input
-          aria-label="Ask about this report"
-          value={question}
-          onChange={(e) => setQuestion(e.target.value)}
-          placeholder="What does this mean for my project?"
+        <textarea
+          aria-label="Ask Guardian Intelligence about this report"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              sendMessage(input);
+            }
+          }}
+          placeholder="Ask a question about this report (Enter to send, Shift+Enter for newline)..."
           maxLength={1000}
+          className="multiline-textarea"
+          rows={2}
+          disabled={busy}
         />
-        <button aria-label="Send question" disabled={busy || !question.trim()}>
-          {busy ? (
-            <Loader2 className="spin" size={17} />
-          ) : (
-            <ArrowUp size={17} />
-          )}
-        </button>
+        <div className="multiline-input-footer">
+          <span className="char-count">{input.length}/1000</span>
+          <button
+            type="submit"
+            className="send-btn"
+            disabled={busy || !input.trim()}
+            aria-label="Send message"
+          >
+            {busy ? (
+              <Loader2 className="spin" size={14} />
+            ) : (
+              <>
+                <span>Send</span>
+                <ArrowUp size={13} />
+              </>
+            )}
+          </button>
+        </div>
       </form>
+
+      {/* Error state */}
       {error && (
-        <p className="error" role="alert">
-          {error}
-        </p>
+        <div
+          style={{
+            marginTop: "10px",
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+            color: "#bb624d",
+            fontSize: "11px",
+          }}
+          role="alert"
+        >
+          <AlertTriangle size={15} />
+          <span>{error}</span>
+        </div>
       )}
-      <small>
-        Evidence-based answers · Deterministic provider · No external AI service
+
+      <small
+        style={{
+          display: "block",
+          fontSize: "9px",
+          color: "var(--muted)",
+          marginTop: "10px",
+        }}
+      >
+        Evidence-grounded explanations ·{" "}
+        {activeProvider === "gemini"
+          ? `Google Gemini (${activeModel})`
+          : "Deterministic Engine"}{" "}
+        · All claims cited to stored report findings
       </small>
     </section>
   );

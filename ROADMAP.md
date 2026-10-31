@@ -25,20 +25,22 @@
 - [x] OSV bounded pagination (`next_page_token` traversal up to 5 pages per dependency, loop detection, aggregate byte budgets, resilient partial results).
 - [x] Decoupled three-dimensional coverage semantics throughout models and UI (source/behavioral, dependency resolution, vulnerability intelligence).
 - [x] Archive ingestion hardening with normalized path collision rejection, control character detection, symlink/hardlink/special entry rejection, aggregate decompression bomb protection, and unextracted nested archive handling.
+- [x] Guardian Cognitive Intelligence 1.0: Google Gemini (`gemini-3.8-flash`) provider integration via `google-genai` SDK, structured advisor output, prompt-injection defense fences, citation validation against report findings, and deterministic fallback.
+- [x] Privacy-first context management: explicit user consent controls, automated secret redaction layer, and compact context minimization.
+- [x] Multi-turn report-scoped conversation sessions stored in SQLite with strict report isolation and bounded turn limits.
+- [x] Coverage-aware behavioral assessment presentation and duplicate advisory aggregation.
 
 ## Next priorities
 
 1. Interactive dependency graph visualizer showing dependency edges and risk propagation.
-2. Evidence snippet secret redaction prior to export or display.
-3. Configurable report retention and historical report deletion policies.
-4. Expanded lockfile support for pnpm and Yarn Berry v2+ formats.
-5. Automated CI/CD action/CLI command (`guardian scan`) for pull request checks.
-6. Accessible keyboard navigation and screen-reader audit.
+2. Configurable report retention and historical report deletion policies.
+3. Expanded lockfile support for pnpm and Yarn Berry v2+ formats.
+4. Automated CI/CD action/CLI command (`guardian scan`) for pull request checks.
+5. Accessible keyboard navigation and screen-reader audit.
 
 ## Later
 
 - Isolated microVM execution sandbox for dynamic package detonation.
 - PyPI and crates.io package registry adapters.
 - Sigstore / npm provenance signature verification.
-- Provider-backed LLM explanation integration with strict citation verification.
 - Team workspaces and role-based access control.
