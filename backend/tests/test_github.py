@@ -45,6 +45,18 @@ _TEST_KEY_PEM = _TEST_KEY.private_bytes(
 def test_client():
     return TestClient(app)
 
+def authorize_client(client, *installation_ids):
+    """Model the browser's completed installation callback in HTTP tests."""
+    sid = github.session_manager.create_session()
+    for installation_id in installation_ids:
+        if not storage.get_github_installation(installation_id):
+            storage.save_github_installation({'id': installation_id, 'account_login': f'owner-{installation_id}', 'account_type': 'User'})
+        github.session_manager.authorize_installation(sid, installation_id)
+        github.session_manager.select_installation(sid, installation_id)
+    client.cookies.set('guardian_session', sid)
+    return sid
+
+
 @pytest.fixture
 def github_env(monkeypatch):
     """Sets up simulated GitHub App configuration."""
@@ -154,6 +166,7 @@ def test_github_sync_endpoint(github_env, test_client):
         }
     ]
     with patch("backend.guardian.github._call_app_api", return_value=mock_installations):
+        session_id = authorize_client(test_client, 333444)
         resp = test_client.post("/api/github/sync")
         assert resp.status_code == 200
         data = resp.json()
@@ -165,8 +178,8 @@ def test_github_sync_endpoint(github_env, test_client):
         assert active is not None
         assert active["id"] == 333444
 
-def test_status_auto_discovery(github_env, test_client):
-    """GET /api/github/status auto-discovers installations if database is empty."""
+def test_status_does_not_discover_global_installations(github_env, test_client):
+    """Unauthenticated browser status never discovers or inherits server installations."""
     # Ensure database is clean
     with storage.connection() as db:
         db.execute("DELETE FROM github_installations")
@@ -189,9 +202,10 @@ def test_status_auto_discovery(github_env, test_client):
         resp = test_client.get("/api/github/status")
         assert resp.status_code == 200
         data = resp.json()
-        assert data["connected"] is True
-        assert data["installation"]["id"] == 444555
-        assert data["installation"]["account_login"] == "discovered-user"
+        assert data["connected"] is False
+        assert data["installation"] is None
+        assert data["installations"] == []
+        assert storage.get_active_github_installation() is None
 
 def test_disconnect(github_env, test_client):
     storage.save_github_installation({
@@ -201,10 +215,12 @@ def test_disconnect(github_env, test_client):
     })
     assert storage.get_active_github_installation() is not None
 
+    session_id = authorize_client(test_client, 999111)
     resp = test_client.post("/api/github/disconnect")
     assert resp.status_code == 200
     assert resp.json()["status"] == "disconnected"
-    assert storage.get_active_github_installation() is None
+    assert not github.session_manager.is_installation_authorized(session_id, 999111)
+    assert storage.get_github_installation(999111) is not None
 
 def test_token_caching_and_refresh(github_env):
     storage.save_github_installation({
@@ -279,6 +295,7 @@ def test_list_repositories_and_search(github_env, test_client):
 
     with patch("backend.guardian.github._call_installation_api", return_value=repos_payload):
         # List all
+        session_id = authorize_client(test_client, 100)
         resp = test_client.get("/api/github/repositories")
         assert resp.status_code == 200
         repos = resp.json()
@@ -317,6 +334,7 @@ def test_list_branches(github_env, test_client):
         return repo_meta
 
     with patch("backend.guardian.github._call_installation_api", side_effect=mock_install_api):
+        session_id = authorize_client(test_client, 100)
         resp = test_client.get("/api/github/repositories/1/branches")
         assert resp.status_code == 200
         branches = resp.json()
@@ -450,6 +468,7 @@ def test_scan_github_repository_endpoint(github_env, test_client):
         raise ValueError(endpoint)
 
     with patch("backend.guardian.github._call_installation_api", side_effect=mock_install_api):
+        session_id = authorize_client(test_client, 100)
         resp = test_client.post("/api/scans/github", json={"repository_id": 42, "branch": "main"})
         assert resp.status_code == 202
         job_id = resp.json()["id"]
@@ -619,6 +638,8 @@ def test_close_remediation_pull_request(github_env, test_client):
     storage.save_plan(plan)
 
     def mock_install_api(inst_id, endpoint, method="GET", json_data=None):
+        if endpoint == "/repositories/99":
+            return {"id": 99, "name": "app", "full_name": "acme/app", "owner": {"login": "acme"}, "default_branch": "main"}
         if endpoint == "/repositories/99/pulls/55" and method == "GET":
             return {"number": 55, "state": "open", "merged": False}
         if endpoint == "/repositories/99/pulls/55" and method == "PATCH":
@@ -626,6 +647,7 @@ def test_close_remediation_pull_request(github_env, test_client):
         raise ValueError(endpoint)
 
     with patch("backend.guardian.github._call_installation_api", side_effect=mock_install_api):
+        session_id = authorize_client(test_client, 100)
         resp = test_client.post("/api/remediation/plans/plan_to_close/close-github-pr")
         assert resp.status_code == 200
         data = resp.json()
@@ -673,11 +695,13 @@ def test_multiple_installations_preservation_and_explicit_selection(github_env, 
         {"id": 1002, "account": {"id": 102, "login": "bob-team", "type": "User"}, "created_at": "2026-02-01T00:00:00Z", "updated_at": "2026-10-31T20:00:00Z"}
     ]
     with patch("backend.guardian.github._call_app_api", return_value=mock_gh_installations):
+        session_id = authorize_client(test_client, 1002, 1001)
         sync_resp = test_client.post("/api/github/sync")
         assert sync_resp.status_code == 200
         # Active account is still alice-org
         active_after_sync = storage.get_active_github_installation()
         assert active_after_sync["id"] == 1001
+        assert github.session_manager.get_selected_installation_id(session_id) == 1001
 
         # Listing installations exposes both accounts
         list_resp = test_client.get("/api/github/installations")
@@ -694,7 +718,7 @@ def test_multiple_installations_preservation_and_explicit_selection(github_env, 
         assert sel_resp.json()["id"] == 1002
 
         # Active account is now bob-team
-        active_now = storage.get_active_github_installation()
+        active_now = storage.get_github_installation(github.session_manager.get_selected_installation_id(session_id))
         assert active_now["id"] == 1002
         assert active_now["account_login"] == "bob-team"
 
@@ -704,6 +728,7 @@ def test_disconnect_selected_installation_preserves_others(github_env, test_clie
     storage.save_github_installation({"id": 2002, "account_login": "user-two", "account_type": "User"}, make_active=False)
 
     # Disconnect user-two
+    session_id = authorize_client(test_client, 2002, 2001)
     resp = test_client.post("/api/github/installations/2002/disconnect")
     assert resp.status_code == 200
     assert resp.json()["installation_id"] == 2002
@@ -716,7 +741,8 @@ def test_disconnect_selected_installation_preserves_others(github_env, test_clie
     # Disconnect target user-one
     resp2 = test_client.post("/api/github/installations/2001/disconnect")
     assert resp2.status_code == 200
-    assert storage.get_active_github_installation() is None
+    assert github.session_manager.get_selected_installation_id(session_id) is None
+    assert storage.get_github_installation(2001) is not None
 
 def test_oauth_state_validation_and_session_binding(github_env):
     """Part 2.3: OAuth state requires non-empty, unexpired, single-use, session-bound tokens."""
@@ -828,11 +854,14 @@ def test_close_merged_pull_request_preserves_applied(github_env, test_client):
 
     # GitHub reports PR as merged
     def mock_install_api(inst_id, endpoint, method="GET", json_data=None):
+        if endpoint == "/repositories/99":
+            return {"id": 99, "name": "app", "full_name": "acme/app", "owner": {"login": "acme"}, "default_branch": "main"}
         if endpoint == "/repositories/99/pulls/88" and method == "GET":
             return {"number": 88, "state": "closed", "merged": True}
         raise ValueError(endpoint)
 
     with patch("backend.guardian.github._call_installation_api", side_effect=mock_install_api):
+        session_id = authorize_client(test_client, 500)
         resp = test_client.post("/api/remediation/plans/plan_merged_pr/close-github-pr")
         assert resp.status_code == 200
         data = resp.json()
@@ -870,28 +899,28 @@ def test_session_isolation_and_authorization_boundary(github_env, test_client):
     assert github.session_manager.is_installation_authorized(sess_B, 7771) is False
 
     # Session A lists installations: sees 7771
-    resp_A = test_client.get("/api/github/installations", headers={"x-guardian-session": sess_A})
+    resp_A = test_client.get("/api/github/installations", cookies={"guardian_session": sess_A})
     assert resp_A.status_code == 200
     insts_A = resp_A.json()
     assert any(i["id"] == 7771 for i in insts_A)
 
     # Session B lists installations: sees nothing authorized for B
-    resp_B = test_client.get("/api/github/installations", headers={"x-guardian-session": sess_B})
+    resp_B = test_client.get("/api/github/installations", cookies={"guardian_session": sess_B})
     assert resp_B.status_code == 200
     insts_B = resp_B.json()
     assert not any(i["id"] == 7771 for i in insts_B)
 
     # Session B attempts to select 7771: rejected
-    sel_B = test_client.post("/api/github/installations/7771/select", headers={"x-guardian-session": sess_B})
-    assert sel_B.status_code in (400, 403, 404)
+    sel_B = test_client.post("/api/github/installations/7771/select", cookies={"guardian_session": sess_B})
+    assert sel_B.status_code in (401, 403)
 
     # Session B attempts to list repositories: rejected with 400 or 403
-    repo_B = test_client.get("/api/github/repositories", headers={"x-guardian-session": sess_B})
-    assert repo_B.status_code in (400, 403)
+    repo_B = test_client.get("/api/github/repositories", cookies={"guardian_session": sess_B})
+    assert repo_B.status_code in (401, 403)
 
     # Session A selects 7771 and lists repositories: succeeds
     with patch("backend.guardian.github._call_installation_api", return_value={"repositories": [{"id": 1, "name": "r1", "full_name": "org-alpha/r1"}]}):
-        repo_A = test_client.get("/api/github/repositories", headers={"x-guardian-session": sess_A})
+        repo_A = test_client.get("/api/github/repositories", cookies={"guardian_session": sess_A})
         assert repo_A.status_code == 200
 
 def test_session_disconnect_isolation(github_env, test_client):
@@ -911,7 +940,7 @@ def test_session_disconnect_isolation(github_env, test_client):
     # Disconnect in Session A
     disc_resp = test_client.post(
         "/api/github/installations/8881/disconnect",
-        headers={"x-guardian-session": sess_A}
+        cookies={"guardian_session": sess_A}
     )
     assert disc_resp.status_code == 200
     assert github.session_manager.is_installation_authorized(sess_A, 8881) is False
@@ -924,6 +953,7 @@ def test_token_retrieval_enforces_session_authorization(github_env):
     sess_A = "sess_auth"
     sess_B = "sess_unauth"
 
+    storage.save_github_installation({'id': 9999, 'account_login': 'owner', 'account_type': 'User'})
     github.session_manager.authorize_installation(sess_A, 9999)
 
     # Session A authorized
@@ -939,7 +969,7 @@ def test_token_retrieval_enforces_session_authorization(github_env):
 def test_teammate_session_isolation_and_no_preloaded_account(github_env, test_client):
     """Verifies that a teammate's fresh session does not see or inherit a teammate's pre-loaded account."""
     sess_daksh = "sess_daksh_001"
-    sess_teammate = "sess_teammate_002"
+    sess_teammate = github.session_manager.create_session()
 
     # Daksh has an account installed
     storage.save_github_installation({
@@ -950,7 +980,7 @@ def test_teammate_session_isolation_and_no_preloaded_account(github_env, test_cl
     github.session_manager.authorize_installation(sess_daksh, 177208222)
 
     # Teammate opens app: status should show not connected, no installations
-    status_resp = test_client.get("/api/github/status", headers={"x-guardian-session": sess_teammate})
+    status_resp = test_client.get("/api/github/status", cookies={"guardian_session": sess_teammate})
     assert status_resp.status_code == 200
     status_data = status_resp.json()
     assert status_data["connected"] is False
@@ -963,7 +993,7 @@ def test_teammate_session_isolation_and_no_preloaded_account(github_env, test_cl
         {"id": 999888, "account": {"id": 102, "login": "teammate-user", "type": "User"}, "created_at": "2026-02-01T00:00:00Z"}
     ]
     with patch("backend.guardian.github._call_app_api", return_value=mock_gh_installations):
-        sync_resp = test_client.post("/api/github/sync", headers={"x-guardian-session": sess_teammate})
+        sync_resp = test_client.post("/api/github/sync", cookies={"guardian_session": sess_teammate})
         assert sync_resp.status_code == 200
         sync_data = sync_resp.json()
         assert sync_data["connected"] is False
@@ -981,7 +1011,7 @@ def test_adding_account_immediately_active_and_selected(github_env, test_client)
     }, make_active=True)
 
     # User initiates connect
-    connect_resp = test_client.post("/api/github/connect", headers={"x-guardian-session": sess_user})
+    connect_resp = test_client.post("/api/github/connect", cookies={"guardian_session": sess_user})
     assert connect_resp.status_code == 200
     state = connect_resp.json()["state"]
 
@@ -994,13 +1024,13 @@ def test_adding_account_immediately_active_and_selected(github_env, test_client)
     with patch("backend.guardian.github._call_app_api", return_value=mock_inst):
         cb_resp = test_client.get(
             f"/api/github/callback?installation_id=999888&state={state}",
-            headers={"x-guardian-session": sess_user},
+            cookies={"guardian_session": sess_user},
             follow_redirects=False
         )
         assert cb_resp.status_code == 302
 
     # Status check for sess_user must immediately show teammate-new as connected and active
-    status_resp = test_client.get("/api/github/status", headers={"x-guardian-session": sess_user})
+    status_resp = test_client.get("/api/github/status", cookies={"guardian_session": sess_user})
     assert status_resp.status_code == 200
     status_data = status_resp.json()
     assert status_data["connected"] is True
@@ -1014,7 +1044,7 @@ def test_adding_account_immediately_active_and_selected(github_env, test_client)
     # Attempting to select Daksh's account must fail
     sel_resp = test_client.post(
         "/api/github/installations/177208222/select",
-        headers={"x-guardian-session": sess_user}
+        cookies={"guardian_session": sess_user}
     )
     assert sel_resp.status_code in (400, 403, 404)
 
@@ -1024,18 +1054,16 @@ def test_global_disconnect_removes_installation_from_selection(github_env, test_
     storage.save_github_installation({"id": 5552, "account_login": "account-two", "account_type": "User"}, make_active=False)
 
     # Disconnect account-one
-    disc_resp = test_client.post("/api/github/installations/5551/disconnect")
-    assert disc_resp.status_code == 200
+    result = github.disconnect_installation(5551)
+    assert result["installation_id"] == 5551
 
     # Account-one should be gone from list
-    list_resp = test_client.get("/api/github/installations")
-    assert list_resp.status_code == 200
-    logins = [i["account_login"] for i in list_resp.json()]
+    logins = [i["account_login"] for i in github.list_installations()]
     assert "account-one" not in logins
     assert "account-two" in logins
 
     # Attempting to select account-one should fail
-    sel_resp = test_client.post("/api/github/installations/5551/select")
-    assert sel_resp.status_code in (400, 404)
+    with pytest.raises(ValueError):
+        github.select_installation(5551)
 
 

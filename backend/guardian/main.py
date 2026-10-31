@@ -8,10 +8,13 @@ from pathlib import Path
 from uuid import uuid4
 from fastapi import FastAPI, File, HTTPException, UploadFile, Form, Request, Response
 from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from . import ingestion, storage, advisor, github
-from .engine import analyze, assess, RANK, finding
+from .core import analyze_sources as analyze
+from .engine import assess, RANK, finding
+from .cli_bridge import router as cli_router
 from .explanations import EvidenceExplainer
 from .intelligence import check_osv
 from .models import Dependency, PackageRequest, Question, Report, Evidence, AskRequest, AdvisorResponse, FindingCitation, AIStatus
@@ -36,10 +39,12 @@ from .config import Budget
 from typing import Literal, Optional
 
 app = FastAPI(title='Guardian', version='0.1.0')
+app.include_router(cli_router)
 app.add_middleware(RequestSizeLimit)
 app.add_middleware(CORSMiddleware, allow_origins=['http://localhost:3000','http://127.0.0.1:3000'], allow_methods=['GET','POST'], allow_headers=['*'])
 JOBS = {}
 CANCELLATIONS = {}
+JOB_INSTALLATIONS = {}
 LOCK = threading.Lock()
 SLOTS = threading.BoundedSemaphore(2)
 FIXTURES = Path(__file__).resolve().parents[2] / 'fixtures'
@@ -221,6 +226,7 @@ def submit(loader, source, profile="fast", job_id=None, classification=None, pro
                 if JOBS[old]['status'] not in ('queued', 'running', 'cancelling'):
                     del JOBS[old]
                     CANCELLATIONS.pop(old, None)
+                    JOB_INSTALLATIONS.pop(old, None)
                     break
         JOBS[job_id] = {'id':job_id, 'status':'queued', 'stage':'Queued'}
         CANCELLATIONS[job_id] = threading.Event()
@@ -231,9 +237,48 @@ def submit(loader, source, profile="fast", job_id=None, classification=None, pro
 def health():
     return {'status':'ok', 'engine':'guardian-static-v2'}
 
+@app.post('/api/session/init')
+def session_init(request: Request, response: Response):
+    sid = request.cookies.get("guardian_session")
+    is_new = True
+    if sid:
+        sess = storage.get_session(sid)
+        if sess:
+            storage.touch_session(sid)
+            is_new = False
+        else:
+            sid = storage.create_session(ttl_days=30)
+    else:
+        sid = storage.create_session(ttl_days=30)
+
+    response.set_cookie(
+        key="guardian_session",
+        value=sid,
+        max_age=86400 * 30,
+        httponly=True,
+        samesite="lax",
+        path="/"
+    )
+    return {"initialized": True, "new": is_new}
+
+@app.get('/api/session/status')
+def session_status(request: Request):
+    sid = request.cookies.get("guardian_session")
+    if sid and storage.get_session(sid):
+        storage.touch_session(sid)
+        return {"valid": True}
+    return {"valid": False}
+
 @app.get('/api/scans')
-def scans():
-    return storage.recent()
+def scans(request: Request):
+    accessible = []
+    for rep in storage.recent():
+        try:
+            _verify_scan_access(rep, request)
+            accessible.append(rep)
+        except HTTPException:
+            continue
+    return accessible
 
 @app.post('/api/scans/upload', status_code=202)
 async def upload(files: list[UploadFile] = File(...), profile: Literal["fast", "deep"] = Form("fast")):
@@ -445,18 +490,72 @@ def discard_project(scan_id: str):
     return {'status': 'discarded' if discarded else 'not_found'}
 
 def _get_session_id(request: Request) -> Optional[str]:
-    return request.headers.get("x-guardian-session") or request.cookies.get("guardian_session")
+    """Reads session ID strictly from the HttpOnly guardian_session cookie and validates it in SQLite."""
+    sid = request.cookies.get("guardian_session")
+    if not sid:
+        return None
+    sess = storage.get_session(sid)
+    if not sess:
+        return None
+    storage.touch_session(sid)
+    return sid
 
 def _verify_scan_access(rep: Report, request: Request) -> None:
     """Ensures GitHub-backed reports respect session installation authorization."""
     if rep.source_metadata and rep.source_metadata.source_type == "github":
-        session_id = request.headers.get("x-guardian-session") or request.cookies.get("guardian_session")
-        if session_id:
-            if not github.session_manager.is_session_valid(session_id):
-                raise HTTPException(401, "GitHub session is invalid or expired.")
-            auth_insts = github.session_manager.get_authorized_installation_ids(session_id)
-            if not auth_insts:
-                raise HTTPException(403, "Access to GitHub repository report is unauthorized for this session.")
+        session_id = _require_github_session(request)
+        installation_id = rep.source_metadata.installation_id
+        if installation_id is None:
+            raise HTTPException(403, 'This legacy GitHub report lacks installation authorization metadata. Rescan the repository to bind access securely.')
+        if not storage.is_installation_authorized_for_session(session_id, installation_id):
+            raise HTTPException(403, 'This session is not authorized for the installation associated with this GitHub report.')
+
+
+def _require_github_session(request: Request) -> str:
+    session_id = _get_session_id(request)
+    if not session_id:
+        raise HTTPException(401, 'GitHub session is missing, invalid or expired. Connect GitHub in this browser session.')
+    return session_id
+
+
+@app.middleware('http')
+async def protect_github_resources(request: Request, call_next):
+    """One HTTP boundary protects reports, exports, plans, snapshots and active jobs."""
+    parts = request.url.path.strip('/').split('/')
+    try:
+        if len(parts) >= 3 and parts[:2] == ['api', 'github']:
+            if parts[2] not in {'status', 'installations', 'connect', 'callback'} or len(parts) > 3:
+                _require_github_session(request)
+        if parts[:3] == ['api', 'scans', 'github']:
+            _require_github_session(request)
+        scan_id = None
+        if len(parts) >= 3 and parts[:2] in (['api', 'scans'], ['api', 'jobs']):
+            scan_id = parts[2]
+        elif len(parts) >= 3 and parts[:2] == ['api', 'projects']:
+            scan_id = parts[2]
+        elif len(parts) >= 4 and parts[:3] == ['api', 'remediation', 'plans']:
+            plan = storage.get_plan(parts[3])
+            if plan:
+                scan_id = plan.scan_id
+                if plan.repository_id and not storage.get(scan_id):
+                    # Orphan plans cannot fall back to global installation credentials.
+                    session_id = _require_github_session(request)
+                    try:
+                        github.get_repository(plan.repository_id, session_id=session_id)
+                    except Exception:
+                        raise HTTPException(403, 'This session cannot access the plan repository.')
+        if scan_id:
+            rep = storage.get(scan_id)
+            if rep:
+                _verify_scan_access(rep, request)
+            installation_id = JOB_INSTALLATIONS.get(scan_id)
+            if installation_id is not None:
+                session_id = _require_github_session(request)
+                if not storage.is_installation_authorized_for_session(session_id, installation_id):
+                    raise HTTPException(403, 'This GitHub scan belongs to another installation.')
+    except HTTPException as error:
+        return JSONResponse({'detail': error.detail}, status_code=error.status_code)
+    return await call_next(request)
 
 @app.post('/api/scans/{scan_id}/handoff', response_model=HandoffExportResponse)
 def generate_handoff(scan_id: str, request_body: HandoffRequest, request: Request):
@@ -525,10 +624,11 @@ def get_handoff(
         raise HTTPException(400, str(err))
 
 @app.post('/api/scans/{scan_id}/remediation/plan')
-def create_remediation_plan(scan_id: str, request: PlanGenerationRequest):
+def create_remediation_plan(scan_id: str, request: PlanGenerationRequest, req: Request):
     rep = storage.get(scan_id)
     if not rep:
         raise HTTPException(404, 'Report not found')
+    _verify_scan_access(rep, req)
     snap = project_manager.get_snapshot(scan_id)
     if not snap:
         raise HTTPException(400, 'Project snapshot is not available or has expired (30-minute inactivity limit). Please rescan or reconnect the project to prepare a remediation plan.')
@@ -555,17 +655,23 @@ def create_remediation_plan(scan_id: str, request: PlanGenerationRequest):
     return plan
 
 @app.get('/api/remediation/plans/{plan_id}')
-def get_remediation_plan(plan_id: str):
+def get_remediation_plan(plan_id: str, req: Request):
     plan = storage.get_plan(plan_id)
     if not plan:
         raise HTTPException(404, 'Remediation plan not found')
+    rep = storage.get(plan.scan_id)
+    if rep:
+        _verify_scan_access(rep, req)
     return plan
 
 @app.post('/api/remediation/plans/{plan_id}/approve')
-def approve_remediation_plan(plan_id: str):
+def approve_remediation_plan(plan_id: str, req: Request):
     plan = storage.get_plan(plan_id)
     if not plan:
         raise HTTPException(404, 'Remediation plan not found')
+    rep = storage.get(plan.scan_id)
+    if rep:
+        _verify_scan_access(rep, req)
     try:
         plan = storage.update_plan_status(plan_id, 'approved')
     except ValueError as err:
@@ -573,10 +679,13 @@ def approve_remediation_plan(plan_id: str):
     return plan
 
 @app.post('/api/remediation/plans/{plan_id}/reject')
-def reject_remediation_plan(plan_id: str):
+def reject_remediation_plan(plan_id: str, req: Request):
     plan = storage.get_plan(plan_id)
     if not plan:
         raise HTTPException(404, 'Remediation plan not found')
+    rep = storage.get(plan.scan_id)
+    if rep:
+        _verify_scan_access(rep, req)
     try:
         plan = storage.update_plan_status(plan_id, 'rejected')
     except ValueError as err:
@@ -584,10 +693,13 @@ def reject_remediation_plan(plan_id: str):
     return plan
 
 @app.post('/api/remediation/plans/{plan_id}/applied')
-def mark_plan_applied(plan_id: str, record: PlanAppliedRecord):
+def mark_plan_applied(plan_id: str, record: PlanAppliedRecord, req: Request):
     plan = storage.get_plan(plan_id)
     if not plan:
         raise HTTPException(404, 'Remediation plan not found')
+    rep = storage.get(plan.scan_id)
+    if rep:
+        _verify_scan_access(rep, req)
     status = 'applied' if record.success else 'failed'
     try:
         plan = storage.update_plan_status(plan_id, status)
@@ -597,10 +709,13 @@ def mark_plan_applied(plan_id: str, record: PlanAppliedRecord):
 
 @app.post('/api/remediation/plans/{plan_id}/revert')
 @app.post('/api/remediation/plans/{plan_id}/reverted')
-def mark_plan_reverted(plan_id: str, record: Optional[PlanRevertedRecord] = None):
+def mark_plan_reverted(plan_id: str, req: Request, record: Optional[PlanRevertedRecord] = None):
     plan = storage.get_plan(plan_id)
     if not plan:
         raise HTTPException(404, 'Remediation plan not found')
+    rep = storage.get(plan.scan_id)
+    if rep:
+        _verify_scan_access(rep, req)
     try:
         plan = storage.update_plan_status(plan_id, 'reverted')
     except ValueError as err:
@@ -608,16 +723,18 @@ def mark_plan_reverted(plan_id: str, record: Optional[PlanRevertedRecord] = None
     return plan
 
 @app.post('/api/remediation/plans/{plan_id}/verification')
-def verify_remediation_plan(plan_id: str, req: VerificationRequest):
+def verify_remediation_plan(plan_id: str, req: VerificationRequest, request: Request):
     plan = storage.get_plan(plan_id)
     if not plan:
         raise HTTPException(404, 'Remediation plan not found')
     orig_rep = storage.get(plan.scan_id)
     if not orig_rep:
         raise HTTPException(404, 'Original report not found')
+    _verify_scan_access(orig_rep, request)
     rescanned_rep = storage.get(req.rescanned_scan_id)
     if not rescanned_rep:
         raise HTTPException(404, 'Rescanned report not found')
+    _verify_scan_access(rescanned_rep, request)
 
     try:
         storage.update_plan_status(plan_id, 'verified')
@@ -629,24 +746,40 @@ def verify_remediation_plan(plan_id: str, req: VerificationRequest):
     return verification
 
 @app.get('/api/remediation/plans/{plan_id}/verification')
-def get_plan_verification(plan_id: str):
+def get_plan_verification(plan_id: str, req: Request):
     verification = storage.get_verification(plan_id)
     if not verification:
         raise HTTPException(404, 'Verification record not found')
+    rep = storage.get(verification.scan_id)
+    if rep:
+        _verify_scan_access(rep, req)
     return verification
 
 @app.get('/api/scans/{scan_id}/remediation/plans')
-def get_scan_remediation_plans(scan_id: str):
+def get_scan_remediation_plans(scan_id: str, req: Request):
+    rep = storage.get(scan_id)
+    if not rep:
+        raise HTTPException(404, 'Report not found')
+    _verify_scan_access(rep, req)
+    return storage.get_plans_for_scan(scan_id)
     rep = storage.get(scan_id)
     if not rep:
         raise HTTPException(404, 'Report not found')
     return storage.get_plans_for_scan(scan_id)
 
 @app.get('/api/projects/{name:path}/remediation/history')
-def get_project_remediation_history(name: str):
+def get_project_remediation_history(name: str, request: Request):
     plans = storage.get_plans_for_project(name)
     history = []
     for plan in plans:
+        rep = storage.get(plan.scan_id)
+        if rep:
+            try:
+                _verify_scan_access(rep, request)
+            except HTTPException:
+                continue
+        elif plan.repository_id:
+            continue
         verification = storage.get_verification(plan.plan_id)
         history.append({
             'plan': plan,
@@ -661,12 +794,12 @@ class GitHubScanRequest(BaseModel):
 
 @app.get('/api/github/status')
 def github_status(request: Request):
-    session_id = _get_session_id(request)
+    session_id = _get_session_id(request) or 'unauthenticated-http-session'
     return github.get_connection_status(session_id=session_id)
 
 @app.get('/api/github/installations')
 def github_installations(request: Request):
-    session_id = _get_session_id(request)
+    session_id = _get_session_id(request) or 'unauthenticated-http-session'
     return github.list_installations(session_id=session_id)
 
 @app.post('/api/github/installations/{installation_id}/select')
@@ -686,10 +819,12 @@ def disconnect_github_installation_endpoint(installation_id: int, request: Reque
         raise HTTPException(400, str(err))
 
 @app.post('/api/github/connect')
-def github_connect(request: Request):
-    session_id = _get_session_id(request)
+def github_connect(request: Request, response: Response):
+    session_id = _get_session_id(request) or storage.create_session(ttl_days=30)
     try:
-        return github.create_connect_flow(session_id=session_id)
+        result = github.create_connect_flow(session_id=session_id)
+        response.set_cookie('guardian_session', session_id, max_age=86400 * 30, httponly=True, samesite='lax', path='/')
+        return result
     except Exception as err:
         raise HTTPException(400, str(err))
 
@@ -702,6 +837,8 @@ def github_callback(
     code: Optional[str] = None
 ):
     session_id = _get_session_id(request) or github.get_state_session_id(state)
+    if not session_id:
+        session_id = storage.create_session(ttl_days=30)
     try:
         github.handle_installation_callback(installation_id=installation_id, state=state, session_id=session_id)
         host = request.headers.get("host", "")
@@ -710,15 +847,14 @@ def github_callback(
         else:
             redirect_url = "/?github=connected"
         response = RedirectResponse(url=redirect_url, status_code=302)
-        if session_id:
-            response.set_cookie(
-                key="guardian_session",
-                value=session_id,
-                max_age=86400,
-                httponly=False,
-                samesite="lax",
-                path="/"
-            )
+        response.set_cookie(
+            key="guardian_session",
+            value=session_id,
+            max_age=86400 * 30,
+            httponly=True,
+            samesite="lax",
+            path="/"
+        )
         return response
     except Exception as err:
         raise HTTPException(400, f"GitHub installation callback failed: {err}")
@@ -768,7 +904,7 @@ def github_branches(repo_id: int, request: Request):
 
 @app.post('/api/scans/github', status_code=202)
 def scan_github_repository(scan_req: GitHubScanRequest, request: Request):
-    session_id = _get_session_id(request)
+    session_id = _require_github_session(request)
     # Pre-flight check: verify active GitHub installation exists
     try:
         github._resolve_active_installation_id(session_id)
@@ -778,6 +914,7 @@ def scan_github_repository(scan_req: GitHubScanRequest, request: Request):
         raise HTTPException(502, f"GitHub connection error: {err}")
 
     job_id = uuid4().hex
+    JOB_INSTALLATIONS[job_id] = github._resolve_active_installation_id(session_id)
     project_id = f"github:{scan_req.repository_id}"
 
     def github_loader():
@@ -808,6 +945,7 @@ def scan_github_repository(scan_req: GitHubScanRequest, request: Request):
             project_id=project_id,
         )
     except Exception:
+        JOB_INSTALLATIONS.pop(job_id, None)
         project_manager.discard_snapshot(job_id)
         raise
 
@@ -817,6 +955,9 @@ def apply_remediation_github(plan_id: str, request: Request):
     plan = storage.get_plan(plan_id)
     if not plan:
         raise HTTPException(404, 'Remediation plan not found.')
+    rep = storage.get(plan.scan_id)
+    if rep:
+        _verify_scan_access(rep, request)
     if not plan.repository_id:
         raise HTTPException(400, 'Remediation plan is not associated with a GitHub repository.')
 
@@ -834,6 +975,9 @@ def close_remediation_github_pr(plan_id: str, request: Request):
     plan = storage.get_plan(plan_id)
     if not plan:
         raise HTTPException(404, 'Remediation plan not found.')
+    rep = storage.get(plan.scan_id)
+    if rep:
+        _verify_scan_access(rep, request)
     if not plan.repository_id or not plan.pr_number:
         raise HTTPException(400, 'Remediation plan does not have an active GitHub pull request.')
 

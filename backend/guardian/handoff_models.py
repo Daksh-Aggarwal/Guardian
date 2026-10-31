@@ -35,6 +35,8 @@ class FindingSummary(BaseModel):
     references: List[str] = Field(default_factory=list)
     domain: str = 'behavior'
     package: Optional[str] = None
+    ecosystem: Optional[str] = None
+    artifact_sha256: Optional[str] = None
     advisory: Optional[AdvisoryDetail] = None
     evidence: List[EvidenceLocation] = Field(default_factory=list)
     limitations: List[str] = Field(default_factory=list)

@@ -8,3 +8,5 @@ cryptography>=42.0.0
 pytest>=8,<9
 google-genai>=1.47.0,<2
 pyyaml>=6.0,<7
+packaging>=23
+tomli>=2; python_version < "3.11"

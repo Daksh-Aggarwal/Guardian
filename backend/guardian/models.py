@@ -1,6 +1,44 @@
 from __future__ import annotations
 from typing import List, Literal, Optional, Dict, Any
 from pydantic import BaseModel, Field, model_validator
+from typing_extensions import TypedDict
+
+class CliDecision(TypedDict, total=False):
+    decision: Literal['ALLOW', 'WARN', 'BLOCK', 'REVIEW']
+    reasons: List[str]
+    blocking_finding_ids: List[str]
+    review_reasons: List[str]
+    overridable: bool
+    policy: Dict[str, Any]
+
+class CliPackageDecision(CliDecision, total=False):
+    identity: str
+    sha256: str
+    kind: str
+
+class CliInstallation(TypedDict, total=False):
+    status: str
+    reason: str
+    artifact_sha256: List[str]
+
+class CliOverride(TypedDict, total=False):
+    decision: Literal['ALLOW', 'WARN', 'BLOCK', 'REVIEW']
+    force: bool
+    acknowledged: bool
+    timestamp: str
+
+class CliMetadata(TypedDict, total=False):
+    schema_version: str
+    ecosystem: Literal['npm', 'pypi']
+    roots: List[str]
+    packages: List[CliPackageDecision]
+    decision: CliDecision
+    installation: CliInstallation
+    overrides: List[CliOverride]
+    sync: str
+    lifecycle_scripts: str
+    imported: bool
+    imported_scan_id: str
 
 Severity = Literal['info', 'low', 'medium', 'high', 'critical']
 class Evidence(BaseModel):
@@ -26,6 +64,8 @@ class Finding(BaseModel):
     limitations: List[str] = Field(default_factory=list)
     data_flows: List[DataFlow] = Field(default_factory=list)
     package: Optional[str] = None
+    ecosystem: Optional[str] = None
+    artifact_sha256: Optional[str] = None
     advisory: Optional[Advisory] = None
 class Dependency(BaseModel):
     name: str
@@ -35,6 +75,7 @@ class Dependency(BaseModel):
     ecosystem: str = 'npm'
 
 class GitHubMetadata(BaseModel):
+    installation_id: Optional[int] = None
     repository_id: int
     repo_name: str
     owner: str
@@ -66,6 +107,7 @@ class Report(BaseModel):
     inspection_summary: Optional[InspectionSummary] = None
     root_integrity: Optional[IntegrityResult] = None
     assessments: dict = Field(default_factory=dict)
+    cli: Optional[CliMetadata] = None
 
     @model_validator(mode='before')
     @classmethod
@@ -181,6 +223,8 @@ class IntegrityResult(BaseModel):
     detail: str = 'Integrity verification was not performed.'
 
 class PackageInspection(BaseModel):
+    ecosystem: str = 'npm'
+    artifact_sha256: Optional[str] = None
     name: str
     version: str
     location: str

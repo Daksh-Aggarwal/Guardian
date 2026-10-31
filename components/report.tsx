@@ -253,6 +253,35 @@ export default function ReportView({
       transition={{ duration: 0.25 }}
       className="report-view-container"
     >
+      {report.cli && (
+        <section
+          className="card"
+          style={{ padding: "1.25rem", marginBottom: "1rem" }}
+          aria-label="CLI installation decision"
+        >
+          <strong>
+            Guardian CLI · {report.cli.ecosystem} ·{" "}
+            {report.cli.decision?.decision || "Decision unavailable"}
+          </strong>
+          <p>
+            Installation: {report.cli.installation?.status || "not attempted"}.
+            Lifecycle scripts: {report.cli.lifecycle_scripts || "disabled"}.
+          </p>
+          {report.cli.imported && (
+            <p>
+              Imported local evidence. Findings, artifact hashes and
+              installation claims were not reverified by this website.
+            </p>
+          )}
+          {!!report.cli.decision?.reasons?.length && (
+            <ul>
+              {report.cli.decision.reasons.map((reason, index) => (
+                <li key={index}>{reason}</li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
       {/* Top action bar */}
       <div className="report-action-bar">
         <div className="report-action-left">

@@ -1,5 +1,13 @@
 # Architecture
 
+## CLI supply-chain boundary (0.2)
+
+The independent website and local CLI call `backend/guardian/core.py:analyze_sources`; the existing deterministic Python/Babel engine remains authoritative. `npm_adapter.py` and `pypi_adapter.py` acquire exact graphs and bounded in-memory source inputs using `supply_models.py`. `core.analyze_plan` associates evidence with package ecosystem and artifact SHA-256; `policy.py` separately evaluates ALLOW/WARN/BLOCK/REVIEW. `cli.py` enforces approval before adapter installation, and `local_reports.py` stores private local reports. No server or account is required.
+
+npm installs an exact generated graph from a private verified cache using offline script-free npm ci. PyPI installs approved hash-pinned wheels without index/dependency resolution or builds. Source distributions are scanned statically and cannot become install approvals. `cli_bridge.py` supplies explicit consent-gated local JSON import into existing report/history/Handoff components; it does not supply account login or cloud sync. GitHub report access is bound to a valid session and recorded installation, with no HTTP global fallback.
+
+See [the CLI security model, limits and scenario evidence](docs/CLI.md) for supported resolution semantics and unresolved connected-mode work.
+
 ## Modules
 
 - `app/`: Next.js App Router page, metadata, typography, theme, and responsive styling.

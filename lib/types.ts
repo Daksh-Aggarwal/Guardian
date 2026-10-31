@@ -54,6 +54,8 @@ export type Finding = {
   data_flows?: DataFlow[];
   package?: string | null;
   advisory?: Advisory | null;
+  ecosystem?: string | null;
+  artifact_sha256?: string | null;
 };
 export type Report = {
   id: string;
@@ -83,6 +85,24 @@ export type Report = {
   inspection_summary?: InspectionSummary | null;
   root_integrity?: Integrity | null;
   assessments?: ReportAssessments;
+  cli?: {
+    schema_version: string;
+    ecosystem?: string;
+    decision?: {
+      decision: string;
+      reasons?: string[];
+      review_reasons?: string[];
+    };
+    installation?: { status: string; detail?: string };
+    lifecycle_scripts?: string;
+    imported?: boolean;
+    packages?: {
+      identity: string;
+      sha256: string;
+      kind: string;
+      decision: string;
+    }[];
+  } | null;
 };
 export type Answer = {
   provider: string;
@@ -139,35 +159,23 @@ export type AIStatus = {
   timeout_seconds: number;
   max_turns: number;
 };
-export function getOrCreateSessionId(): string {
-  if (typeof window === "undefined") return "";
+export async function initSession(): Promise<{ initialized: boolean; new: boolean }> {
   try {
-    let sid = localStorage.getItem("guardian_session_id");
-    if (!sid) {
-      const cookieMatch = document.cookie.match(/(?:^|;\s*)guardian_session=([^;]+)/);
-      if (cookieMatch && cookieMatch[1]) {
-        sid = decodeURIComponent(cookieMatch[1]);
-      } else {
-        sid = "sess_" + Math.random().toString(36).substring(2) + Date.now().toString(36);
-      }
-      localStorage.setItem("guardian_session_id", sid);
+    const res = await fetch("/api/session/init", {
+      method: "POST",
+      credentials: "include",
+    });
+    if (res.ok) {
+      return await res.json();
     }
-    return sid;
-  } catch {
-    return "";
-  }
+  } catch {}
+  return { initialized: false, new: false };
 }
 
 export async function api<T>(path: string, options?: RequestInit): Promise<T> {
-  const sessionId = getOrCreateSessionId();
-  const headers = new Headers(options?.headers);
-  if (sessionId && !headers.has("x-guardian-session")) {
-    headers.set("x-guardian-session", sessionId);
-  }
   const mergedOptions: RequestInit = {
     credentials: "include",
     ...options,
-    headers,
   };
   const res = await fetch("/api" + path, mergedOptions);
   if (!res.ok) {
@@ -177,7 +185,9 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
       const data = await res.json();
       message = typeof data.detail === "string" ? data.detail : message;
     } catch {}
-    throw new Error(message);
+    const err = new Error(message);
+    (err as any).status = res.status;
+    throw err;
   }
   return res.json();
 }
@@ -198,6 +208,8 @@ export type Integrity = {
   detail: string;
 };
 export type Inspection = {
+  ecosystem?: string;
+  artifact_sha256?: string | null;
   name: string;
   version: string;
   location: string;
@@ -293,6 +305,7 @@ export type RemediationPlan = {
 };
 
 export type GitHubMetadata = {
+  installation_id?: number | null;
   repository_id: number;
   repo_name: string;
   owner: string;
@@ -399,11 +412,7 @@ export type ProjectMetadata = {
 };
 
 export type HandoffTarget =
-  | "universal"
-  | "claude_code"
-  | "cursor"
-  | "codex"
-  | "github_copilot";
+  "universal" | "claude_code" | "cursor" | "codex" | "github_copilot";
 
 export type RemediationMode = "focused_fix" | "deep_remediation";
 export type HandoffScope = "finding" | "findings" | "scan";
@@ -426,6 +435,8 @@ export type AdvisoryDetail = {
 };
 
 export type FindingSummary = {
+  ecosystem?: string | null;
+  artifact_sha256?: string | null;
   finding_id: string;
   rule: string;
   title: string;
@@ -460,7 +471,11 @@ export type ProposedRemediation = {
   id: string;
   finding_ids: string[];
   title: string;
-  action_type: "upgrade_dependency" | "remove_script" | "source_patch" | "investigate_manual";
+  action_type:
+    | "upgrade_dependency"
+    | "remove_script"
+    | "source_patch"
+    | "investigate_manual";
   description: string;
   rationale: string;
   affected_version?: string | null;
@@ -474,7 +489,11 @@ export type ProposedRemediation = {
 };
 
 export type ValidationRequirement = {
-  category: "test_suite" | "integrity_check" | "build_and_typecheck" | "manual_verification";
+  category:
+    | "test_suite"
+    | "integrity_check"
+    | "build_and_typecheck"
+    | "manual_verification";
   title: string;
   description: string;
   suggested_command?: string | null;
@@ -502,7 +521,8 @@ export type ProjectProvenance = {
   github_commit_sha?: string | null;
   github_repo_url?: string | null;
   is_snapshot_stale_warning: boolean;
-  snapshot_verification_status?: "verified_match" | "unverified_against_workspace" | "snapshot_expired";
+  snapshot_verification_status?:
+    "verified_match" | "unverified_against_workspace" | "snapshot_expired";
   staleness_detail?: string;
 };
 

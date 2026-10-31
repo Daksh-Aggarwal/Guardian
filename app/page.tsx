@@ -36,7 +36,7 @@ import {
   MoonIcon,
   SearchIcon,
 } from "@/components/icons";
-import { api, Report, ScanJob, Finding } from "@/lib/types";
+import { api, initSession, Report, ScanJob, Finding } from "@/lib/types";
 import CalendarHeatmap, { CalendarDay } from "@/components/ui/calendar-heatmap";
 import { getDependencyAccounting, getFindingBreakdown } from "@/lib/accounting";
 import {
@@ -52,6 +52,7 @@ import {
 } from "@/components/ui";
 import ScanPanel from "@/components/scan-panel";
 import ReportView from "@/components/report";
+import CliReportImport from "@/components/cli-report-import";
 import ProjectWorkspace from "@/components/project-workspace";
 import RemediationPanel from "@/components/remediation-panel";
 
@@ -166,7 +167,9 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    refresh();
+    initSession().finally(() => {
+      refresh();
+    });
     const storedTheme = localStorage.getItem("guardian-theme");
     const isDark =
       storedTheme === "dark" ||
@@ -819,6 +822,12 @@ export default function Home() {
                       onConnectFolder={() => navigate("Project workspace")}
                       activeTab={scanTab}
                       onTabChange={setScanTab}
+                    />
+                    <CliReportImport
+                      onImport={(imported) => {
+                        setReports((current) => [imported, ...current]);
+                        openReport(imported);
+                      }}
                     />
                   </div>
 

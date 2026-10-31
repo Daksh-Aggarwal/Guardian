@@ -125,6 +125,19 @@ def _get_call_name(node: ast.Call) -> str:
         return '.'.join(reversed(parts))
     return ''
 
+
+def _direct_environment_source(node):
+    """Recognize an actual environment expression within a network argument.
+
+    This deliberately does not correlate an unrelated environment read elsewhere
+    in the module with a public network request.
+    """
+    if isinstance(node, ast.Attribute):
+        return isinstance(node.value, ast.Name) and node.value.id == 'os' and node.attr == 'environ'
+    if isinstance(node, ast.Call):
+        return _get_call_name(node) in {'os.getenv', 'os.environ.get'}
+    return False
+
 class PythonSecurityVisitor(ast.NodeVisitor):
     def __init__(self, filename: str, lines: List[str]):
         self.filename = filename
@@ -213,21 +226,28 @@ class PythonSecurityVisitor(ast.NodeVisitor):
 
             # Exfiltration check: do network arguments reference known environment variables?
             exfil_var = None
+            source_node = None
             all_exprs = list(node.args) + [kw.value for kw in node.keywords]
             for expr in all_exprs:
                 for sub in ast.walk(expr):
                     if isinstance(sub, ast.Name) and sub.id in self.env_vars:
                         exfil_var = sub.id
+                        source_node = sub
+                        break
+                    if _direct_environment_source(sub):
+                        exfil_var = _get_call_name(sub) if isinstance(sub, ast.Call) else 'os.environ'
+                        source_node = sub
                         break
                 if exfil_var:
                     break
 
             if exfil_var:
                 ev = self._evidence(node, f'Sensitive credential ({exfil_var}) passed to network call {call_name}()')
+                source_ev = self._evidence(source_node, f'Credential {exfil_var} read in network argument')
                 flow = DataFlow(
                     context='payload',
                     steps=[
-                        FlowStep(file=self.filename, line=ev.line, column=ev.column, snippet=ev.snippet, detail=f'Credential {exfil_var} read', kind='source', binding=exfil_var),
+                        FlowStep(file=self.filename, line=source_ev.line, column=source_ev.column, snippet=source_ev.snippet, detail=source_ev.detail, kind='source', binding=exfil_var),
                         FlowStep(file=self.filename, line=ev.line, column=ev.column, snippet=ev.snippet, detail=f'Credential passed to {call_name}', kind='sink', binding=call_name)
                     ]
                 )

@@ -1,7 +1,8 @@
 import json
 import os
+import secrets
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import List, Optional, Dict, Set
 from uuid import uuid4
@@ -11,6 +12,7 @@ from .remediation_models import RemediationPlan, VerificationResult
 def connection():
     path = os.getenv('GUARDIAN_DB', str(Path(__file__).resolve().parents[1] / 'guardian.sqlite3'))
     db = sqlite3.connect(path, timeout=10)
+    db.execute('PRAGMA foreign_keys = ON')
     db.execute('CREATE TABLE IF NOT EXISTS scans (id TEXT PRIMARY KEY, created_at TEXT NOT NULL, report TEXT NOT NULL)')
     db.execute('''
         CREATE TABLE IF NOT EXISTS conversations (
@@ -65,6 +67,25 @@ def connection():
             is_active INTEGER NOT NULL DEFAULT 1
         )
     ''')
+    db.execute('''
+        CREATE TABLE IF NOT EXISTS sessions (
+            session_id TEXT PRIMARY KEY,
+            created_at TEXT NOT NULL,
+            last_active TEXT NOT NULL,
+            expires_at TEXT NOT NULL
+        )
+    ''')
+    db.execute('''
+        CREATE TABLE IF NOT EXISTS session_installations (
+            session_id TEXT NOT NULL,
+            installation_id INTEGER NOT NULL,
+            is_selected INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (session_id, installation_id),
+            FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE,
+            FOREIGN KEY (installation_id) REFERENCES github_installations(installation_id) ON DELETE CASCADE
+        )
+    ''')
+    db.execute('CREATE INDEX IF NOT EXISTS idx_session_inst_sess ON session_installations(session_id)')
     return db
 
 def save(report: Report):
@@ -409,5 +430,241 @@ def set_active_github_installation(installation_id: int):
     with connection() as db:
         db.execute('UPDATE github_installations SET is_active = 0')
         db.execute('UPDATE github_installations SET is_active = 1 WHERE installation_id = ?', (installation_id,))
+
+
+# ---------------------------------------------------------------------------
+# Server-Managed Sessions & Scoped Installation Authorization (SQLite)
+# ---------------------------------------------------------------------------
+
+def create_session(ttl_days: int = 30, session_id: Optional[str] = None) -> str:
+    """Creates or registers a server-managed session in SQLite with sliding TTL."""
+    if not session_id:
+        session_id = secrets.token_urlsafe(32)
+    now = datetime.now(timezone.utc)
+    expires = now + timedelta(days=ttl_days)
+    with connection() as db:
+        db.execute(
+            '''INSERT OR REPLACE INTO sessions (session_id, created_at, last_active, expires_at)
+               VALUES (?, ?, ?, ?)''',
+            (session_id, now.isoformat(), now.isoformat(), expires.isoformat())
+        )
+    return session_id
+
+def get_session(session_id: Optional[str]) -> Optional[dict]:
+    """Retrieves an active, unexpired session from SQLite."""
+    if not session_id or not isinstance(session_id, str):
+        return None
+    now_iso = datetime.now(timezone.utc).isoformat()
+    with connection() as db:
+        row = db.execute(
+            'SELECT session_id, created_at, last_active, expires_at FROM sessions WHERE session_id = ?',
+            (session_id,)
+        ).fetchone()
+        if not row:
+            return None
+        sid, created_at, last_active, expires_at = row
+        if expires_at < now_iso:
+            db.execute('DELETE FROM sessions WHERE session_id = ?', (session_id,))
+            return None
+        return {
+            'session_id': sid,
+            'created_at': created_at,
+            'last_active': last_active,
+            'expires_at': expires_at,
+        }
+
+def touch_session(session_id: str, ttl_days: int = 30) -> bool:
+    """Refreshes sliding expiration on each authenticated request."""
+    if not session_id:
+        return False
+    now = datetime.now(timezone.utc)
+    expires = now + timedelta(days=ttl_days)
+    with connection() as db:
+        res = db.execute(
+            'UPDATE sessions SET last_active = ?, expires_at = ? WHERE session_id = ?',
+            (now.isoformat(), expires.isoformat(), session_id)
+        )
+        return res.rowcount > 0
+
+def revoke_session(session_id: str) -> None:
+    """Explicitly revokes a session and clears its installation associations."""
+    if not session_id:
+        return
+    with connection() as db:
+        db.execute('DELETE FROM session_installations WHERE session_id = ?', (session_id,))
+        db.execute('DELETE FROM sessions WHERE session_id = ?', (session_id,))
+
+def authorize_installation_for_session(
+    session_id: str,
+    installation_id: int,
+    make_selected: bool = False
+) -> None:
+    """Binds a GitHub installation to a specific session in SQLite.
+    
+    If make_selected is True or no installation is currently selected for the session,
+    marks this installation as selected (is_selected=1) and unselects others.
+    """
+    now = datetime.now(timezone.utc)
+    with connection() as db:
+        # Ensure the session exists in the sessions table
+        sess = db.execute('SELECT 1 FROM sessions WHERE session_id = ?', (session_id,)).fetchone()
+        if not sess:
+            expires = now + timedelta(days=30)
+            db.execute(
+                'INSERT INTO sessions (session_id, created_at, last_active, expires_at) VALUES (?, ?, ?, ?)',
+                (session_id, now.isoformat(), now.isoformat(), expires.isoformat())
+            )
+
+        has_selected = db.execute(
+            'SELECT 1 FROM session_installations WHERE session_id = ? AND is_selected = 1',
+            (session_id,)
+        ).fetchone()
+
+        if make_selected or not has_selected:
+            db.execute(
+                'UPDATE session_installations SET is_selected = 0 WHERE session_id = ?',
+                (session_id,)
+            )
+            is_selected = 1
+        else:
+            existing = db.execute(
+                'SELECT is_selected FROM session_installations WHERE session_id = ? AND installation_id = ?',
+                (session_id, installation_id)
+            ).fetchone()
+            is_selected = existing[0] if existing else 0
+
+        db.execute(
+            '''INSERT INTO session_installations (session_id, installation_id, is_selected)
+               VALUES (?, ?, ?)
+               ON CONFLICT(session_id, installation_id) DO UPDATE SET
+               is_selected = excluded.is_selected''',
+            (session_id, installation_id, is_selected)
+        )
+
+def get_session_installations(session_id: str) -> List[dict]:
+    """Retrieves all installations explicitly authorized for this session."""
+    with connection() as db:
+        rows = db.execute(
+            '''SELECT gi.installation_id, gi.account_login, gi.account_type, gi.account_avatar,
+                      gi.repository_selection, gi.installed_at, gi.is_active, si.is_selected
+               FROM session_installations si
+               JOIN github_installations gi ON si.installation_id = gi.installation_id
+               WHERE si.session_id = ?
+               ORDER BY si.is_selected DESC, gi.installation_id DESC''',
+            (session_id,)
+        ).fetchall()
+        return [
+            {
+                'id': r[0],
+                'account_id': r[0],
+                'account_login': r[1],
+                'account_type': r[2],
+                'avatar_url': r[3],
+                'repository_selection': r[4],
+                'installed_at': r[5],
+                'is_active': bool(r[6]),
+                'is_selected': bool(r[7]),
+            }
+            for r in rows
+        ]
+
+def get_session_selected_installation(session_id: str) -> Optional[dict]:
+    """Retrieves the active/selected installation for this session."""
+    with connection() as db:
+        row = db.execute(
+            '''SELECT gi.installation_id, gi.account_login, gi.account_type, gi.account_avatar,
+                      gi.repository_selection, gi.installed_at, gi.is_active
+               FROM session_installations si
+               JOIN github_installations gi ON si.installation_id = gi.installation_id
+               WHERE si.session_id = ? AND si.is_selected = 1
+               LIMIT 1''',
+            (session_id,)
+        ).fetchone()
+        if row:
+            return {
+                'id': row[0],
+                'account_id': row[0],
+                'account_login': row[1],
+                'account_type': row[2],
+                'avatar_url': row[3],
+                'repository_selection': row[4],
+                'installed_at': row[5],
+                'is_active': bool(row[6]),
+                'is_selected': True,
+            }
+    return None
+
+def set_session_selected_installation(session_id: str, installation_id: int) -> bool:
+    """Sets the selected installation for a given session."""
+    with connection() as db:
+        exists = db.execute(
+            'SELECT 1 FROM session_installations WHERE session_id = ? AND installation_id = ?',
+            (session_id, installation_id)
+        ).fetchone()
+        if not exists:
+            return False
+        db.execute('UPDATE session_installations SET is_selected = 0 WHERE session_id = ?', (session_id,))
+        db.execute(
+            'UPDATE session_installations SET is_selected = 1 WHERE session_id = ? AND installation_id = ?',
+            (session_id, installation_id)
+        )
+        return True
+
+def deauthorize_installation_for_session(session_id: str, installation_id: int) -> bool:
+    """Removes an installation from this session and cleans up global active status if unreferenced."""
+    with connection() as db:
+        was_selected = db.execute(
+            'SELECT is_selected FROM session_installations WHERE session_id = ? AND installation_id = ?',
+            (session_id, installation_id)
+        ).fetchone()
+        if not was_selected:
+            return False
+
+        db.execute(
+            'DELETE FROM session_installations WHERE session_id = ? AND installation_id = ?',
+            (session_id, installation_id)
+        )
+        if was_selected[0] == 1:
+            remaining = db.execute(
+                'SELECT installation_id FROM session_installations WHERE session_id = ? ORDER BY installation_id DESC LIMIT 1',
+                (session_id,)
+            ).fetchone()
+            if remaining:
+                db.execute(
+                    'UPDATE session_installations SET is_selected = 1 WHERE session_id = ? AND installation_id = ?',
+                    (session_id, remaining[0])
+                )
+
+        # Check if any other session references this installation
+        other = db.execute(
+            'SELECT 1 FROM session_installations WHERE installation_id = ? LIMIT 1',
+            (installation_id,)
+        ).fetchone()
+        if not other:
+            db.execute('UPDATE github_installations SET is_active = 0 WHERE installation_id = ?', (installation_id,))
+        return True
+
+def is_installation_authorized_for_session(session_id: Optional[str], installation_id: int) -> bool:
+    """Checks whether an installation is authorized for the given session."""
+    if not session_id:
+        return False
+    with connection() as db:
+        row = db.execute(
+            'SELECT 1 FROM session_installations WHERE session_id = ? AND installation_id = ?',
+            (session_id, installation_id)
+        ).fetchone()
+        return bool(row)
+
+def get_session_authorized_installation_ids(session_id: Optional[str]) -> Set[int]:
+    """Returns set of installation IDs authorized for the given session."""
+    if not session_id:
+        return set()
+    with connection() as db:
+        rows = db.execute(
+            'SELECT installation_id FROM session_installations WHERE session_id = ?',
+            (session_id,)
+        ).fetchall()
+        return {r[0] for r in rows}
+
 
 

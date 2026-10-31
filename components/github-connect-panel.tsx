@@ -23,6 +23,7 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import {
   api,
+  initSession,
   GitHubStatus,
   GitHubInstallation,
   GitHubRepository,
@@ -41,6 +42,7 @@ export default function GitHubConnectPanel({
   profile: "fast" | "deep";
   onProfileChange: (p: "fast" | "deep") => void;
 }) {
+  const [sessionReady, setSessionReady] = useState(false);
   const [status, setStatus] = useState<GitHubStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
@@ -91,7 +93,17 @@ export default function GitHubConnectPanel({
   };
 
   useEffect(() => {
-    fetchStatus();
+    let active = true;
+    async function init() {
+      await initSession();
+      if (!active) return;
+      setSessionReady(true);
+      await fetchStatus();
+    }
+    init();
+    return () => {
+      active = false;
+    };
   }, []);
 
   // Fetch repositories
@@ -162,6 +174,9 @@ export default function GitHubConnectPanel({
       await api<GitHubInstallation>(`/github/installations/${instId}/select`, { method: "POST" });
       setSelectedRepo(null);
       setRepos([]);
+      setBranches([]);
+      setSelectedBranch("");
+      setActiveCommitSha(null);
       await fetchStatus();
     } catch (err) {
       setError((err as Error).message);
@@ -181,6 +196,9 @@ export default function GitHubConnectPanel({
       }
       setSelectedRepo(null);
       setRepos([]);
+      setBranches([]);
+      setSelectedBranch("");
+      setActiveCommitSha(null);
       await fetchStatus();
     } catch (err) {
       setError((err as Error).message);
@@ -218,7 +236,7 @@ export default function GitHubConnectPanel({
     }
   };
 
-  if (loading) {
+  if (!sessionReady || loading) {
     return (
       <div style={{ padding: "40px", textAlign: "center", color: "var(--muted)" }}>
         <Loader2 size={20} className="animate-spin" style={{ margin: "0 auto 8px" }} />

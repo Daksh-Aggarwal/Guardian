@@ -387,6 +387,8 @@ class HandoffBuilder:
                 references=[sanitize_inline_markdown(r) for r in (f.references or [])],
                 domain=getattr(f, 'domain', 'behavior') or 'behavior',
                 package=sanitize_inline_markdown(f.package) if f.package else None,
+                ecosystem=f.ecosystem,
+                artifact_sha256=f.artifact_sha256,
                 advisory=adv_detail,
                 evidence=ev_locs,
                 limitations=[sanitize_inline_markdown(l) for l in (f.limitations or [])],

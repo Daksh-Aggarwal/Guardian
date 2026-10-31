@@ -1,7 +1,9 @@
 import ast
 import json
+import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 from uuid import uuid4
 import yaml
@@ -9,6 +11,9 @@ from .models import Dependency, Evidence, Finding, DataFlow
 from .config import parser_limits
 
 ROOT = Path(__file__).resolve().parents[2]
+PARSER = ROOT / 'scripts/parse.cjs'
+if not PARSER.is_file():
+    PARSER = Path(sys.prefix) / 'share/guardian/scripts/parse.cjs'
 POPULAR = ['react', 'react-dom', 'lodash', 'express', 'axios', 'chalk', 'commander', 'typescript', 'webpack', 'vite', 'next', 'eslint', 'prettier', 'dotenv', 'zod', 'mongoose', 'debug', 'moment', 'cross-env', 'cookie', 'minimist', 'yargs', 'jquery', 'request', 'uuid']
 RANK = {'info': 0, 'low': 1, 'medium': 2, 'high': 3, 'critical': 4}
 LIFECYCLE_STAGES = ['preinstall', 'install', 'postinstall', 'prepare', 'preuninstall', 'uninstall', 'postuninstall', 'prepack', 'postpack', 'prepublish', 'prepublishOnly']
@@ -213,7 +218,8 @@ def analyze(files, limits=None, timeout=20):
     parsed = []
     if sources:
         try:
-            result = subprocess.run(['node', '--max-old-space-size=256', str(ROOT / 'scripts/parse.cjs')], input=json.dumps({"files":sources,"limits":limits or parser_limits()}), text=True, capture_output=True, timeout=timeout, cwd=ROOT)
+            parser_env = {k: v for k, v in os.environ.items() if k not in {'NODE_OPTIONS', 'NODE_PATH'}}
+            result = subprocess.run(['node', '--max-old-space-size=256', str(PARSER)], input=json.dumps({"files":sources,"limits":limits or parser_limits()}), text=True, capture_output=True, timeout=timeout, cwd=ROOT, env=parser_env)
             if result.returncode:
                 raise ValueError('Parser exited unsuccessfully')
             parsed = json.loads(result.stdout)
