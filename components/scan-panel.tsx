@@ -33,6 +33,7 @@ export default function ScanPanel({
   onConnectFolder,
   activeTab,
   onTabChange,
+  onAnalyzing,
 }: {
   onStart: (id: string) => void;
   busy: boolean;
@@ -40,6 +41,7 @@ export default function ScanPanel({
   onConnectFolder?: () => void;
   activeTab?: "upload" | "package" | "github";
   onTabChange?: (tab: "upload" | "package" | "github") => void;
+  onAnalyzing?: () => void;
 }) {
   const [internalTab, setInternalTab] = useState<"upload" | "package" | "github">("upload");
   const tab = activeTab ?? internalTab;
@@ -60,6 +62,7 @@ export default function ScanPanel({
   async function submit() {
     setError("");
     setSending(true);
+    onAnalyzing?.();
     try {
       let result: { id: string };
       if (tab === "upload") {

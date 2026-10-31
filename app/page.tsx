@@ -66,6 +66,7 @@ export default function Home() {
   const [dark, setDark] = useState(true);
   const [themeReady, setThemeReady] = useState(false);
   const [job, setJob] = useState<ScanJob | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [connected, setConnected] = useState(false);
@@ -232,6 +233,7 @@ export default function Home() {
 
   const openReport = useCallback((r: Report) => {
     setReport(r);
+    setIsAnalyzing(false);
     window.history.replaceState(null, "", `?scan=${r.id}`);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, []);
@@ -249,14 +251,18 @@ export default function Home() {
         setJob(state);
         if (state.status === "complete") {
           const finishedReport = await api<Report>(`/scans/${job.id}`);
+          setJob(null);
+          setIsAnalyzing(false);
           openReport(finishedReport);
           refresh();
         } else if (state.status === "failed") {
           setError(state.error || "Scan failed.");
           setJob(null);
+          setIsAnalyzing(false);
         } else if (state.status === "cancelled") {
           setError(state.stage || "Scan was cancelled.");
           setJob(null);
+          setIsAnalyzing(false);
         } else {
           timer = setTimeout(poll, 650);
         }
@@ -264,6 +270,7 @@ export default function Home() {
         if (!cancelled) {
           setError((e as Error).message);
           setJob(null);
+          setIsAnalyzing(false);
         }
       }
     };
@@ -280,6 +287,10 @@ export default function Home() {
   ) {
     setPage(p);
     setReport(null);
+    if (p === "Overview") {
+      if (!busy) setJob(null);
+      setIsAnalyzing(false);
+    }
     window.history.replaceState(null, "", "/");
     setSearch("");
     setMobileMenuOpen(false);
@@ -288,6 +299,7 @@ export default function Home() {
   function startScan(id: string) {
     setError("");
     navigate("Overview");
+    setIsAnalyzing(true);
     setJob({ id, status: "queued", stage: "Queued" });
     document
       .getElementById("new-scan")
@@ -605,7 +617,17 @@ export default function Home() {
         </header>
 
         {/* Main Content Viewport */}
-        <main className={page === "Overview" ? "main-overview" : ""}>
+        <main
+          className={
+            report
+              ? ""
+              : page === "Overview"
+                ? isAnalyzing || busy || job
+                  ? "main-overview is-scrollable"
+                  : "main-overview"
+                : ""
+          }
+        >
           {error && (
             <div className="global-error" role="alert">
               <AlertCircle size={18} />
@@ -822,6 +844,7 @@ export default function Home() {
                       onConnectFolder={() => navigate("Project workspace")}
                       activeTab={scanTab}
                       onTabChange={setScanTab}
+                      onAnalyzing={() => setIsAnalyzing(true)}
                     />
                     <CliReportImport
                       onImport={(imported) => {
