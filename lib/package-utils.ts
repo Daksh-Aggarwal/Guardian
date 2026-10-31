@@ -143,25 +143,73 @@ export function normalizePackageName(
 }
 
 /**
- * Compares two SemVer 2.0.0 version strings according to the official specification.
- * 1. Build metadata (+...) is stripped and ignored for precedence.
- * 2. Major, minor, and patch are compared numerically.
- * 3. A normal release has higher precedence than any pre-release (e.g. 2.0.0 > 2.0.0-rc.1).
- * 4. Pre-release identifiers separated by dots are compared:
+ * Official SemVer 2.0.0 specification regex.
+ * Strictly checks for major.minor.patch[-prerelease][+buildmetadata].
+ * Rejects leading zeros in numeric identifiers and invalid characters.
+ */
+export const STRICT_SEMVER_REGEX =
+  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
+
+export const FORBIDDEN_SEMVER_CHARS = /[><=~!*^,]/;
+
+export interface SemverOptions {
+  allowLeadingV?: boolean;
+}
+
+export function isValidSemver(
+  version?: string | null,
+  options: SemverOptions = {},
+): boolean {
+  if (!version || typeof version !== "string") return false;
+  let clean = version.trim();
+  if (FORBIDDEN_SEMVER_CHARS.test(clean)) return false;
+  if (options.allowLeadingV && (clean.startsWith("v") || clean.startsWith("V"))) {
+    clean = clean.slice(1);
+  }
+  return STRICT_SEMVER_REGEX.test(clean);
+}
+
+function compareAscii(s1: string, s2: string): number {
+  if (s1 === s2) return 0;
+  return s1 < s2 ? -1 : 1;
+}
+
+/**
+ * Compares two SemVer 2.0.0 version strings strictly according to the official specification.
+ * 1. Range operators (^, ~, >=, <=, etc.) are strictly forbidden and throw TypeError.
+ * 2. Build metadata (+...) is stripped and ignored for precedence.
+ * 3. Major, minor, and patch are compared numerically.
+ * 4. A normal release has higher precedence than any pre-release (e.g. 2.0.0 > 2.0.0-rc.1).
+ * 5. Pre-release identifiers separated by dots are compared:
  *    - Numeric identifiers are compared as integers (e.g. alpha.10 > alpha.2).
- *    - Identifiers with letters are compared lexically (ASCII order).
+ *    - Identifiers with letters are compared by ASCII lexical order.
  *    - Numeric identifiers have lower precedence than non-numeric identifiers.
  *    - More pre-release identifiers have higher precedence (e.g. 1.0.0-beta.1 > 1.0.0-beta).
  * Returns 1 if v1 > v2, -1 if v1 < v2, and 0 if equal.
  */
-export function compareSemver(v1?: string | null, v2?: string | null): number {
+export function compareSemver(
+  v1?: string | null,
+  v2?: string | null,
+  options: SemverOptions = {},
+): number {
   if (!v1 && !v2) return 0;
   if (!v1) return -1;
   if (!v2) return 1;
 
-  // Clean version strings (strip leading v, ^, ~, >=, <=, etc.)
-  const clean1 = v1.replace(/^[v^~>=<]+/, "").trim();
-  const clean2 = v2.replace(/^[v^~>=<]+/, "").trim();
+  let clean1 = v1.trim();
+  let clean2 = v2.trim();
+
+  if (options.allowLeadingV) {
+    if (clean1.startsWith("v") || clean1.startsWith("V")) clean1 = clean1.slice(1);
+    if (clean2.startsWith("v") || clean2.startsWith("V")) clean2 = clean2.slice(1);
+  }
+
+  if (!isValidSemver(clean1, { allowLeadingV: false })) {
+    throw new TypeError(`Invalid SemVer 2.0.0 version string: '${v1}'`);
+  }
+  if (!isValidSemver(clean2, { allowLeadingV: false })) {
+    throw new TypeError(`Invalid SemVer 2.0.0 version string: '${v2}'`);
+  }
 
   if (clean1 === clean2) return 0;
 
@@ -179,11 +227,10 @@ export function compareSemver(v1?: string | null, v2?: string | null): number {
   const core2 = dashIdx2 === -1 ? noBuild2 : noBuild2.slice(0, dashIdx2);
   const prerelease2 = dashIdx2 === -1 ? null : noBuild2.slice(dashIdx2 + 1);
 
-  const parts1 = core1.split(".").map((n) => parseInt(n, 10) || 0);
-  const parts2 = core2.split(".").map((n) => parseInt(n, 10) || 0);
+  const parts1 = core1.split(".").map((n) => parseInt(n, 10));
+  const parts2 = core2.split(".").map((n) => parseInt(n, 10));
 
-  const maxLen = Math.max(parts1.length, parts2.length);
-  for (let i = 0; i < maxLen; i++) {
+  for (let i = 0; i < 3; i++) {
     const p1 = parts1[i] ?? 0;
     const p2 = parts2[i] ?? 0;
     if (p1 > p2) return 1;
@@ -205,7 +252,6 @@ export function compareSemver(v1?: string | null, v2?: string | null): number {
     const id1 = idents1[i];
     const id2 = idents2[i];
 
-    // If one ran out of identifiers, the one with more identifiers has higher precedence
     if (id1 === undefined) return -1;
     if (id2 === undefined) return 1;
 
@@ -225,10 +271,184 @@ export function compareSemver(v1?: string | null, v2?: string | null): number {
     } else if (!isNum1 && isNum2) {
       return 1;
     } else {
-      // Both non-numeric: ASCII lexical order
-      return id1.localeCompare(id2);
+      // Both non-numeric: strictly ASCII lexical order (NOT localeCompare)
+      return compareAscii(id1, id2);
     }
   }
 
   return 0;
+}
+
+/**
+ * PEP 440 canonical regex and validation.
+ */
+export const PEP440_REGEX =
+  /^([0-9]+!)?([0-9]+(?:\.[0-9]+)*)(?:[-_.]?(a|b|c|rc|alpha|beta|pre|preview)[-_.]?([0-9]+)?)?(?:(?:[-_.]?(?:post|rev|r)[-_.]?([0-9]+)?)|(?:-([0-9]+)))?(?:[-_.]?dev[-_.]?([0-9]+)?)?(?:\+([0-9a-zA-Z]+(?:[-_.][0-9a-zA-Z]+)*))?$/i;
+
+export const FORBIDDEN_PEP440_CHARS = /[><=~*^]|!=/;
+
+export interface ParsedPep440 {
+  epoch: number;
+  release: number[];
+  pre: [string, number] | null;
+  post: number | null;
+  dev: number | null;
+  local: string | null;
+}
+
+export function isValidPep440(version?: string | null): boolean {
+  if (!version || typeof version !== "string") return false;
+  const clean = version.trim();
+  if (["unresolved", "latest", "*", ""].includes(clean)) return false;
+  if (FORBIDDEN_PEP440_CHARS.test(clean)) return false;
+  return PEP440_REGEX.test(clean);
+}
+
+export function parsePep440(version: string): ParsedPep440 | null {
+  if (!version || typeof version !== "string") return null;
+  const clean = version.trim();
+  if (FORBIDDEN_PEP440_CHARS.test(clean)) return null;
+  const m = clean.match(PEP440_REGEX);
+  if (!m) return null;
+
+  const epoch = m[1] ? parseInt(m[1].replace("!", ""), 10) : 0;
+  const release = m[2].split(".").map((n) => parseInt(n, 10));
+
+  let pre: [string, number] | null = null;
+  if (m[3]) {
+    let tag = m[3].toLowerCase();
+    if (tag === "alpha") tag = "a";
+    else if (tag === "beta") tag = "b";
+    else if (tag === "c" || tag === "pre" || tag === "preview") tag = "rc";
+    const num = m[4] ? parseInt(m[4], 10) : 0;
+    pre = [tag, num];
+  }
+
+  let post: number | null = null;
+  const rawPost = m[5] || m[6];
+  if (rawPost !== undefined) {
+    post = parseInt(rawPost, 10);
+  } else if (clean.includes(".post") || clean.includes("-post")) {
+    post = 0;
+  }
+
+  let dev: number | null = null;
+  if (m[7] !== undefined) {
+    dev = parseInt(m[7], 10);
+  } else if (clean.includes(".dev") || clean.includes("-dev")) {
+    dev = 0;
+  }
+
+  const local = m[8] || null;
+
+  return { epoch, release, pre, post, dev, local };
+}
+
+/**
+ * Compares two PyPI versions according to PEP 440.
+ */
+export function comparePep440(v1?: string | null, v2?: string | null): number {
+  if (!v1 && !v2) return 0;
+  if (!v1) return -1;
+  if (!v2) return 1;
+
+  const p1 = parsePep440(v1);
+  const p2 = parsePep440(v2);
+
+  if (!p1) throw new TypeError(`Invalid PEP 440 version: '${v1}'`);
+  if (!p2) throw new TypeError(`Invalid PEP 440 version: '${v2}'`);
+
+  // 1. Epoch
+  if (p1.epoch !== p2.epoch) {
+    return p1.epoch > p2.epoch ? 1 : -1;
+  }
+
+  // 2. Release segment (normalize trailing zeros: 1.0.0 == 1.0)
+  const r1 = [...p1.release];
+  while (r1.length > 0 && r1[r1.length - 1] === 0) r1.pop();
+  const r2 = [...p2.release];
+  while (r2.length > 0 && r2[r2.length - 1] === 0) r2.pop();
+
+  const maxLen = Math.max(r1.length, r2.length);
+  for (let i = 0; i < maxLen; i++) {
+    const n1 = r1[i] ?? 0;
+    const n2 = r2[i] ?? 0;
+    if (n1 !== n2) {
+      return n1 > n2 ? 1 : -1;
+    }
+  }
+
+  // 3. Pre-release
+  // Release without pre-release > release with pre-release
+  const preTagOrder: Record<string, number> = { a: 1, b: 2, rc: 3 };
+  const preVal1 = p1.pre ? preTagOrder[p1.pre[0]] : 999;
+  const preVal2 = p2.pre ? preTagOrder[p2.pre[0]] : 999;
+
+  if (preVal1 !== preVal2) {
+    return preVal1 > preVal2 ? 1 : -1;
+  }
+  if (p1.pre && p2.pre && p1.pre[1] !== p2.pre[1]) {
+    return p1.pre[1] > p2.pre[1] ? 1 : -1;
+  }
+
+  // 4. Post-release (post > normal)
+  const postVal1 = p1.post !== null ? p1.post : -1;
+  const postVal2 = p2.post !== null ? p2.post : -1;
+  if (postVal1 !== postVal2) {
+    return postVal1 > postVal2 ? 1 : -1;
+  }
+
+  // 5. Development release (dev < normal)
+  const devVal1 = p1.dev !== null ? p1.dev : Infinity;
+  const devVal2 = p2.dev !== null ? p2.dev : Infinity;
+  if (devVal1 !== devVal2) {
+    return devVal1 > devVal2 ? 1 : -1;
+  }
+
+  // 6. Local version
+  if (p1.local || p2.local) {
+    if (!p1.local && p2.local) return -1;
+    if (p1.local && !p2.local) return 1;
+    if (p1.local && p2.local) {
+      return compareAscii(p1.local, p2.local);
+    }
+  }
+
+  return 0;
+}
+
+/**
+ * Ecosystem-aware version comparison.
+ * - 'npm': uses strict SemVer 2.0.0
+ * - 'pypi': uses PEP 440
+ */
+export function compareVersions(
+  v1?: string | null,
+  v2?: string | null,
+  ecosystem: "npm" | "pypi" = "npm",
+  options: SemverOptions = {},
+): number {
+  if (ecosystem === "pypi") {
+    return comparePep440(v1, v2);
+  }
+  return compareSemver(v1, v2, options);
+}
+
+/**
+ * Safe version comparator that does not throw on invalid/unresolved inputs,
+ * suitable for sorting dependency tables and timeline displays.
+ */
+export function compareVersionsSafe(
+  v1?: string | null,
+  v2?: string | null,
+  ecosystem: "npm" | "pypi" = "npm",
+): number {
+  try {
+    return compareVersions(v1, v2, ecosystem);
+  } catch {
+    if (!v1 && !v2) return 0;
+    if (!v1) return -1;
+    if (!v2) return 1;
+    return compareAscii(v1, v2);
+  }
 }

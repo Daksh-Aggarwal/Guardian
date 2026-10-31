@@ -7,9 +7,14 @@ import httpx
 from .engine import finding
 from .models import Evidence, Advisory
 
+try:
+    from packaging.version import Version, InvalidVersion
+except ImportError:
+    Version = None
+
 NPM_EXACT = re.compile(r'^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$')
 PYPI_EXACT = re.compile(r'^\d+\.\d+(?:\.\d+)?(?:[a-zA-Z0-9_.+-]+)?$')
-FORBIDDEN_VERSION_CHARS = re.compile(r'[><=~!*^,]')
+FORBIDDEN_VERSION_CHARS = re.compile(r'[><=~*^]|!=|,')
 
 def is_exact_resolved_version(version: str, ecosystem: str = 'npm') -> bool:
     """Verifies that a version string represents an exact resolved version and not a range/constraint."""
@@ -19,6 +24,12 @@ def is_exact_resolved_version(version: str, ecosystem: str = 'npm') -> bool:
     if clean in ('unresolved', 'latest', '*', '') or FORBIDDEN_VERSION_CHARS.search(clean):
         return False
     if ecosystem.lower() == 'pypi':
+        if Version is not None:
+            try:
+                Version(clean)
+                return True
+            except InvalidVersion:
+                return False
         return bool(PYPI_EXACT.fullmatch(clean))
     return bool(NPM_EXACT.fullmatch(clean))
 

@@ -474,7 +474,7 @@ export default function Home() {
       )}
 
       {/* Sidebar Navigation */}
-      <aside className={`sidebar ${mobileMenuOpen ? "mobile-open" : ""}`}>
+      <aside className={mobileMenuOpen ? "sidebar mobile-open" : "sidebar"}>
         <div className="sidebar-brand-row">
           <Brand />
           <button
@@ -507,7 +507,11 @@ export default function Home() {
                 {name}
                 {name === "Scan history" && (
                   <span
-                    className={`nav-attention-dot ${reports.length > 0 ? "has-reports" : ""}`}
+                    className={
+                      reports.length > 0
+                        ? "nav-attention-dot has-reports"
+                        : "nav-attention-dot"
+                    }
                     title={
                       reports.length > 0
                         ? `${reports.length} scan${reports.length === 1 ? "" : "s"} in history`
@@ -555,8 +559,6 @@ export default function Home() {
           </div>
 
           <div className="top-actions">
-
-
             <button
               aria-label={dark ? "Switch to light mode" : "Switch to dark mode"}
               className="icon-button theme-toggle"

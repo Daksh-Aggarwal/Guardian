@@ -27,8 +27,14 @@ globalThis.window = {
           objectStoreNames: { contains: () => true },
           transaction: () => ({
             objectStore: () => ({
-              put: (backup) => {
-                backupStore.set(backup.plan_id, backup);
+              getAll: () => {
+                const r = { result: Array.from(backupStore.values()) };
+                queueMicrotask(() => r.onsuccess?.());
+                return r;
+              },
+              put: (item) => {
+                const key = item.id || item.plan_id;
+                backupStore.set(key, item);
                 const r = {};
                 queueMicrotask(() => r.onsuccess?.());
                 return r;
@@ -70,7 +76,14 @@ const {
   normalizePackageName,
   getFindingSignature,
   compareSemver,
+  isValidSemver,
+  comparePep440,
+  isValidPep440,
+  compareVersions,
+  compareVersionsSafe,
 } = await import("../lib/package-utils.ts");
+
+const { resolveProjectDirectoryId } = await import("../lib/project-identity.ts");
 
 // Mock FileSystemFileHandle & FileSystemDirectoryHandle
 class MockFileHandle {
@@ -111,6 +124,10 @@ class MockDirectoryHandle {
     this.kind = "directory";
     this.files = new Map();
     this.permission = "granted";
+  }
+
+  async isSameEntry(other) {
+    return this === other;
   }
 
   async requestPermission({ mode } = {}) {
@@ -1305,4 +1322,83 @@ test("20. Undo error classification rejects permission errors rather than assumi
       return true;
     }
   );
+});
+
+test("21. Strict SemVer 2.0.0 validation and comparison", () => {
+  // Prerelease ordering
+  assert.equal(compareSemver("1.0.0-alpha.2", "1.0.0-alpha.10"), -1);
+  assert.equal(compareSemver("1.0.0-beta", "1.0.0-beta.1"), -1);
+  assert.equal(compareSemver("1.0.0-rc.1", "1.0.0"), -1);
+  assert.equal(compareSemver("1.0.0", "1.0.0-rc.1"), 1);
+
+  // Build metadata equality (stripped and ignored)
+  assert.equal(compareSemver("1.0.0+build1", "1.0.0+build2"), 0);
+
+  // Rejection of range operators
+  assert.throws(() => compareSemver("^1.2.3", "1.2.3"), TypeError);
+  assert.throws(() => compareSemver("~1.2.3", "1.2.3"), TypeError);
+  assert.throws(() => compareSemver(">=1.2.3", "1.2.3"), TypeError);
+
+  // Leading 'v' rejected by default unless allowLeadingV is set
+  assert.throws(() => compareSemver("v1.2.3", "1.2.3"), TypeError);
+  assert.equal(compareSemver("v1.2.3", "1.2.3", { allowLeadingV: true }), 0);
+});
+
+test("22. PEP 440 PyPI parsing, normalization, and ordering", () => {
+  // Trailing zero normalization in release segment (1.0.0 == 1.0)
+  assert.equal(comparePep440("1.0.0", "1.0"), 0);
+  assert.equal(comparePep440("2.1.0", "2.1"), 0);
+  assert.equal(comparePep440("2.1.1", "2.1"), 1);
+
+  // Epoch comparison
+  assert.equal(comparePep440("1!1.0", "2.0"), 1);
+
+  // Pre-release tag ordering: a < b < rc < final
+  assert.equal(comparePep440("1.0a1", "1.0b1"), -1);
+  assert.equal(comparePep440("1.0b1", "1.0rc1"), -1);
+  assert.equal(comparePep440("1.0rc1", "1.0"), -1);
+
+  // Post release > final
+  assert.equal(comparePep440("1.0.post1", "1.0"), 1);
+
+  // Dev release < final
+  assert.equal(comparePep440("1.0.dev1", "1.0"), -1);
+
+  // Local version
+  assert.equal(comparePep440("1.0+local1", "1.0"), 1);
+
+  // Rejection of invalid / range specifiers
+  assert.throws(() => comparePep440("==1.0", "1.0"), TypeError);
+  assert.throws(() => comparePep440(">=1.0", "1.0"), TypeError);
+  assert.throws(() => comparePep440("^1.0", "1.0"), TypeError);
+});
+
+test("23. Ecosystem-aware version comparison & safety", () => {
+  // npm ecosystem uses SemVer
+  assert.equal(compareVersions("1.0.0-rc.1", "1.0.0", "npm"), -1);
+  // PyPI ecosystem uses PEP 440
+  assert.equal(compareVersions("1.0.0", "1.0", "pypi"), 0);
+  assert.equal(compareVersions("1.0a1", "1.0", "pypi"), -1);
+
+  // compareVersionsSafe does not throw on invalid/range versions
+  assert.doesNotThrow(() => compareVersionsSafe("^1.2.3", "1.2.3", "npm"));
+  assert.doesNotThrow(() => compareVersionsSafe(">=2.0.0", "1.0.0", "pypi"));
+});
+
+test("24. Local project identity isolation using FileSystemDirectoryHandle.isSameEntry", async () => {
+  // Two distinct directory handles with the same folder name "backend"
+  const dirHandleA = new MockDirectoryHandle("backend");
+  const dirHandleB = new MockDirectoryHandle("backend");
+
+  const idA = await resolveProjectDirectoryId(dirHandleA, "backend");
+  const idB = await resolveProjectDirectoryId(dirHandleB, "backend");
+
+  // Distinct directories MUST receive distinct project IDs
+  assert.notEqual(idA, idB);
+  assert.match(idA, /^proj_loc_backend_/);
+  assert.match(idB, /^proj_loc_backend_/);
+
+  // Reopening the same directory handle reuses the existing persistent project ID
+  const idA_reopened = await resolveProjectDirectoryId(dirHandleA, "backend");
+  assert.equal(idA_reopened, idA);
 });

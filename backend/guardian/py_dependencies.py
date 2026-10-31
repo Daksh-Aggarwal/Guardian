@@ -6,6 +6,7 @@ except ModuleNotFoundError:
     import tomli as tomllib
 from pathlib import PurePosixPath
 from .models import Dependency, PackageInspection, IntegrityResult
+from .intelligence import is_exact_resolved_version
 
 EXACT = re.compile(r'^\d+\.\d+(?:\.\d+)?(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$')
 MAX_DISCOVERED = 2000
@@ -42,7 +43,7 @@ def parse_requirements_txt(content: str, path: str = 'requirements.txt'):
         if not parsed:
             continue
         name, ver = parsed
-        is_exact = bool(EXACT.fullmatch(ver))
+        is_exact = is_exact_resolved_version(ver, 'pypi')
         dep = Dependency(name=name, version=ver, direct=True, source=path, ecosystem='pypi')
         dependencies.append(dep)
         inspection = PackageInspection(

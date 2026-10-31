@@ -453,9 +453,18 @@ export async function applyPlanToFileSystem(
     createdDirs: [],
   });
 
-  // 4. Sequentially write modified and created files with touched-file tracking
+  // 4. Sequentially write modified and created files with granular transaction tracking
   const modifiedFiles: string[] = [];
-  const touchedFiles = new Set<string>();
+
+  // Explicit transaction lifecycle tracking
+  const tx = {
+    createdDirectories: createdDirsSet,
+    createdFileHandles: new Set<string>(),
+    openedWritables: new Set<string>(),
+    writeAttempted: new Set<string>(),
+    writeClosed: new Set<string>(),
+    verifiedFiles: new Set<string>(),
+  };
 
   try {
     for (const change of plan.proposed_changes) {
@@ -484,16 +493,17 @@ export async function applyPlanToFileSystem(
         let writable: any = null;
         try {
           writable = await (handle as any).createWritable();
+          tx.openedWritables.add(change.file_path);
         } catch (openErr) {
           throw openErr;
         }
 
         try {
+          tx.writeAttempted.add(change.file_path);
           await writable.write(updatedText);
           await writable.close();
-          touchedFiles.add(change.file_path);
+          tx.writeClosed.add(change.file_path);
         } catch (writeErr) {
-          touchedFiles.add(change.file_path);
           throw writeErr;
         }
 
@@ -508,6 +518,7 @@ export async function applyPlanToFileSystem(
           );
         }
 
+        tx.verifiedFiles.add(change.file_path);
         modifiedFiles.push(change.file_path);
       } else if (change.operation === "create") {
         const handle = await resolveFileHandle(
@@ -516,16 +527,24 @@ export async function applyPlanToFileSystem(
           true,
           createdDirsSet,
         );
-        touchedFiles.add(change.file_path);
+        tx.createdFileHandles.add(change.file_path);
         const content = change.created_content || "";
 
         let writable: any = null;
         try {
           writable = await (handle as any).createWritable();
-          await writable.write(content);
-          await writable.close();
+          tx.openedWritables.add(change.file_path);
         } catch (createErr) {
           throw createErr;
+        }
+
+        try {
+          tx.writeAttempted.add(change.file_path);
+          await writable.write(content);
+          await writable.close();
+          tx.writeClosed.add(change.file_path);
+        } catch (writeErr) {
+          throw writeErr;
         }
 
         const writtenFile = await handle.getFile();
@@ -538,6 +557,7 @@ export async function applyPlanToFileSystem(
           );
         }
 
+        tx.verifiedFiles.add(change.file_path);
         modifiedFiles.push(change.file_path);
       }
     }
@@ -556,8 +576,9 @@ export async function applyPlanToFileSystem(
     // 5. Rollback on failure: restore touched files from backup and remove created files
     const failedRestoreFiles: string[] = [];
 
+    // Restore updated files only if a writable was opened or writing was attempted
     for (const entry of backupEntries) {
-      if (touchedFiles.has(entry.path)) {
+      if (tx.openedWritables.has(entry.path) || tx.writeAttempted.has(entry.path)) {
         try {
           const handle = await resolveFileHandle(
             directoryHandle,
@@ -581,8 +602,9 @@ export async function applyPlanToFileSystem(
       }
     }
 
+    // Remove newly created files only if a handle was created
     for (const createdPath of createdFiles) {
-      if (touchedFiles.has(createdPath)) {
+      if (tx.createdFileHandles.has(createdPath) || tx.openedWritables.has(createdPath)) {
         try {
           await removeFileHandle(directoryHandle, createdPath);
         } catch {

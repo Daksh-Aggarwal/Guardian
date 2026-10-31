@@ -619,12 +619,10 @@ def get_project_remediation_history(name: str):
         })
     return history
 
-def _get_session_id(request: Request) -> str:
+def _get_session_id(request: Request) -> Optional[str]:
     session_id = request.headers.get("x-guardian-session")
     if not session_id:
         session_id = request.cookies.get("guardian_session")
-    if not session_id:
-        session_id = github.session_manager.create_session()
     return session_id
 
 class GitHubScanRequest(BaseModel):

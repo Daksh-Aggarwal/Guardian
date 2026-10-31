@@ -31,7 +31,7 @@ from backend.guardian.remediation_models import (
     ProposedFileChange,
     TextEdit
 )
-from backend.guardian import storage
+from backend.guardian import storage, github
 
 # Generate RSA key for testing
 _TEST_KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
@@ -845,4 +845,94 @@ def test_close_merged_pull_request_preserves_applied(github_env, test_client):
         saved = storage.get_plan("plan_merged_pr")
         assert saved.status == "applied"
         assert saved.pr_state == "merged"
+
+# ==========================================
+# 5. GUARDIAN 4.2 SESSION ISOLATION & REGRESSION TESTS
+# ==========================================
+
+def test_session_isolation_and_authorization_boundary(github_env, test_client):
+    """Guardian 4.2 Section 2: Session isolation guarantees that Session B cannot
+    access or select installations authorized strictly for Session A.
+    """
+    sess_A = "sess_user_alpha_123"
+    sess_B = "sess_user_beta_456"
+
+    # Save an installation
+    storage.save_github_installation({
+        "id": 7771,
+        "account_login": "org-alpha",
+        "account_type": "Organization"
+    }, make_active=False)
+
+    # Authorize 7771 strictly for Session A
+    github.session_manager.authorize_installation(sess_A, 7771)
+    assert github.session_manager.is_installation_authorized(sess_A, 7771) is True
+    assert github.session_manager.is_installation_authorized(sess_B, 7771) is False
+
+    # Session A lists installations: sees 7771
+    resp_A = test_client.get("/api/github/installations", headers={"x-guardian-session": sess_A})
+    assert resp_A.status_code == 200
+    insts_A = resp_A.json()
+    assert any(i["id"] == 7771 for i in insts_A)
+
+    # Session B lists installations: sees nothing authorized for B
+    resp_B = test_client.get("/api/github/installations", headers={"x-guardian-session": sess_B})
+    assert resp_B.status_code == 200
+    insts_B = resp_B.json()
+    assert not any(i["id"] == 7771 for i in insts_B)
+
+    # Session B attempts to select 7771: rejected
+    sel_B = test_client.post("/api/github/installations/7771/select", headers={"x-guardian-session": sess_B})
+    assert sel_B.status_code in (400, 403, 404)
+
+    # Session B attempts to list repositories: rejected with 400 or 403
+    repo_B = test_client.get("/api/github/repositories", headers={"x-guardian-session": sess_B})
+    assert repo_B.status_code in (400, 403)
+
+    # Session A selects 7771 and lists repositories: succeeds
+    with patch("backend.guardian.github._call_installation_api", return_value={"repositories": [{"id": 1, "name": "r1", "full_name": "org-alpha/r1"}]}):
+        repo_A = test_client.get("/api/github/repositories", headers={"x-guardian-session": sess_A})
+        assert repo_A.status_code == 200
+
+def test_session_disconnect_isolation(github_env, test_client):
+    """Guardian 4.2 Section 2.C: Disconnecting in Session A removes it from Session A's
+    authorized/selected set, but does not delete the installation globally from SQLite.
+    """
+    sess_A = "sess_user_alpha_disc"
+    storage.save_github_installation({
+        "id": 8881,
+        "account_login": "org-shared",
+        "account_type": "Organization"
+    }, make_active=False)
+
+    github.session_manager.authorize_installation(sess_A, 8881)
+    assert github.session_manager.is_installation_authorized(sess_A, 8881) is True
+
+    # Disconnect in Session A
+    disc_resp = test_client.post(
+        "/api/github/installations/8881/disconnect",
+        headers={"x-guardian-session": sess_A}
+    )
+    assert disc_resp.status_code == 200
+    assert github.session_manager.is_installation_authorized(sess_A, 8881) is False
+
+    # Stored record in SQLite still exists (not uninstalled or deleted globally)
+    assert storage.get_github_installation(8881) is not None
+
+def test_token_retrieval_enforces_session_authorization(github_env):
+    """Guardian 4.2 Section 2.C: get_installation_access_token must reject unauthorized sessions."""
+    sess_A = "sess_auth"
+    sess_B = "sess_unauth"
+
+    github.session_manager.authorize_installation(sess_A, 9999)
+
+    # Session A authorized
+    with patch("backend.guardian.github._call_app_api", return_value={"token": "ghs_token123", "expires_at": "2026-11-01T12:00:00Z"}):
+        token = github.get_installation_access_token(9999, session_id=sess_A)
+        assert token == "ghs_token123"
+
+    # Session B unauthorized: PermissionError
+    import pytest
+    with pytest.raises(PermissionError):
+        github.get_installation_access_token(9999, session_id=sess_B)
 

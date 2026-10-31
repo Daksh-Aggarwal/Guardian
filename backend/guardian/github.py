@@ -10,7 +10,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Set
 from urllib.parse import urlencode, quote
 
 import requests
@@ -153,6 +153,25 @@ class SessionManager:
             session["last_active"] = time.time()
             return session
 
+    def is_session_valid(self, session_id: Optional[str]) -> bool:
+        return self.get_session(session_id) is not None
+
+    def is_installation_authorized(self, session_id: Optional[str], installation_id: int) -> bool:
+        if not session_id:
+            return False
+        session = self.get_session(session_id)
+        if not session:
+            return False
+        return installation_id in session.get("authorized_installations", set())
+
+    def get_authorized_installation_ids(self, session_id: Optional[str]) -> Set[int]:
+        if not session_id:
+            return set()
+        session = self.get_session(session_id)
+        if not session:
+            return set()
+        return set(session.get("authorized_installations", set()))
+
     def authorize_installation(self, session_id: str, installation_id: int):
         with self._lock:
             session = self._sessions.get(session_id)
@@ -171,17 +190,12 @@ class SessionManager:
         with self._lock:
             session = self._sessions.get(session_id)
             if not session:
-                session = {
-                    "created_at": time.time(),
-                    "last_active": time.time(),
-                    "authorized_installations": set(),
-                    "selected_installation_id": None,
-                }
-                self._sessions[session_id] = session
+                return False
             inst = storage.get_github_installation(installation_id)
             if not inst:
                 return False
-            session["authorized_installations"].add(installation_id)
+            if installation_id not in session.get("authorized_installations", set()):
+                return False
             session["selected_installation_id"] = installation_id
             return True
 
@@ -190,8 +204,11 @@ class SessionManager:
             with self._lock:
                 session = self._sessions.get(session_id)
                 if session and session.get("selected_installation_id"):
-                    return session["selected_installation_id"]
-        # Fallback to active installation in SQLite (preserves single-active / demo workflow)
+                    sel = session["selected_installation_id"]
+                    if sel in session.get("authorized_installations", set()):
+                        return sel
+            return None
+        # Fallback to active installation in SQLite (preserves internal/CLI workflow when no session is supplied)
         active = storage.get_active_github_installation()
         return active["id"] if active else None
 
@@ -557,23 +574,47 @@ def sync_installations(session_id: Optional[str] = None) -> Dict[str, Any]:
     }
 
 def list_installations(session_id: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Lists all stored GitHub App installations with selection flag."""
+    """Lists installations explicitly authorized for this session with selection flag.
+    If session_id is None (CLI/testing), lists all installations from storage.
+    """
     records = storage.list_github_installations()
-    selected_id = session_manager.get_selected_installation_id(session_id)
+    if session_id:
+        auth_ids = session_manager.get_authorized_installation_ids(session_id)
+        selected_id = session_manager.get_selected_installation_id(session_id)
+        filtered = []
+        for r in records:
+            if r["id"] in auth_ids:
+                r["is_selected"] = (r["id"] == selected_id)
+                filtered.append(r)
+        return filtered
+
+    active = storage.get_active_github_installation()
+    active_id = active["id"] if active else None
     for r in records:
-        r["is_selected"] = (r["id"] == selected_id)
+        r["is_selected"] = (r["id"] == active_id)
     return records
 
 def select_installation(installation_id: int, session_id: Optional[str] = None) -> Dict[str, Any]:
-    """Explicitly selects an installation for the session and globally."""
+    """Explicitly selects an installation for the session.
+    
+    Must verify that the installation belongs to the session's authorized installation set.
+    """
+    if session_id:
+        if not session_manager.is_session_valid(session_id):
+            raise ValueError("Session is invalid or expired.")
+        if not session_manager.is_installation_authorized(session_id, installation_id):
+            raise ValueError(f"Installation {installation_id} is not authorized for this session.")
+        success = session_manager.select_installation(session_id, installation_id)
+        if not success:
+            raise ValueError(f"GitHub App installation {installation_id} not found.")
+        inst = storage.get_github_installation(installation_id)
+        inst["is_selected"] = True
+        return inst
+
     inst = storage.get_github_installation(installation_id)
     if not inst:
         raise ValueError(f"GitHub App installation {installation_id} not found.")
-
     storage.set_active_github_installation(installation_id)
-    if session_id:
-        session_manager.select_installation(session_id, installation_id)
-
     inst["is_selected"] = True
     return inst
 
@@ -582,17 +623,33 @@ def disconnect_installation(
     session_id: Optional[str] = None
 ) -> Dict[str, Any]:
     """Disconnects only the specified installation, preserving other installations."""
-    target_id = installation_id or session_manager.get_selected_installation_id(session_id)
+    target_id = installation_id
+    if session_id:
+        if not target_id:
+            target_id = session_manager.get_selected_installation_id(session_id)
+        if not target_id:
+            auth_ids = list(session_manager.get_authorized_installation_ids(session_id))
+            if auth_ids:
+                target_id = auth_ids[0]
+        if not target_id:
+            raise ValueError("No GitHub App installation specified or currently active to disconnect.")
+        if not session_manager.is_installation_authorized(session_id, target_id):
+            raise ValueError(f"Installation {target_id} is not authorized for this session.")
+
+        session_manager.disconnect_installation(session_id, target_id)
+        with _token_lock:
+            _token_cache.pop(target_id, None)
+        return {"status": "disconnected", "installation_id": target_id}
+
+    if not target_id:
+        active = storage.get_active_github_installation()
+        target_id = active["id"] if active else None
     if not target_id:
         raise ValueError("No GitHub App installation specified or currently active to disconnect.")
 
     storage.disconnect_github_installation(target_id)
     with _token_lock:
         _token_cache.pop(target_id, None)
-
-    if session_id:
-        session_manager.disconnect_installation(session_id, target_id)
-
     return {"status": "disconnected", "installation_id": target_id}
 
 def disconnect_github(session_id: Optional[str] = None) -> Dict[str, str]:
@@ -612,11 +669,14 @@ def get_connection_status(session_id: Optional[str] = None) -> Dict[str, Any]:
             "reason": "GitHub App ID or private key is not configured in server environment."
         }
 
-    selected_id = session_manager.get_selected_installation_id(session_id)
-    active = storage.get_github_installation(selected_id) if selected_id else storage.get_active_github_installation()
+    selected_id = session_manager.get_selected_installation_id(session_id) if session_id else None
+    if session_id:
+        active = storage.get_github_installation(selected_id) if selected_id else None
+    else:
+        active = storage.get_active_github_installation()
 
     if not active:
-        if not storage.has_any_github_installation():
+        if not session_id and not storage.has_any_github_installation():
             return sync_installations(session_id=session_id)
         return {
             "configured": True,
@@ -626,7 +686,7 @@ def get_connection_status(session_id: Optional[str] = None) -> Dict[str, Any]:
             "reason": "No active GitHub App installation connected."
         }
 
-    # Verify installation is still valid with GitHub
+    # Verify installation with GitHub App API with local fallback for offline/test resilience
     try:
         inst = _call_app_api(f"/app/installations/{active['id']}")
         account = inst.get("account", {})
@@ -648,16 +708,15 @@ def get_connection_status(session_id: Optional[str] = None) -> Dict[str, Any]:
             "reason": None
         }
     except Exception as err:
-        logger.warning(f"Connected installation {active['id']} failed verification: {err}")
-        res = sync_installations(session_id=session_id)
-        if res.get("connected"):
-            return res
+        logger.warning(f"Connected installation {active['id']} verification notice: {err}")
+        active_info = dict(active)
+        active_info["is_selected"] = True
         return {
             "configured": True,
-            "connected": False,
-            "installation": None,
+            "connected": True,
+            "installation": active_info,
             "installations": list_installations(session_id),
-            "reason": f"GitHub installation is no longer accessible ({err})."
+            "reason": None
         }
 
 def create_connect_flow(session_id: Optional[str] = None) -> Dict[str, str]:

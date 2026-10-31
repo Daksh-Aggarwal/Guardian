@@ -20,7 +20,7 @@ import type { Severity } from "@/lib/types";
 
 export function Brand({ size = "default" }: { size?: "default" | "compact" }) {
   return (
-    <div className={`brand ${size === "compact" ? "brand-compact" : ""}`}>
+    <div className={size === "compact" ? "brand brand-compact" : "brand"}>
       <motion.span
         className="brand-icon"
         whileHover={{ scale: 1.06, rotate: -3 }}
@@ -48,7 +48,7 @@ export function Badge({
       ? "Observation"
       : norm.charAt(0).toUpperCase() + norm.slice(1);
   return (
-    <span className={`badge ${norm} ${size === "sm" ? "badge-sm" : ""}`}>
+    <span className={size === "sm" ? `badge ${norm} badge-sm` : `badge ${norm}`}>
       <i className="badge-dot" />
       {label}
     </span>
@@ -102,7 +102,11 @@ export function ClassificationBadge({
   const isDemo = classification === "demo";
   return (
     <span
-      className={`classification-badge ${isDemo ? "demo" : "real"} ${size === "sm" ? "badge-sm" : ""}`}
+      className={
+        size === "sm"
+          ? `classification-badge ${isDemo ? "demo" : "real"} badge-sm`
+          : `classification-badge ${isDemo ? "demo" : "real"}`
+      }
       title={
         isDemo ? "Synthetic demonstration fixture" : "Real project / package"
       }
