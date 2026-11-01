@@ -13,6 +13,7 @@ load_environment()
 from . import local_reports
 from .core import analyze_plan
 from .ingestion import EXTENSIONS, MAX_FILE, MAX_FILES, MAX_EXPANDED
+from .terminal_ui import Terminal, report_text, safe
 from .policy import Policy
 from .supply_models import Artifact, Plan, AcquisitionError, IntegrityError, InstallError
 
@@ -35,12 +36,23 @@ def installation_guard(project):
         path.unlink()
 
 
+def presentation_options(parser, root=False):
+    default='auto' if root else argparse.SUPPRESS
+    parser.add_argument('--color', choices=('auto','always','never'), default=default, help='Terminal color mode (NO_COLOR is respected).')
+    parser.add_argument('--no-color', dest='color', action='store_const', const='never', default=argparse.SUPPRESS, help='Disable terminal colors.')
+    group=parser.add_mutually_exclusive_group()
+    group.add_argument('--banner', action='store_true', default=None if root else argparse.SUPPRESS, help='Show the DevGuardian ASCII banner.')
+    group.add_argument('--no-banner', dest='banner', action='store_false', default=argparse.SUPPRESS, help='Suppress the welcome banner.')
+
+
 def parser():
     result = argparse.ArgumentParser(prog='guardian', description='Local npm + PyPI pre-installation static security analysis.')
-    result.add_argument('--version', action='version', version='Guardian ' + VERSION)
+    result.add_argument('--version', action='version', version='DevGuardian ' + VERSION)
+    presentation_options(result,root=True)
     commands = result.add_subparsers(dest='command', required=True)
     for command in ('install', 'check', 'audit', 'report', 'login', 'logout', 'status', 'sync', 'devices'):
         sub = commands.add_parser(command)
+        presentation_options(sub)
         if command in ('install', 'check'):
             sub.add_argument('packages', nargs='*')
         if command == 'login':
@@ -108,31 +120,8 @@ def project_artifact(project, eco):
                     hashlib.sha256(raw).hexdigest(), False, kind='project')
 
 
-def terminal(report, verbose=False):
-    cli = report.cli or {}
-    decision = cli.get('decision', {})
-    lines = ['Guardian Security Scanner', '', f"Decision: {decision.get('decision', 'REVIEW')}  |  Behavioral assessment: {report.risk}"]
-    if cli.get('location_count'):
-        lines[2:2] = [f"Found {cli['location_count']} installation locations.",
-                      f"Found {cli['unique_artifacts']} unique package artifacts.", '']
-    for p in cli.get('packages', []):
-        lines.append(f"  {p['identity']:<48} {p['decision']}")
-    for reason in dict.fromkeys(decision.get('reasons', [])):
-        lines.append('  ' + reason)
-    for f in report.findings:
-        if f.severity == 'info' and not verbose:
-            continue
-        lines.extend(['', f'{f.severity.upper()} [{f.confidence} confidence] {f.title}', f'  {f.package or report.name} | {f.rule}'])
-        if f.evidence:
-            ev = f.evidence[0]
-            lines.append(f'  {ev.file}:{ev.line}:{ev.column}: {ev.detail}')
-    status = cli.get('installation', {}).get('status', 'not attempted')
-    lines.extend(['', 'Installation: ' + status, 'No lifecycle scripts or Python build backends were executed by Guardian.',
-                  'Static analysis cannot prove a package safe. Vulnerability intelligence: ' + report.intelligence + '.'])
-    if verbose:
-        lines.extend('  ' + note for note in report.coverage)
-    # Package names/evidence are untrusted; do not emit terminal control sequences.
-    return '\n'.join(''.join(c if c >= ' ' or c == '\n' else '?' for c in line) for line in lines)
+def terminal(report, verbose=False, color='auto', width=None):
+    return report_text(report,verbose,color,width)
 
 
 def emit(report, args):
@@ -142,8 +131,8 @@ def emit(report, args):
     if args.json:
         print(report.model_dump_json())
     else:
-        print(terminal(report, args.verbose))
-        print(f'Report saved locally: {target}')
+        print(terminal(report, args.verbose, args.color))
+        print(Terminal(color=args.color).line(f'Report saved locally: {target}',tone='muted'))
 
 
 def execute(args):
@@ -170,25 +159,14 @@ def execute(args):
             result=client.sync(saved_reports())
         if args.json:
             print(json.dumps(result))
-        elif args.command == 'devices':
-            for device in result:
-                print(f"{device['id']}  {device['device_name']}  {device['operating_system']}  {'revoked' if device['revoked_at'] else 'connected'}")
-            if not result: print('No CLI devices registered yet. Run guardian login.')
-        elif result.get('status') == 'synchronized':
-            print(f"Synchronized {result['count']} report(s). Source snippets were withheld; local reports were preserved.")
         else:
-            print('Guardian Status')
-            print('Authentication: '+result.get('authentication','Local'))
-            if result.get('account'): print('Account: '+''.join(c if c.isprintable() else '?' for c in str(result['account'])))
-            if result.get('device'): print('Device: '+result['device']['device_name'])
-            print('Report Sync: '+result.get('report_sync','Sign in with guardian login'))
-            print('Automatic synchronization: disabled')
+            print(Terminal(color=args.color).account(args.command,result))
         return 0
     if args.command == 'report':
         report = local_reports.latest()
         if args.output:
             local_reports.write_private(args.output, report.model_dump_json(indent=2))
-        print(report.model_dump_json() if args.json else terminal(report, args.verbose))
+        print(report.model_dump_json() if args.json else terminal(report, args.verbose, args.color))
         return 0
     project = Path.cwd()
     specs = getattr(args, 'packages', [])
@@ -213,14 +191,14 @@ def execute(args):
         if args.command == 'check' and not specs:
             raise AcquisitionError('Specify a package or local artifact; use guardian audit for the current project.')
         if not args.json:
-            print(f'Resolving and acquiring {eco} dependencies...', file=sys.stderr)
+            print(Terminal(sys.stderr,args.color).line(f'[resolve] Resolving and acquiring {eco} dependencies...',tone='brand'),file=sys.stderr)
         plan = adapter.resolve(specs, project, offline=args.offline)
         if args.command == 'audit':
             artifact = project_artifact(project, eco)
             # Local project provenance is disclosed; its code still participates in policy.
             plan.artifacts.insert(0, artifact)
     if not args.json:
-        print(f'Analysing {len(plan.artifacts)} unique artifacts...', file=sys.stderr)
+        print(Terminal(sys.stderr,args.color).line(f'[scan] Analysing {len(plan.artifacts)} unique artifacts...',tone='brand'),file=sys.stderr)
     report = analyze_plan(plan, Policy.load(args.policy) if args.policy else None)
     decision = report.cli['decision']
     result = 0
@@ -253,7 +231,22 @@ def execute(args):
 
 
 def main(argv=None):
-    args = parser().parse_args(argv)
+    argv=list(sys.argv[1:] if argv is None else argv)
+    command_parser=parser()
+    if not argv:
+        if Terminal().interactive:print(Terminal().banner(VERSION))
+        command_parser.print_help()
+        return 0
+    if ('--help' in argv or '-h' in argv) and '--json' not in argv and '--no-banner' not in argv:
+        mode='auto'
+        for i,argument in enumerate(argv):
+            if argument=='--no-color':mode='never'
+            elif argument.startswith('--color='):mode=argument.split('=',1)[1]
+            elif argument=='--color' and i+1<len(argv):mode=argv[i+1]
+        if Terminal().interactive or '--banner' in argv:print(Terminal(color=mode).banner(VERSION))
+    args = command_parser.parse_args(argv)
+    if not args.json and (args.banner is True or (args.banner is None and args.command=='login' and Terminal().interactive)):
+        print(Terminal(color=args.color).banner(VERSION))
     try:
         return execute(args)
     except (IntegrityError, AcquisitionError, InstallError, ValueError, OSError) as error:
@@ -269,11 +262,13 @@ def main(argv=None):
                     message += ' Package: ' + diagnostic['package'] + '.'
                 if 'limit' in diagnostic:
                     message += f" Limit: {diagnostic['limit']}; encountered: {diagnostic.get('encountered', 'unknown')}."
-            print('Guardian: ' + ''.join(c if c >= ' ' else '?' for c in message), file=sys.stderr)
+            ui=Terminal(sys.stderr,args.color)
+            print(ui.heading('DevGuardian / Error'),file=sys.stderr)
+            print(ui.line(message,tone='BLOCK'),file=sys.stderr)
             if args.verbose and diagnostic:
                 for key, value in diagnostic.items():
-                    safe = ''.join(c if c >= ' ' else '?' for c in str(value))
-                    print(f'  {key}: {safe}', file=sys.stderr)
+                    clean = safe(value)
+                    print(Terminal(sys.stderr,args.color).line(f'{key}: {clean}',indent=2),file=sys.stderr)
             if isinstance(error, AcquisitionError) and args.command in {'install','check','audit'}:
                 print('No installation was attempted.', file=sys.stderr)
         return code

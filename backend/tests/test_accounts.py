@@ -276,3 +276,25 @@ def test_placeholder_database_password_is_reported_before_connecting(auth,monkey
     assert result.headers['x-guardian-error']=='database_password_placeholder'
     assert 'placeholder password' in result.json()['detail']
     assert 'db.example.invalid' not in result.text
+
+
+def test_short_opaque_refresh_token_reaches_provider_and_preserves_device_checks(auth,monkeypatch):
+    client=TestClient(app);token=auth();d=device()
+    assert client.post('/api/account/devices',headers=headers(token),json=d).status_code==200
+    calls=[]
+    def provider(path,payload):
+        calls.append((path,payload))
+        return {'access_token':token,'refresh_token':'new-token-12','expires_in':3600}
+    monkeypatch.setattr(account_api,'supabase_request',provider)
+    body={'refresh_token':'abc123xyz789','device_id':d['id']}
+    response=client.post('/api/account/cli/refresh',json=body)
+    assert response.status_code==200
+    assert calls==[('token?grant_type=refresh_token',{'refresh_token':'abc123xyz789'})]
+    assert response.json()['refresh_token']=='new-token-12'
+    assert response.headers['cache-control']=='no-store'
+    calls.clear()
+    for invalid in ('','x'*8193):
+        assert client.post('/api/account/cli/refresh',json={**body,'refresh_token':invalid}).status_code==422
+    assert not calls
+    client.post('/api/account/devices/'+d['id']+'/revoke',headers=headers(token))
+    assert client.post('/api/account/cli/refresh',json=body).status_code==403

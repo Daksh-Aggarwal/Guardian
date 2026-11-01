@@ -242,7 +242,8 @@ def logout(request:Request,device_id:UUID,user:Identity=Depends(require_identity
 
 class RefreshRequest(BaseModel):
     model_config=ConfigDict(extra='forbid')
-    refresh_token:str=Field(min_length=16,max_length=8192)
+    # Refresh tokens are opaque provider values, not JWTs or fixed-length secrets.
+    refresh_token:str=Field(min_length=1,max_length=8192)
     device_id:UUID
 
 

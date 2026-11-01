@@ -192,3 +192,20 @@ These are reproducible local tests, not live public-registry production claims. 
 Changed components: `core.py`, `supply_models.py`, `policy.py`, `npm_adapter.py`, `pypi_adapter.py`, `cli.py`, `__main__.py`, `local_reports.py`, `cli_bridge.py`; report models, engine parser environment and Python AST source-to-sink integration; API/GitHub isolation and Handoff artifact identity; `components/cli-report-import.tsx`, existing report/overview UI and `lib/types.ts`; four CLI/bridge test modules plus session regression fixtures; root `pyproject.toml`, Python requirements, npm manifests, README and architecture docs. Concurrent session persistence changes in `storage.py`/GitHub/API were retained and integrated without discarding them.
 
 The npm acquisition limits and shared-artifact accounting were subsequently corrected; see [the acquisition regression guide](CLI-BUDGETS.md) for current defaults, hard ceilings and actual Lodash/Express outcomes.
+
+## DevGuardian terminal presentation
+
+The executable remains `guardian`. Interactive help (`guardian` or `guardian --help`) and `guardian login` show a DevGuardian ASCII wordmark and shield/check inspired by `app/icon.svg`: white strokes on the icon's indigo `#4d54d7`. Narrow terminals use a compact brand header. Routine checks, reports, status, devices and sync do not show an automatic banner. No persistent first-run marker or extra network request is needed.
+
+```sh
+guardian --banner --help          # preview the branding
+guardian login --no-banner        # skip the welcome
+guardian report --color always    # explicitly request colors
+guardian report --no-color        # plain text
+guardian report --verbose         # all informational findings, evidence locations and coverage notes
+guardian report --json            # original machine-readable schema, no banner or colors
+```
+
+`--color auto|always|never`, `--no-color`, `--banner` and `--no-banner` work before or after the subcommand. Automatic colors require a terminal; redirected output stays plain. `NO_COLOR` (including an empty value), `TERM=dumb`, and unsupported Windows consoles disable ANSI even with `--color always`. JSON takes precedence over presentation flags. The banner is ASCII; no font downloads, animation, terminal clearing or added Python dependencies are required.
+
+Reports separate package decisions, findings and a final summary: actual policy decision, severity totals (including informational findings), source files, vulnerability intelligence, available integrity/dependency accounting, installation outcome, recorded overrides, coverage notes and a decision-specific next step. Nonverbose mode shows the first evidence location per actionable finding and the first two coverage notes; `--verbose` shows all. Finding IDs and stored reports remain unchanged. ALLOW never becomes a claim that a package is safe, and failed or overridden installations retain their original decision. Untrusted package/evidence/account text is stripped of terminal controls before the formatter adds its own styling.

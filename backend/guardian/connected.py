@@ -98,7 +98,7 @@ class AccountClient:
                         if len(raw)>10*1024*1024: raise AcquisitionError('Account response exceeded its size limit.')
                     if response.status_code>=300:
                         # Server errors contain no trusted arbitrary display text.
-                        message={401:'Account session expired. Run guardian login.',403:'Account or device authorization was revoked. Run guardian login.',409:'Report/device identity conflict. Local reports were preserved.',429:'Account request rate limit reached. Retry shortly.',503:'Account service is not configured or temporarily unavailable.'}.get(response.status_code,'Account request failed. Local reports were preserved.')
+                        message={401:'Account session expired. Run guardian login.',403:'Account or device authorization was revoked. Run guardian login.',409:'Report/device identity conflict. Local reports were preserved.',429:'Account request rate limit reached. Retry shortly.',422:'Account request validation failed. Update the Guardian API and CLI together; local reports are unchanged.',503:'Account service is not configured or temporarily unavailable.'}.get(response.status_code,'Account request failed. Local reports were preserved.')
                         if response.status_code==503:
                             setup_messages={
                                 'database_password_placeholder':'GUARDIAN_DATABASE_URL still has a placeholder password. Replace it in Guardian .env with your Supabase PostgreSQL connection string and restart the API. For local SQLite instead, leave GUARDIAN_DATABASE_URL blank and keep GUARDIAN_ACCOUNT_STORE=sqlite.',
