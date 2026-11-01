@@ -284,9 +284,11 @@ Open **[http://127.0.0.1:3000](http://127.0.0.1:3000)**.
 
 * **Zero Arbitrary Execution**: Guardian never runs package scripts (`preinstall`, `postinstall`), never executes uploaded archives, and never runs untrusted code in an unmonitored sandbox.
 * **Privacy-First Boundaries**: Ingestion runs in-memory; local project handles remain in browser memory; API keys and sensitive tokens are automatically redacted.
-* **Reconciled Accounting Invariants**:
-  $$\text{declaredDirect} + \text{transitive} = \text{totalResolved}$$
-  $$\text{inspected} + \text{skipped} + \text{unavailable} + \text{unresolved} + \text{integrity\_failed} + \text{not\_attempted} = \text{totalResolved}$$
+* **Reconciled Accounting Invariants**: Every dependency and finding is accounted for arithmetically—zero phantom packages, zero concealed drops:
+  ```text
+  declaredDirect + transitive === totalResolved
+  inspected + skipped + unavailable + unresolved + integrity_failed + not_attempted === totalResolved
+  ```
 * **Fail Visibly**: Incomplete coverage, skipped dependencies, or API outages are always surfaced visibly—never concealed.
 
 ---
