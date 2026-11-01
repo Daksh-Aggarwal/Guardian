@@ -52,7 +52,7 @@ import {
 } from "@/components/ui";
 import ScanPanel from "@/components/scan-panel";
 import ReportView from "@/components/report";
-import CliReportImport from "@/components/cli-report-import";
+import { AccountButton } from "@/components/account-provider";
 import ProjectWorkspace from "@/components/project-workspace";
 import RemediationPanel from "@/components/remediation-panel";
 
@@ -84,7 +84,7 @@ export default function Home() {
   const [workspaceInitialReport, setWorkspaceInitialReport] =
     useState<Report | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [scanTab, setScanTab] = useState<"upload" | "package" | "github">("upload");
+  const [scanTab, setScanTab] = useState<"upload" | "package" | "github" | "cli">("upload");
 
   const handleGetStarted = () => {
     if (page !== "Overview") navigate("Overview");
@@ -563,6 +563,7 @@ export default function Home() {
             <button
               key={name}
               className={page === name && !report ? "active" : ""}
+              aria-current={page === name && !report ? "page" : undefined}
               onClick={() => navigate(name as any)}
             >
               <Icon size={18} />
@@ -616,6 +617,7 @@ export default function Home() {
           </div>
 
           <div className="top-actions">
+            <AccountButton />
             <button
               type="button"
               className="btn-get-started"
@@ -721,7 +723,7 @@ export default function Home() {
                 report={report}
                 onBack={() => navigate("Scan history")}
                 onPrepareFix={(f) => {
-                  setRemediationFinding(f.id);
+                  setRemediationFinding(f ? f.id : null);
                   setRemediationOpen(true);
                 }}
                 onInvestigateProject={(r) => {
@@ -870,9 +872,7 @@ export default function Home() {
                       activeTab={scanTab}
                       onTabChange={setScanTab}
                       onAnalyzing={() => setIsAnalyzing(true)}
-                    />
-                    <CliReportImport
-                      onImport={(imported) => {
+                      onImportReport={(imported) => {
                         setReports((current) => [imported, ...current]);
                         openReport(imported);
                       }}

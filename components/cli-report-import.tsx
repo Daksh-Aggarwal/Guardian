@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { FileCode2, ChevronRight, Loader2 } from "lucide-react";
 import { api, Report } from "@/lib/types";
 
 export default function CliReportImport({
@@ -41,56 +42,66 @@ export default function CliReportImport({
   }
 
   return (
-    <details className="card" style={{ padding: "1.25rem", marginTop: "1rem" }}>
-      <summary style={{ cursor: "pointer", fontWeight: 600 }}>
-        Open a Guardian CLI report
+    <details className="cli-import-card">
+      <summary className="cli-import-summary">
+        <FileCode2 size={16} style={{ color: "var(--accent)" }} />
+        <span>Open a Guardian CLI report</span>
+        <ChevronRight size={14} className="cli-import-chevron" />
       </summary>
-      <p style={{ margin: "0.75rem 0", color: "var(--text-secondary)" }}>
-        Export JSON with <code>guardian report --output report.json</code>, then
-        choose it here. This saves report evidence in this local website. Source
-        archives are never uploaded. Imported results are labeled and are not
-        reverified scans. Account sync is unavailable.
-      </p>
-      <input
-        aria-label="Guardian CLI JSON report"
-        type="file"
-        accept=".json,application/json"
-        disabled={busy}
-        onChange={(event) => {
-          setFile(event.target.files?.[0] || null);
-          setConsent(false);
-          setError("");
-        }}
-      />
-      <label
-        style={{
-          display: "flex",
-          gap: "0.5rem",
-          margin: "1rem 0",
-          alignItems: "start",
-        }}
-      >
-        <input
-          type="checkbox"
-          checked={consent}
-          onChange={(event) => setConsent(event.target.checked)}
-          disabled={busy}
-        />
-        I consent to saving this report and its evidence in this local website.
-      </label>
-      <button
-        className="btn-secondary"
-        type="button"
-        disabled={!file || !consent || busy}
-        onClick={importReport}
-      >
-        {busy ? "Importing…" : "Import report"}
-      </button>
-      {error && (
-        <p role="alert" style={{ marginTop: "0.75rem" }}>
-          {error}
+      <div className="cli-import-content">
+        <p className="cli-import-desc">
+          Export JSON with <code>guardian report --output report.json</code>, then
+          choose it here. This saves report evidence in this local website. Source
+          archives are never uploaded. Imported results are labeled and are not
+          reverified scans. Account sync is unavailable.
         </p>
-      )}
+        <div className="cli-import-file-row">
+          <input
+            id="cli-file-input"
+            aria-label="Guardian CLI JSON report file input"
+            type="file"
+            accept=".json,application/json"
+            disabled={busy}
+            onChange={(event) => {
+              setFile(event.target.files?.[0] || null);
+              setConsent(false);
+              setError("");
+            }}
+          />
+        </div>
+        <label className="cli-import-consent">
+          <input
+            type="checkbox"
+            checked={consent}
+            onChange={(event) => setConsent(event.target.checked)}
+            disabled={busy}
+            aria-label="Consent to save report locally"
+          />
+          <span>I consent to saving this report and its evidence in this local website.</span>
+        </label>
+        <div>
+          <button
+            className="button primary"
+            type="button"
+            disabled={!file || !consent || busy}
+            onClick={importReport}
+          >
+            {busy ? (
+              <>
+                <Loader2 size={14} className="animate-spin inline mr-1" />
+                <span>Importing…</span>
+              </>
+            ) : (
+              <span>Import report</span>
+            )}
+          </button>
+        </div>
+        {error && (
+          <p role="alert" className="cli-import-error">
+            {error}
+          </p>
+        )}
+      </div>
     </details>
   );
 }

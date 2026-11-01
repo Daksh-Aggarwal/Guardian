@@ -3,6 +3,8 @@ import SmoothScroll from "@/components/smooth-scroll";
 import type { Metadata } from "next";
 import "./globals.css";
 import "./signal-fonts.css";
+import "./account.css";
+import { AccountProvider } from "@/components/account-provider";
 export const metadata: Metadata = {
   title: "Guardian — Know what you trust.",
   description:
@@ -17,7 +19,7 @@ export default function RootLayout({
     <html lang="en">
       <body>
         <MotionPreferences>
-          <SmoothScroll>{children}</SmoothScroll>
+          <AccountProvider><SmoothScroll>{children}</SmoothScroll></AccountProvider>
         </MotionPreferences>
       </body>
     </html>

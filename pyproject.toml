@@ -7,7 +7,7 @@ name = "guardian-local-security"
 version = "0.2.0"
 description = "Local npm and PyPI pre-installation static security analysis"
 requires-python = ">=3.9"
-dependencies = ["pydantic>=2.9,<3", "httpx>=0.27,<1", "pyyaml>=6,<7", "packaging>=23", "tomli>=2; python_version<'3.11'"]
+dependencies = ["pydantic>=2.9,<3", "httpx>=0.27,<1", "pyyaml>=6,<7", "packaging>=23", "tomli>=2; python_version<'3.11'", "keyring>=25,<26", "python-dotenv>=1,<2"]
 
 [project.scripts]
 guardian = "backend.guardian.cli:main"

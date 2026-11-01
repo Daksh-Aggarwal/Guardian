@@ -235,8 +235,10 @@ const nodeTypes = {
   custom: CustomNode,
 };
 
-// Dagre layout computation
-function getLayoutedElements(
+export type GraphLayoutMode = "balanced" | "dagre";
+
+// Dagre standard hierarchical layout (classic TB)
+function getDagreLayoutedElements(
   nodes: Node[],
   edges: Edge[],
   direction = "TB",
@@ -273,6 +275,118 @@ function getLayoutedElements(
   return { nodes: layoutedNodes, edges };
 }
 
+// Balanced aspect-ratio matrix layout (preserves canvas visibility for large child sets)
+function getBalancedLayoutedElements(
+  nodes: Node[],
+  edges: Edge[],
+): { nodes: Node[]; edges: Edge[] } {
+  const rootNode = nodes.find((n) => n.id === "root");
+  if (!rootNode || nodes.length <= 4) {
+    return getDagreLayoutedElements(nodes, edges, "TB");
+  }
+
+  const nonRootNodes = nodes.filter((n) => n.id !== "root");
+  const directNodes: Node[] = [];
+  const transitiveNodes: Node[] = [];
+
+  const childEdges = new Map<string, string[]>();
+  edges.forEach((e) => {
+    if (!childEdges.has(e.source)) childEdges.set(e.source, []);
+    childEdges.get(e.source)!.push(e.target);
+  });
+
+  nonRootNodes.forEach((node) => {
+    const isDirect =
+      (node.data as any)?.direct ??
+      edges.some((e) => e.source === "root" && e.target === node.id);
+    if (isDirect) {
+      directNodes.push(node);
+    } else {
+      transitiveNodes.push(node);
+    }
+  });
+
+  // Sort direct nodes: Vulnerable/elevated first, then subtrees, then alphabetical
+  directNodes.sort((a, b) => {
+    const aData = a.data as any;
+    const bData = b.data as any;
+    const aVulns =
+      (aData?.advisories?.length || 0) +
+      (aData?.behavioralFindings?.length || 0);
+    const bVulns =
+      (bData?.advisories?.length || 0) +
+      (bData?.behavioralFindings?.length || 0);
+    if (aVulns !== bVulns) return bVulns - aVulns;
+    const aChildren = (childEdges.get(a.id) || []).length;
+    const bChildren = (childEdges.get(b.id) || []).length;
+    if (aChildren !== bChildren) return bChildren - aChildren;
+    return (aData?.name || "").localeCompare(bData?.name || "");
+  });
+
+  const N = directNodes.length;
+  // Calculate optimal column count to target ~16:9 canvas aspect ratio
+  const cols = Math.max(3, Math.min(8, Math.ceil(Math.sqrt(0.71 * N))));
+  const dx = 214;
+  const dy = 88;
+  const gridWidth = Math.max(190, (cols - 1) * dx);
+  const startY = 130;
+
+  const nodePositions = new Map<string, { x: number; y: number }>();
+
+  // Center root above the direct dependencies grid
+  nodePositions.set("root", {
+    x: Math.round(gridWidth / 2),
+    y: 0,
+  });
+
+  // Layout direct nodes in matrix grid
+  directNodes.forEach((node, idx) => {
+    const row = Math.floor(idx / cols);
+    const col = idx % cols;
+    nodePositions.set(node.id, {
+      x: col * dx,
+      y: startY + row * dy,
+    });
+  });
+
+  // Layout transitive nodes beneath the direct grid
+  if (transitiveNodes.length > 0) {
+    const maxDirectY = startY + Math.ceil(N / cols) * dy + 60;
+    const tCols = Math.max(3, Math.min(6, Math.ceil(Math.sqrt(transitiveNodes.length))));
+    transitiveNodes.forEach((node, idx) => {
+      const parentEdge = edges.find(
+        (e) => e.target === node.id && e.source !== "root",
+      );
+      const parentPos = parentEdge ? nodePositions.get(parentEdge.source) : null;
+      if (parentPos) {
+        const siblings = childEdges.get(parentEdge!.source) || [];
+        const sibIndex = siblings.indexOf(node.id);
+        nodePositions.set(node.id, {
+          x: Math.round(parentPos.x + (sibIndex - (siblings.length - 1) / 2) * (dx * 0.95)),
+          y: parentPos.y + dy * 1.35,
+        });
+      } else {
+        const tRow = Math.floor(idx / tCols);
+        const tCol = idx % tCols;
+        nodePositions.set(node.id, {
+          x: tCol * dx,
+          y: maxDirectY + tRow * dy,
+        });
+      }
+    });
+  }
+
+  const layoutedNodes = nodes.map((node) => {
+    const pos = nodePositions.get(node.id) || { x: 0, y: 0 };
+    return {
+      ...node,
+      position: pos,
+    };
+  });
+
+  return { nodes: layoutedNodes, edges };
+}
+
 export default function DependencyGraph({
   report,
   onSelectFinding,
@@ -297,6 +411,7 @@ export default function DependencyGraph({
   const [focusedSubtreePackage, setFocusedSubtreePackage] = useState<
     string | null
   >(null);
+  const [layoutMode, setLayoutMode] = useState<GraphLayoutMode>("balanced");
 
   // Map findings to packages
   const packageFindings = useMemo(() => {
@@ -559,22 +674,53 @@ export default function DependencyGraph({
       position: { x: 0, y: 0 },
     }));
 
-    const rfEdges: Edge[] = filteredEdges.map((fe) => ({
-      id: fe.id,
-      source: fe.source,
-      target: fe.target,
-      type: "smoothstep",
-      animated: fe.source === "root",
-      style: { stroke: "#475569", strokeWidth: 1.5 },
-      markerEnd: {
-        type: MarkerType.ArrowClosed,
-        width: 12,
-        height: 12,
-        color: "#64748b",
-      },
-    }));
+    const rfEdges: Edge[] = filteredEdges.map((fe) => {
+      const targetNode = filteredNodes.find((n) => n.id === fe.target);
+      const targetVulns = targetNode ? (packageFindings.advMap.get(targetNode.name)?.length || 0) : 0;
+      const targetBeh = targetNode ? (packageFindings.behMap.get(targetNode.name)?.length || 0) : 0;
+      const isConnectedToSelected = selectedNodeId ? (fe.source === selectedNodeId || fe.target === selectedNodeId) : false;
 
-    return getLayoutedElements(rfNodes, rfEdges);
+      let strokeColor = "rgba(100, 116, 139, 0.4)";
+      let strokeWidth = 1.2;
+      let isAnimated = false;
+      let markerColor = "#64748b";
+
+      if (isConnectedToSelected) {
+        strokeColor = "var(--accent, #c5f467)";
+        strokeWidth = 2.5;
+        isAnimated = true;
+        markerColor = "#c5f467";
+      } else if (targetVulns > 0) {
+        strokeColor = "#f87171";
+        strokeWidth = 1.8;
+        isAnimated = true;
+        markerColor = "#f87171";
+      } else if (targetBeh > 0) {
+        strokeColor = "#fbbf24";
+        strokeWidth = 1.8;
+        isAnimated = true;
+        markerColor = "#fbbf24";
+      }
+
+      return {
+        id: fe.id,
+        source: fe.source,
+        target: fe.target,
+        type: "smoothstep",
+        animated: isAnimated,
+        style: { stroke: strokeColor, strokeWidth },
+        markerEnd: {
+          type: MarkerType.ArrowClosed,
+          width: 10,
+          height: 10,
+          color: markerColor,
+        },
+      };
+    });
+
+    return layoutMode === "balanced"
+      ? getBalancedLayoutedElements(rfNodes, rfEdges)
+      : getDagreLayoutedElements(rfNodes, rfEdges, "TB");
   }, [
     filteredNodes,
     filteredEdges,
@@ -582,6 +728,7 @@ export default function DependencyGraph({
     selectedNodeId,
     childrenMap,
     parentsMap,
+    layoutMode,
   ]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
@@ -732,6 +879,28 @@ export default function DependencyGraph({
               <option value={99}>Full Tree (All)</option>
             </select>
           </div>
+
+          {/* Arrangement Layout Mode Selector */}
+          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+            <span style={{ fontSize: "11px", color: "var(--muted)" }}>
+              Arrangement:
+            </span>
+            <select
+              value={layoutMode}
+              onChange={(e) => setLayoutMode(e.target.value as GraphLayoutMode)}
+              style={{
+                padding: "4px 8px",
+                borderRadius: "6px",
+                background: "var(--surface)",
+                border: "1px solid var(--line)",
+                color: "var(--text)",
+                fontSize: "11px",
+              }}
+            >
+              <option value="balanced">Aspect Matrix (Visible)</option>
+              <option value="dagre">Hierarchical Tree (TB)</option>
+            </select>
+          </div>
         </div>
 
         {/* Right action controls */}
@@ -765,6 +934,7 @@ export default function DependencyGraph({
       >
         <div style={{ flex: 1, height: "100%", background: "#090d16" }}>
           <ReactFlow
+            key={`${report?.name || report?.id || "graph"}-${layoutMode}`}
             nodes={nodes}
             edges={edges}
             onNodesChange={onNodesChange}
@@ -772,7 +942,8 @@ export default function DependencyGraph({
             onNodeClick={onNodeClick}
             nodeTypes={nodeTypes}
             fitView
-            minZoom={0.2}
+            fitViewOptions={{ padding: 0.12 }}
+            minZoom={0.08}
             maxZoom={1.8}
           >
             <Background color="#1e293b" gap={18} size={1} />

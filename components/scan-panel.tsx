@@ -19,7 +19,7 @@ import {
   GitBranch,
 } from "@/components/icons";
 import { motion, AnimatePresence } from "framer-motion";
-import { api, ScanJob } from "@/lib/types";
+import { api, ScanJob, Report } from "@/lib/types";
 import { Note } from "./ui";
 import GitHubConnectPanel from "./github-connect-panel";
 import { MagneticDropZone } from "./ui/magnetic-drop-zone";
@@ -34,18 +34,20 @@ export default function ScanPanel({
   activeTab,
   onTabChange,
   onAnalyzing,
+  onImportReport,
 }: {
   onStart: (id: string) => void;
   busy: boolean;
   job: ScanJob | null;
   onConnectFolder?: () => void;
-  activeTab?: "upload" | "package" | "github";
-  onTabChange?: (tab: "upload" | "package" | "github") => void;
+  activeTab?: "upload" | "package" | "github" | "cli";
+  onTabChange?: (tab: "upload" | "package" | "github" | "cli") => void;
   onAnalyzing?: () => void;
+  onImportReport?: (report: Report) => void;
 }) {
-  const [internalTab, setInternalTab] = useState<"upload" | "package" | "github">("upload");
+  const [internalTab, setInternalTab] = useState<"upload" | "package" | "github" | "cli">("upload");
   const tab = activeTab ?? internalTab;
-  const setTab = (nextTab: "upload" | "package" | "github") => {
+  const setTab = (nextTab: "upload" | "package" | "github" | "cli") => {
     setInternalTab(nextTab);
     onTabChange?.(nextTab);
   };
@@ -94,6 +96,11 @@ export default function ScanPanel({
     }
   }, [busy, job]);
 
+  // CLI Import state
+  const [cliFile, setCliFile] = useState<File | null>(null);
+  const [cliConsent, setCliConsent] = useState(false);
+  const [cliImporting, setCliImporting] = useState(false);
+
   const disabled = busy || sending;
 
   async function submit() {
@@ -133,6 +140,33 @@ export default function ScanPanel({
     }
   }
 
+  async function handleImportCli() {
+    if (!cliFile || !cliConsent) return;
+    setCliImporting(true);
+    setError("");
+    try {
+      if (cliFile.size > 8 * 1024 * 1024)
+        throw new Error("Reports must be at most 8 MB.");
+      const reportData: unknown = JSON.parse(await cliFile.text());
+      const imported = await api<Report>("/cli/reports", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ report: reportData, consent: true }),
+      });
+      setCliFile(null);
+      setCliConsent(false);
+      onImportReport?.(imported);
+    } catch (problem) {
+      setError(
+        problem instanceof Error
+          ? problem.message
+          : "Could not import this report.",
+      );
+    } finally {
+      setCliImporting(false);
+    }
+  }
+
   function chooseFiles(selected: File[]) {
     const totalSize = selected.reduce((n, f) => n + f.size, 0);
     if (totalSize > 10 * 1024 * 1024) {
@@ -150,7 +184,7 @@ export default function ScanPanel({
       </div>
 
       {/* Mode Tabs */}
-      <div className="launchpad-tabs" role="tablist">
+      <div className="launchpad-tabs" role="tablist" aria-label="Investigation source options">
         <button
           type="button"
           role="tab"
@@ -183,6 +217,17 @@ export default function ScanPanel({
           <GitBranch size={16} />
           <span>GitHub Repository</span>
         </button>
+
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "cli"}
+          className={`launchpad-tab-btn ${tab === "cli" ? "active" : ""}`}
+          onClick={() => setTab("cli")}
+        >
+          <FileCode2 size={16} />
+          <span>Import CLI Report</span>
+        </button>
       </div>
 
       {tab === "upload" ? (
@@ -196,7 +241,7 @@ export default function ScanPanel({
             disabled={disabled}
             title="Drop project archive or browse files"
             subtitle="Supports project .ZIP, package.json, package-lock.json, pnpm-lock.yaml, or yarn.lock"
-            className="mb-3 min-h-[248px]"
+            className="mb-3 min-h-[220px]"
           />
           {onConnectFolder && (
             <div className="connect-folder-hint">
@@ -216,7 +261,7 @@ export default function ScanPanel({
         </div>
       ) : tab === "package" ? (
         <div className="launchpad-package-area">
-          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "14px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "14px", flexWrap: "wrap" }}>
             <span style={{ fontSize: "11px", fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase", color: "var(--muted)" }}>
               Target Ecosystem:
             </span>
@@ -225,12 +270,13 @@ export default function ScanPanel({
               className={`quick-pkg-chip ${ecosystem === "npm" ? "active" : ""}`}
               style={{
                 cursor: "pointer",
-                padding: "3px 10px",
+                padding: "4px 12px",
                 borderRadius: "14px",
-                border: "1px solid " + (ecosystem === "npm" ? "var(--primary)" : "var(--border)"),
-                background: ecosystem === "npm" ? "var(--primary)" : "var(--surface)",
-                color: ecosystem === "npm" ? "#ffffff" : "var(--foreground)",
-                fontWeight: ecosystem === "npm" ? 600 : 400
+                border: "1px solid " + (ecosystem === "npm" ? "var(--accent-border)" : "var(--line)"),
+                background: ecosystem === "npm" ? "var(--accent)" : "var(--surface)",
+                color: ecosystem === "npm" ? "var(--on-accent)" : "var(--text)",
+                fontWeight: ecosystem === "npm" ? 600 : 400,
+                fontSize: "12px",
               }}
               onClick={() => {
                 setEcosystem("npm");
@@ -244,12 +290,13 @@ export default function ScanPanel({
               className={`quick-pkg-chip ${ecosystem === "pypi" ? "active" : ""}`}
               style={{
                 cursor: "pointer",
-                padding: "3px 10px",
+                padding: "4px 12px",
                 borderRadius: "14px",
-                border: "1px solid " + (ecosystem === "pypi" ? "var(--primary)" : "var(--border)"),
-                background: ecosystem === "pypi" ? "var(--primary)" : "var(--surface)",
-                color: ecosystem === "pypi" ? "#ffffff" : "var(--foreground)",
-                fontWeight: ecosystem === "pypi" ? 600 : 400
+                border: "1px solid " + (ecosystem === "pypi" ? "var(--accent-border)" : "var(--line)"),
+                background: ecosystem === "pypi" ? "var(--accent)" : "var(--surface)",
+                color: ecosystem === "pypi" ? "var(--on-accent)" : "var(--text)",
+                fontWeight: ecosystem === "pypi" ? 600 : 400,
+                fontSize: "12px",
               }}
               onClick={() => {
                 setEcosystem("pypi");
@@ -314,16 +361,74 @@ export default function ScanPanel({
             scripts are run.
           </Note>
         </div>
-      ) : (
+      ) : tab === "github" ? (
         <GitHubConnectPanel
           onStartScan={onStart}
           disabled={disabled}
           profile={profile}
           onProfileChange={setProfile}
         />
+      ) : (
+        /* tab === "cli" */
+        <div className="launchpad-upload-area">
+          <MagneticDropZone
+            accept=".json,application/json"
+            multiple={false}
+            maxSize={8 * 1024 * 1024}
+            files={cliFile ? [cliFile] : []}
+            onFilesChange={(selected) => {
+              setCliFile(selected[0] || null);
+              setCliConsent(false);
+              setError("");
+            }}
+            disabled={cliImporting || disabled}
+            title="Drop Guardian CLI JSON report or browse"
+            subtitle="Exported with 'guardian report --output report.json' (up to 8 MB)"
+            className="mb-3 min-h-[200px]"
+          />
+          <label
+            className="cli-import-consent"
+            style={{
+              display: "flex",
+              alignItems: "flex-start",
+              gap: "8px",
+              fontSize: "12.5px",
+              color: "var(--text-secondary)",
+              cursor: "pointer",
+              margin: "8px 0 16px",
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={cliConsent}
+              onChange={(e) => setCliConsent(e.target.checked)}
+              disabled={cliImporting || disabled}
+              style={{ marginTop: "3px", accentColor: "var(--accent)" }}
+            />
+            <span>I consent to saving this report and its evidence in this local website.</span>
+          </label>
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <button
+              type="button"
+              className="btn-primary-large"
+              disabled={!cliFile || !cliConsent || cliImporting || disabled}
+              onClick={handleImportCli}
+            >
+              {cliImporting ? (
+                <>
+                  <Loader2 size={16} className="spin" />
+                  <span>Importing report…</span>
+                </>
+              ) : (
+                <>
+                  <span>Import and view report</span>
+                  <ArrowRight size={16} />
+                </>
+              )}
+            </button>
+          </div>
+        </div>
       )}
-
-      
 
       {error && (
         <div role="alert" className="launchpad-error">
@@ -393,47 +498,41 @@ export default function ScanPanel({
             })}
           </div>
         </div>
-      ) : (
+      ) : tab !== "github" && tab !== "cli" ? (
         <div className="launchpad-footer">
-          {tab !== "github" ? (
-            <label
-              className="deeper-analysis-toggle"
-              title="Toggle deep dependency analysis (up to 20 packages / 4 levels)"
-            >
-              <input
-                type="checkbox"
-                checked={profile === "deep"}
-                onChange={(e) => setProfile(e.target.checked ? "deep" : "fast")}
-                disabled={disabled}
-              />
-              <span className="toggle-switch">
-                <span className="toggle-thumb" />
-              </span>
-              <span className="toggle-label">Deeper analysis</span>
-            </label>
-          ) : (
-            <div />
-          )}
-
-          {tab !== "github" && (
-            <button
-              type="button"
+          <label
+            className="deeper-analysis-toggle"
+            title="Toggle deep dependency analysis (up to 20 packages / 4 levels)"
+          >
+            <input
+              type="checkbox"
+              checked={profile === "deep"}
+              onChange={(e) => setProfile(e.target.checked ? "deep" : "fast")}
               disabled={disabled}
-              className="btn-primary-large"
-              onClick={submit}
-            >
-              {sending ? (
-                <Loader2 size={17} className="spin" />
-              ) : (
-                <>
-                  <span>Analyze {tab === "upload" ? "project" : "package"}</span>
-                  <ArrowRight size={16} />
-                </>
-              )}
-            </button>
-          )}
+            />
+            <span className="toggle-switch">
+              <span className="toggle-thumb" />
+            </span>
+            <span className="toggle-label">Deeper analysis</span>
+          </label>
+
+          <button
+            type="button"
+            disabled={disabled}
+            className="btn-primary-large"
+            onClick={submit}
+          >
+            {sending ? (
+              <Loader2 size={17} className="spin" />
+            ) : (
+              <>
+                <span>Analyze {tab === "upload" ? "project" : "package"}</span>
+                <ArrowRight size={16} />
+              </>
+            )}
+          </button>
         </div>
-      )}
+      ) : null}
     </section>
   );
 }

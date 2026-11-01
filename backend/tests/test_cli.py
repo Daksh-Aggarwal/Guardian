@@ -112,8 +112,9 @@ def test_ambiguous_ecosystem_never_guessed(local, capsys):
 
 def test_no_fake_connected_auth_or_automatic_sync(local, capsys):
     for command in ('login', 'sync'):
-        assert cli.main([command, '--json']) == cli.EXIT_ACQUIRE
-        assert 'unavailable' in json.loads(capsys.readouterr().out)['error']
+        # Account commands now work when configured; offline mode must never fake a login.
+        assert cli.main([command, '--offline', '--json']) == cli.EXIT_ACQUIRE
+        assert 'requires network access' in json.loads(capsys.readouterr().out)['error']
     assert cli.main(['status', '--json']) == 0
     assert json.loads(capsys.readouterr().out)['automatic_sync'] is False
     assert cli.main(['logout', '--json']) == 0

@@ -410,16 +410,7 @@ export default function GitHubConnectPanel({
               {status.available_installations.map((inst) => (
                 <div
                   key={inst.id}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    padding: "10px 12px",
-                    background: "var(--surface-muted)",
-                    borderRadius: "6px",
-                    border: "1px solid var(--line)",
-                    gap: "12px",
-                  }}
+                  className="github-installation-row"
                 >
                   <div style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 0 }}>
                     {inst.avatar_url ? (
@@ -767,7 +758,7 @@ export default function GitHubConnectPanel({
           </div>
 
           {/* Branch Picker */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "10px" }}>
             <div>
               <label style={{ display: "block", fontSize: "11px", color: "var(--muted)", marginBottom: "4px" }}>
                 Select Branch

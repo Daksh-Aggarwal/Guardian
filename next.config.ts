@@ -1,5 +1,13 @@
 import type { NextConfig } from "next";
 const config: NextConfig = {
+  env: {
+    NEXT_PUBLIC_GUARDIAN_CLOUD_MODE: process.env.GUARDIAN_CLOUD_MODE || "false",
+  },
+  async redirects() {
+    return process.env.GUARDIAN_CLOUD_MODE === "true"
+      ? [{ source: "/", destination: "/account", permanent: false }]
+      : [];
+  },
   async rewrites() {
     return [
       {

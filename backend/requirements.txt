@@ -10,3 +10,9 @@ google-genai>=1.47.0,<2
 pyyaml>=6.0,<7
 packaging>=23
 tomli>=2; python_version < "3.11"
+
+# Account integration (server-only PostgreSQL and JWT validation)
+PyJWT[crypto]>=2.10,<3
+psycopg[binary]>=3.2,<4
+keyring>=25,<26
+python-dotenv>=1,<2

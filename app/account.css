@@ -1,0 +1,246 @@
+.account-shell {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 2rem clamp(1rem, 4vw, 4rem) 5rem;
+  color: var(--text);
+}
+.account-header,
+.account-actions,
+.account-intro,
+.account-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.account-header {
+  margin-bottom: 4rem;
+  flex-wrap: wrap;
+}
+.account-brand {
+  font-weight: 750;
+  font-size: 1.1rem;
+  text-decoration: none;
+  color: var(--text);
+}
+.account-brand span,
+.account-muted {
+  color: var(--muted);
+}
+.account-shell h1 {
+  font-size: clamp(2rem, 4vw, 3.5rem);
+  line-height: 1.08;
+  letter-spacing: -0.045em;
+  margin: 0.6rem 0 1rem;
+}
+.account-shell h2 {
+  font-size: 1.25rem;
+  letter-spacing: -0.02em;
+}
+.account-shell p {
+  line-height: 1.65;
+}
+.account-eyebrow {
+  font-family: monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+  color: var(--muted);
+}
+.account-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.5rem;
+  margin-bottom: 1.4rem;
+}
+.account-welcome {
+  max-width: 780px;
+  padding: clamp(1.5rem, 4vw, 3.5rem);
+}
+.account-welcome .btn-primary {
+  margin: 1.5rem 0;
+}
+.account-intro {
+  margin-bottom: 2rem;
+  align-items: flex-end;
+}
+.account-metrics {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+.account-metrics .account-card {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.account-metrics span {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.account-metrics strong {
+  font-size: 2rem;
+  letter-spacing: -0.04em;
+}
+.account-empty {
+  padding: 2.5rem 0;
+  max-width: 700px;
+  color: var(--muted);
+}
+.account-empty h3 {
+  color: var(--text);
+}
+.account-table-wrap {
+  overflow: auto;
+}
+.account-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.8rem;
+  text-align: left;
+}
+.account-table th {
+  color: var(--muted);
+  font-weight: 500;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.account-table th,
+.account-table td {
+  padding: 1.1rem 0.8rem;
+  border-bottom: 1px solid var(--border);
+}
+.account-table small {
+  display: block;
+  color: var(--muted);
+  margin-top: 0.35rem;
+}
+.account-report-link {
+  border: 0;
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+  padding: 0;
+  font: inherit;
+  font-weight: 650;
+  text-align: left;
+}
+.account-report-link:hover {
+  text-decoration: underline;
+}
+.account-decision {
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 0.25rem 0.45rem;
+  font: 600 0.68rem monospace;
+}
+.account-devices {
+  list-style: none;
+  padding: 0;
+}
+.account-devices li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.25rem 0;
+  border-bottom: 1px solid var(--border);
+  gap: 1rem;
+}
+.account-devices p {
+  margin: 0.3rem 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.account-devices small {
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+.account-error {
+  border: 1px solid var(--border);
+  border-left: 3px solid #d97706;
+  border-radius: 6px;
+  padding: 1rem;
+  margin: 1rem 0;
+  color: var(--text);
+  background: var(--surface);
+}
+.account-connect {
+  max-width: 850px;
+}
+.account-connect .account-card {
+  margin-top: 3rem;
+}
+.account-connect dt {
+  color: var(--muted);
+  font-size: 0.8rem;
+  margin-top: 1rem;
+}
+.account-connect dd {
+  margin: 0.25rem 0 1rem;
+}
+.account-connect .btn-primary {
+  display: inline-flex;
+  margin: 1rem 0;
+}
+.account-report .copilot-toggle-btn,
+.account-report .copilot-callout-card,
+.account-report .btn-copilot-ask {
+  display: none;
+}
+@media (max-width: 900px) {
+  .account-metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .account-actions {
+    flex-wrap: wrap;
+  }
+}
+@media (max-width: 520px) {
+  .account-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .account-intro {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .account-devices li {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+.account-shell .btn-primary,
+.account-shell .btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.7rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  text-decoration: none;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.account-shell .btn-primary {
+  background: var(--accent);
+  color: var(--on-accent);
+  border-color: var(--accent-border);
+}
+.account-shell .btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+.account-shell .btn-secondary {
+  background: var(--surface-subtle);
+  color: var(--text);
+}
+.account-shell button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.account-shell button:focus-visible,
+.account-shell a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
