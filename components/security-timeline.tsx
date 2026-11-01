@@ -1,13 +1,7 @@
 "use client";
 
 import React, { useState, useMemo } from "react";
-import {
-  FileCode2,
-  Network,
-  Minus,
-  AlertTriangle,
-  Info,
-} from "lucide-react";
+import { FileCode2, Network, Minus, AlertTriangle, Info } from "lucide-react";
 import {
   Clock,
   ShieldCheck,
@@ -93,14 +87,20 @@ export default function SecurityTimeline({
     );
 
     // Multi-version aware dependency comparison: separate identity from version
-    const baseDepMap = new Map<string, Array<{ version: string; direct: boolean }>>();
+    const baseDepMap = new Map<
+      string,
+      Array<{ version: string; direct: boolean }>
+    >();
     baseReport.dependencies.forEach((d) => {
       const list = baseDepMap.get(d.name) || [];
       list.push({ version: d.version, direct: d.direct });
       baseDepMap.set(d.name, list);
     });
 
-    const targetDepMap = new Map<string, Array<{ version: string; direct: boolean }>>();
+    const targetDepMap = new Map<
+      string,
+      Array<{ version: string; direct: boolean }>
+    >();
     targetReport.dependencies.forEach((d) => {
       const list = targetDepMap.get(d.name) || [];
       list.push({ version: d.version, direct: d.direct });
@@ -135,7 +135,10 @@ export default function SecurityTimeline({
       direct: boolean;
     }> = [];
 
-    const allPackageNames = new Set([...baseDepMap.keys(), ...targetDepMap.keys()]);
+    const allPackageNames = new Set([
+      ...baseDepMap.keys(),
+      ...targetDepMap.keys(),
+    ]);
 
     allPackageNames.forEach((name) => {
       const baseVersions = baseDepMap.get(name) || [];
@@ -143,39 +146,55 @@ export default function SecurityTimeline({
 
       if (baseVersions.length === 0) {
         targetVersions.forEach((tv) =>
-          addedDependencies.push({ name, version: tv.version, direct: tv.direct }),
+          addedDependencies.push({
+            name,
+            version: tv.version,
+            direct: tv.direct,
+          }),
         );
         return;
       }
       if (targetVersions.length === 0) {
         baseVersions.forEach((bv) =>
-          removedDependencies.push({ name, version: bv.version, direct: bv.direct }),
+          removedDependencies.push({
+            name,
+            version: bv.version,
+            direct: bv.direct,
+          }),
         );
         return;
       }
 
       // Check for exact matching versions (unchanged)
       const unmatchedBase: Array<{ version: string; direct: boolean }> = [];
-      const targetVersionMap = new Map(targetVersions.map((tv) => [tv.version, tv]));
+      const targetVersionMap = new Map(
+        targetVersions.map((tv) => [tv.version, tv]),
+      );
 
       baseVersions.forEach((bv) => {
         if (targetVersionMap.has(bv.version)) {
-          unchangedDependencies.push({ name, version: bv.version, direct: bv.direct });
+          unchangedDependencies.push({
+            name,
+            version: bv.version,
+            direct: bv.direct,
+          });
           targetVersionMap.delete(bv.version);
         } else {
           unmatchedBase.push(bv);
         }
       });
 
-      const unmatchedTarget: Array<{ version: string; direct: boolean }> = Array.from(
-        targetVersionMap.values(),
-      );
+      const unmatchedTarget: Array<{ version: string; direct: boolean }> =
+        Array.from(targetVersionMap.values());
 
       // Pair unmatched base and target versions by sort order for upgrade/downgrade detection
       unmatchedBase.sort((a, b) => compareSemver(a.version, b.version));
       unmatchedTarget.sort((a, b) => compareSemver(a.version, b.version));
 
-      const pairsToCompare = Math.min(unmatchedBase.length, unmatchedTarget.length);
+      const pairsToCompare = Math.min(
+        unmatchedBase.length,
+        unmatchedTarget.length,
+      );
       for (let i = 0; i < pairsToCompare; i++) {
         const b = unmatchedBase[i];
         const t = unmatchedTarget[i];
@@ -195,7 +214,11 @@ export default function SecurityTimeline({
             direct: t.direct,
           });
         } else {
-          unchangedDependencies.push({ name, version: t.version, direct: t.direct });
+          unchangedDependencies.push({
+            name,
+            version: t.version,
+            direct: t.direct,
+          });
         }
       }
 
@@ -220,7 +243,7 @@ export default function SecurityTimeline({
     const isCrossBranch = Boolean(
       baseReport.source_metadata?.branch &&
       targetReport.source_metadata?.branch &&
-      baseReport.source_metadata.branch !== targetReport.source_metadata.branch
+      baseReport.source_metadata.branch !== targetReport.source_metadata.branch,
     );
 
     return {
@@ -490,7 +513,8 @@ export default function SecurityTimeline({
                       color: "var(--accent, #6366f1)",
                     }}
                   >
-                    {scan.source_metadata.branch} @ {scan.source_metadata.commit_sha.slice(0, 7)}
+                    {scan.source_metadata.branch} @{" "}
+                    {scan.source_metadata.commit_sha.slice(0, 7)}
                   </span>
                 )}
                 <p
@@ -607,7 +631,11 @@ export default function SecurityTimeline({
               >
                 {sortedScans.map((s, i) => (
                   <option key={s.id} value={s.id}>
-                    #{i + 1} {s.source_metadata?.branch ? `[${s.source_metadata.branch}] ` : ""}- v{s.version} (
+                    #{i + 1}{" "}
+                    {s.source_metadata?.branch
+                      ? `[${s.source_metadata.branch}] `
+                      : ""}
+                    - v{s.version} (
                     {new Date(s.created_at).toLocaleDateString()})
                   </option>
                 ))}
@@ -634,7 +662,11 @@ export default function SecurityTimeline({
               >
                 {sortedScans.map((s, i) => (
                   <option key={s.id} value={s.id}>
-                    #{i + 1} {s.source_metadata?.branch ? `[${s.source_metadata.branch}] ` : ""}- v{s.version} (
+                    #{i + 1}{" "}
+                    {s.source_metadata?.branch
+                      ? `[${s.source_metadata.branch}] `
+                      : ""}
+                    - v{s.version} (
                     {new Date(s.created_at).toLocaleDateString()})
                   </option>
                 ))}
@@ -662,12 +694,17 @@ export default function SecurityTimeline({
                   gap: "10px",
                 }}
               >
-                <GitBranch size={16} style={{ color: "#f59e0b", flexShrink: 0 }} />
+                <GitBranch
+                  size={16}
+                  style={{ color: "#f59e0b", flexShrink: 0 }}
+                />
                 <span>
                   <strong>Cross-Branch Comparison:</strong> Comparing branch{" "}
-                  <code>{comparison.baseBranch}</code> ({comparison.baseCommit?.slice(0, 7)}) with branch{" "}
-                  <code>{comparison.targetBranch}</code> ({comparison.targetCommit?.slice(0, 7)}).
-                  Findings may reflect divergent branch histories rather than sequential fixes.
+                  <code>{comparison.baseBranch}</code> (
+                  {comparison.baseCommit?.slice(0, 7)}) with branch{" "}
+                  <code>{comparison.targetBranch}</code> (
+                  {comparison.targetCommit?.slice(0, 7)}). Findings may reflect
+                  divergent branch histories rather than sequential fixes.
                 </span>
               </div>
             )}

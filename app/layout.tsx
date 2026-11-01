@@ -19,7 +19,9 @@ export default function RootLayout({
     <html lang="en" data-scroll-behavior="smooth">
       <body>
         <MotionPreferences>
-          <AccountProvider><SmoothScroll>{children}</SmoothScroll></AccountProvider>
+          <AccountProvider>
+            <SmoothScroll>{children}</SmoothScroll>
+          </AccountProvider>
         </MotionPreferences>
       </body>
     </html>

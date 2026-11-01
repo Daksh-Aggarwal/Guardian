@@ -4,7 +4,11 @@ import { useEffect } from "react";
 import { MotionConfig, useReducedMotion } from "framer-motion";
 import type { ReactNode } from "react";
 
-export default function MotionPreferences({ children }: { children: ReactNode }) {
+export default function MotionPreferences({
+  children,
+}: {
+  children: ReactNode;
+}) {
   const reduced = useReducedMotion();
 
   useEffect(() => {

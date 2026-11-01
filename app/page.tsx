@@ -84,7 +84,9 @@ export default function Home() {
   const [workspaceInitialReport, setWorkspaceInitialReport] =
     useState<Report | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [scanTab, setScanTab] = useState<"upload" | "package" | "github" | "cli">("upload");
+  const [scanTab, setScanTab] = useState<
+    "upload" | "package" | "github" | "cli"
+  >("upload");
 
   const handleGetStarted = () => {
     if (page !== "Overview") navigate("Overview");
@@ -101,7 +103,9 @@ export default function Home() {
   );
   const [connectedDirectoryHandle, setConnectedDirectoryHandle] =
     useState<FileSystemDirectoryHandle | null>(null);
-  const [heatmapMode, setHeatmapMode] = useState<"activity" | "threats">("activity");
+  const [heatmapMode, setHeatmapMode] = useState<"activity" | "threats">(
+    "activity",
+  );
 
   // Transform scan history into dual-gradient calendar data streams
   const { activityHeatmapData, threatHeatmapData } = useMemo(() => {
@@ -116,7 +120,7 @@ export default function Home() {
       const dayStart = Math.floor((now - i * DAY_MS) / DAY_MS) * DAY_MS;
       const weekday = new Date(dayStart).getUTCDay();
       const isWeekend = weekday === 0 || weekday === 6;
-      const seedVal = isWeekend ? (i % 7 === 0 ? 1 : 0) : ((i * 17) % 5);
+      const seedVal = isWeekend ? (i % 7 === 0 ? 1 : 0) : (i * 17) % 5;
       actMap.set(dayStart, seedVal);
       const threatSeed = (i * 29) % 37 === 0 ? ((i * 11) % 3) + 1 : 0;
       threatMap.set(dayStart, threatSeed);
@@ -131,10 +135,19 @@ export default function Home() {
         (f) =>
           f.severity === "critical" ||
           f.severity === "high" ||
-          ["REVERSE_SHELL", "STAGED_PAYLOAD_DROPPER", "SENSITIVE_TRANSMISSION", "DNS_TUNNELING", "REMOTE_CODE_C2"].includes(f.rule)
+          [
+            "REVERSE_SHELL",
+            "STAGED_PAYLOAD_DROPPER",
+            "SENSITIVE_TRANSMISSION",
+            "DNS_TUNNELING",
+            "REMOTE_CODE_C2",
+          ].includes(f.rule),
       ).length;
       if (actionableThreats > 0) {
-        threatMap.set(dayStart, (threatMap.get(dayStart) || 0) + actionableThreats);
+        threatMap.set(
+          dayStart,
+          (threatMap.get(dayStart) || 0) + actionableThreats,
+        );
       }
     });
 
@@ -172,9 +185,7 @@ export default function Home() {
       refresh();
     });
     const storedTheme = localStorage.getItem("guardian-theme");
-    const isDark =
-      storedTheme === "dark" ||
-      !storedTheme;
+    const isDark = storedTheme === "dark" || !storedTheme;
     setDark(isDark);
     setThemeReady(true);
 
@@ -208,9 +219,13 @@ export default function Home() {
       const setupAction = urlParams.get("setup_action");
       const state = urlParams.get("state");
       if (state) {
-        api(`/github/callback?installation_id=${installationId}&setup_action=${setupAction || ""}&state=${encodeURIComponent(state)}`)
+        api(
+          `/github/callback?installation_id=${installationId}&setup_action=${setupAction || ""}&state=${encodeURIComponent(state)}`,
+        )
           .then(() => {
-            setNotice("GitHub App successfully connected. You can now browse and inspect repositories.");
+            setNotice(
+              "GitHub App successfully connected. You can now browse and inspect repositories.",
+            );
             window.history.replaceState(null, "", window.location.pathname);
             setScanTab("github");
             refresh();
@@ -223,7 +238,9 @@ export default function Home() {
         // Direct link without state (standard GitHub App setup redirect)
         api(`/github/installations/${installationId}/link`, { method: "POST" })
           .then(() => {
-            setNotice("GitHub App successfully connected. You can now browse and inspect repositories.");
+            setNotice(
+              "GitHub App successfully connected. You can now browse and inspect repositories.",
+            );
             window.history.replaceState(null, "", window.location.pathname);
             setScanTab("github");
             refresh();
@@ -234,12 +251,16 @@ export default function Home() {
           });
       }
     } else if (gh === "connected") {
-      setNotice("GitHub App successfully connected. You can now browse and inspect repositories.");
+      setNotice(
+        "GitHub App successfully connected. You can now browse and inspect repositories.",
+      );
       window.history.replaceState(null, "", window.location.pathname);
       setScanTab("github");
       refresh();
     } else if (gh === "error") {
-      setError("Failed to connect GitHub App. Please check your GitHub App configuration and permissions.");
+      setError(
+        "Failed to connect GitHub App. Please check your GitHub App configuration and permissions.",
+      );
       window.history.replaceState(null, "", window.location.pathname);
     }
   }, [refresh]);
@@ -286,7 +307,9 @@ export default function Home() {
           setJob(null);
           setIsAnalyzing(false);
           setTimeout(() => {
-            document.getElementById("new-scan")?.scrollIntoView({ behavior: "smooth", block: "center" });
+            document
+              .getElementById("new-scan")
+              ?.scrollIntoView({ behavior: "smooth", block: "center" });
           }, 40);
         } else {
           timer = setTimeout(poll, 650);
@@ -550,8 +573,6 @@ export default function Home() {
           </button>
         </div>
 
-
-
         <div className="nav-label">COMMAND CENTRE</div>
         <nav>
           {[
@@ -587,8 +608,6 @@ export default function Home() {
             </button>
           ))}
         </nav>
-
-
 
         {/* Sidebar footer */}
         <div className="sidebar-bottom">
@@ -635,9 +654,15 @@ export default function Home() {
               title={dark ? "Use light theme" : "Use dark theme"}
             >
               {dark ? (
-                <SunIcon size={17} className="inline-flex items-center justify-center" />
+                <SunIcon
+                  size={17}
+                  className="inline-flex items-center justify-center"
+                />
               ) : (
-                <MoonIcon size={17} className="inline-flex items-center justify-center" />
+                <MoonIcon
+                  size={17}
+                  className="inline-flex items-center justify-center"
+                />
               )}
             </button>
           </div>
@@ -695,7 +720,9 @@ export default function Home() {
                 fontSize: "13px",
               }}
             >
-              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <div
+                style={{ display: "flex", alignItems: "center", gap: "8px" }}
+              >
                 <CheckCircle2 size={16} />
                 <span>{notice}</span>
               </div>
@@ -766,7 +793,11 @@ export default function Home() {
               onDirectoryHandleChange={setConnectedDirectoryHandle}
               initialReport={workspaceInitialReport}
               initialProjectName={workspaceProjectName}
-              initialProjectId={workspaceProjectId || workspaceInitialReport?.project_id || undefined}
+              initialProjectId={
+                workspaceProjectId ||
+                workspaceInitialReport?.project_id ||
+                undefined
+              }
               allReports={filteredReports}
               onOpenReportView={(r) => openReport(r)}
             />
@@ -786,7 +817,8 @@ export default function Home() {
                   <div>
                     <h1 className="heading-title">Inspection History</h1>
                     <p className="heading-subtitle">
-                      Complete repository of past inspections with full evidence trails preserved.
+                      Complete repository of past inspections with full evidence
+                      trails preserved.
                     </p>
                   </div>
 
@@ -802,7 +834,10 @@ export default function Home() {
                         onClick={() => setDatasetFilter("all")}
                         title="Show all projects and demo data"
                       >
-                        All <span className="dataset-count-pill">{reports.length}</span>
+                        All{" "}
+                        <span className="dataset-count-pill">
+                          {reports.length}
+                        </span>
                       </button>
                       <button
                         type="button"
@@ -810,7 +845,10 @@ export default function Home() {
                         onClick={() => setDatasetFilter("real")}
                         title="Show only real projects and registry lookups"
                       >
-                        Real Projects <span className="dataset-count-pill">{realReportsCount}</span>
+                        Real Projects{" "}
+                        <span className="dataset-count-pill">
+                          {realReportsCount}
+                        </span>
                       </button>
                       <button
                         type="button"
@@ -818,7 +856,10 @@ export default function Home() {
                         onClick={() => setDatasetFilter("demo")}
                         title="Show only synthetic fixtures and demo data"
                       >
-                        Demo Data <span className="dataset-count-pill">{demoReportsCount}</span>
+                        Demo Data{" "}
+                        <span className="dataset-count-pill">
+                          {demoReportsCount}
+                        </span>
                       </button>
                     </div>
                   </div>
@@ -830,7 +871,11 @@ export default function Home() {
                   {/* GitHub-style Security Activity & Threat Heatmap Hero */}
                   <section className="heatmap-hero-card">
                     <div className="heatmap-header">
-                      <div className="heatmap-toggle-pill" role="group" aria-label="Heatmap Mode Toggle">
+                      <div
+                        className="heatmap-toggle-pill"
+                        role="group"
+                        aria-label="Heatmap Mode Toggle"
+                      >
                         <button
                           type="button"
                           className={`heatmap-toggle-btn ${heatmapMode === "activity" ? "active activity" : ""}`}
@@ -850,14 +895,25 @@ export default function Home() {
                           <span>Malware Handled</span>
                         </button>
                       </div>
-
                     </div>
 
                     <div className="heatmap-body">
                       <CalendarHeatmap
-                        data={heatmapMode === "activity" ? activityHeatmapData : threatHeatmapData}
-                        label={heatmapMode === "activity" ? "packages audited" : "threats neutralized"}
-                        hue={heatmapMode === "activity" ? "var(--spectrum-series-3)" : "var(--spectrum-series-4)"}
+                        data={
+                          heatmapMode === "activity"
+                            ? activityHeatmapData
+                            : threatHeatmapData
+                        }
+                        label={
+                          heatmapMode === "activity"
+                            ? "packages audited"
+                            : "threats neutralized"
+                        }
+                        hue={
+                          heatmapMode === "activity"
+                            ? "var(--spectrum-series-3)"
+                            : "var(--spectrum-series-4)"
+                        }
                       />
                     </div>
                   </section>
@@ -878,11 +934,10 @@ export default function Home() {
                       }}
                     />
                   </div>
-
-                  </>
+                </>
               )}
 
-{/* All Scans Table (dedicated to Scan history page) */}
+              {/* All Scans Table (dedicated to Scan history page) */}
               {page === "Scan history" && (
                 <section className="recent-section">
                   <div className="section-heading">
@@ -895,7 +950,10 @@ export default function Home() {
                     </div>
 
                     <div className="history-search">
-                      <SearchIcon size={15} className="inline-flex items-center justify-center opacity-70" />
+                      <SearchIcon
+                        size={15}
+                        className="inline-flex items-center justify-center opacity-70"
+                      />
                       <input
                         aria-label="Search scans"
                         placeholder="Search by package name or version…"
@@ -905,194 +963,197 @@ export default function Home() {
                     </div>
                   </div>
 
-                <div className="card scan-table">
-                  {loading ? (
-                    <div className="empty-loading-state">
-                      <Loader2 className="spin" size={24} />
-                      <span>Connecting to scanner engine…</span>
-                    </div>
-                  ) : !reports.length ? (
-                    <Empty
-                      title="No scans in your evidence trail yet"
-                      action={
-                        <button
-                          type="button"
-                          className="button primary"
-                          onClick={() => {
-                            document
-                              .getElementById("new-scan")
-                              ?.scrollIntoView({ behavior: "smooth" });
-                          }}
-                        >
-                          <Plus size={16} />
-                          <span>Run your first scan</span>
-                        </button>
-                      }
-                    >
-                      Upload a project archive or look up an npm package. Every
-                      assessment produces a permanent evidence report.
-                    </Empty>
-                  ) : (
-                    <>
-                      <div className="table-header">
-                        <span>PACKAGE / PROJECT</span>
-                        <span>BEHAVIORAL ASSESSMENT</span>
-                        <span>FINDINGS</span>
-                        <span>SCANNED AT</span>
-                        <span>ACTION</span>
+                  <div className="card scan-table">
+                    {loading ? (
+                      <div className="empty-loading-state">
+                        <Loader2 className="spin" size={24} />
+                        <span>Connecting to scanner engine…</span>
                       </div>
+                    ) : !reports.length ? (
+                      <Empty
+                        title="No scans in your evidence trail yet"
+                        action={
+                          <button
+                            type="button"
+                            className="button primary"
+                            onClick={() => {
+                              document
+                                .getElementById("new-scan")
+                                ?.scrollIntoView({ behavior: "smooth" });
+                            }}
+                          >
+                            <Plus size={16} />
+                            <span>Run your first scan</span>
+                          </button>
+                        }
+                      >
+                        Upload a project archive or look up an npm package.
+                        Every assessment produces a permanent evidence report.
+                      </Empty>
+                    ) : (
+                      <>
+                        <div className="table-header">
+                          <span>PACKAGE / PROJECT</span>
+                          <span>BEHAVIORAL ASSESSMENT</span>
+                          <span>FINDINGS</span>
+                          <span>SCANNED AT</span>
+                          <span>ACTION</span>
+                        </div>
 
-                      {filteredReports
-                        .filter((r) => {
-                          const q = search.toLowerCase();
-                          return (
-                            r.name.toLowerCase().includes(q) ||
-                            r.version.toLowerCase().includes(q) ||
-                            r.source.toLowerCase().includes(q)
-                          );
-                        })
-                        .slice(0, 50)
-                        .map((r) => {
-                          const hasElevated = r.findings.some((f) =>
-                            ["critical", "high"].includes(f.severity),
-                          );
-                          const hasMedium = r.findings.some(
-                            (f) => f.severity === "medium",
-                          );
-                          const bd = getFindingBreakdown(r.findings);
+                        {filteredReports
+                          .filter((r) => {
+                            const q = search.toLowerCase();
+                            return (
+                              r.name.toLowerCase().includes(q) ||
+                              r.version.toLowerCase().includes(q) ||
+                              r.source.toLowerCase().includes(q)
+                            );
+                          })
+                          .slice(0, 50)
+                          .map((r) => {
+                            const hasElevated = r.findings.some((f) =>
+                              ["critical", "high"].includes(f.severity),
+                            );
+                            const hasMedium = r.findings.some(
+                              (f) => f.severity === "medium",
+                            );
+                            const bd = getFindingBreakdown(r.findings);
 
-                          return (
-                            <div
-                              key={r.id}
-                              className="table-row"
-                              style={{ cursor: "pointer" }}
-                              onClick={() => openReport(r)}
-                            >
-                              <span className="package-cell">
-                                <span className="package-symbol">
-                                  <Package size={18} />
-                                </span>
-                                <span className="package-titles">
-                                  <div
-                                    style={{
-                                      display: "flex",
-                                      alignItems: "center",
-                                      gap: "6px",
-                                    }}
-                                  >
-                                    <strong>{r.name}</strong>
-                                    <ClassificationBadge
-                                      classification={
-                                        r.classification ||
-                                        (r.source === "synthetic fixture"
-                                          ? "demo"
-                                          : "real")
-                                      }
-                                      size="sm"
-                                    />
-                                  </div>
-                                  <small>
-                                    v{r.version} · {r.source} ·{" "}
-                                    {r.files_analyzed} files
-                                  </small>
-                                </span>
-                              </span>
-
-                              <span>
-                                <span
-                                  className={`risk-pill ${hasElevated ? "high" : hasMedium ? "medium" : "clear"}`}
-                                >
-                                  <i />
-                                  {r.risk}
-                                </span>
-                              </span>
-
-                              <span className="findings-cell">
-                                <strong>{bd.actionable}</strong>
-                                <small>
-                                  {" "}
-                                  {bd.actionable === 1
-                                    ? "signal"
-                                    : "signals"}{" "}
-                                  to review
-                                </small>
-                                {bd.informational > 0 && (
-                                  <small
-                                    style={{
-                                      color: "var(--muted)",
-                                      fontSize: "10px",
-                                      display: "block",
-                                    }}
-                                  >
-                                    +{bd.informational} observations
-                                  </small>
-                                )}
-                              </span>
-
-                              <span className="date-cell">
-                                <strong>
-                                  {new Date(r.created_at).toLocaleDateString(
-                                    undefined,
-                                    {
-                                      month: "short",
-                                      day: "numeric",
-                                    },
-                                  )}
-                                </strong>
-                                <small>
-                                  {new Date(r.created_at).toLocaleTimeString(
-                                    undefined,
-                                    {
-                                      hour: "2-digit",
-                                      minute: "2-digit",
-                                    },
-                                  )}
-                                </small>
-                              </span>
-
-                              <span
-                                style={{
-                                  display: "flex",
-                                  alignItems: "center",
-                                  gap: "8px",
-                                  justifyContent: "flex-end",
-                                }}
+                            return (
+                              <div
+                                key={r.id}
+                                className="table-row"
+                                style={{ cursor: "pointer" }}
+                                onClick={() => openReport(r)}
                               >
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setWorkspaceProjectName(r.name);
-                                    setWorkspaceProjectId(r.project_id || r.name);
-                                    setWorkspaceInitialReport(r);
-                                    navigate("Project workspace");
-                                  }}
+                                <span className="package-cell">
+                                  <span className="package-symbol">
+                                    <Package size={18} />
+                                  </span>
+                                  <span className="package-titles">
+                                    <div
+                                      style={{
+                                        display: "flex",
+                                        alignItems: "center",
+                                        gap: "6px",
+                                      }}
+                                    >
+                                      <strong>{r.name}</strong>
+                                      <ClassificationBadge
+                                        classification={
+                                          r.classification ||
+                                          (r.source === "synthetic fixture"
+                                            ? "demo"
+                                            : "real")
+                                        }
+                                        size="sm"
+                                      />
+                                    </div>
+                                    <small>
+                                      v{r.version} · {r.source} ·{" "}
+                                      {r.files_analyzed} files
+                                    </small>
+                                  </span>
+                                </span>
+
+                                <span>
+                                  <span
+                                    className={`risk-pill ${hasElevated ? "high" : hasMedium ? "medium" : "clear"}`}
+                                  >
+                                    <i />
+                                    {r.risk}
+                                  </span>
+                                </span>
+
+                                <span className="findings-cell">
+                                  <strong>{bd.actionable}</strong>
+                                  <small>
+                                    {" "}
+                                    {bd.actionable === 1
+                                      ? "signal"
+                                      : "signals"}{" "}
+                                    to review
+                                  </small>
+                                  {bd.informational > 0 && (
+                                    <small
+                                      style={{
+                                        color: "var(--muted)",
+                                        fontSize: "10px",
+                                        display: "block",
+                                      }}
+                                    >
+                                      +{bd.informational} observations
+                                    </small>
+                                  )}
+                                </span>
+
+                                <span className="date-cell">
+                                  <strong>
+                                    {new Date(r.created_at).toLocaleDateString(
+                                      undefined,
+                                      {
+                                        month: "short",
+                                        day: "numeric",
+                                      },
+                                    )}
+                                  </strong>
+                                  <small>
+                                    {new Date(r.created_at).toLocaleTimeString(
+                                      undefined,
+                                      {
+                                        hour: "2-digit",
+                                        minute: "2-digit",
+                                      },
+                                    )}
+                                  </small>
+                                </span>
+
+                                <span
                                   style={{
-                                    background: "rgba(99, 102, 241, 0.12)",
-                                    border: "1px solid rgba(99, 102, 241, 0.3)",
-                                    color: "var(--accent)",
-                                    borderRadius: "4px",
-                                    padding: "3px 8px",
-                                    fontSize: "11px",
-                                    cursor: "pointer",
-                                    display: "inline-flex",
+                                    display: "flex",
                                     alignItems: "center",
-                                    gap: "4px",
-                                    fontWeight: 500,
+                                    gap: "8px",
+                                    justifyContent: "flex-end",
                                   }}
-                                  title="Open in Project Investigation Workspace"
                                 >
-                                  <span>Investigate</span>
-                                  <ChevronRight size={12} />
-                                </button>
-                              </span>
-                            </div>
-                          );
-                        })}
-                    </>
-                  )}
-                </div>
-              </section>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setWorkspaceProjectName(r.name);
+                                      setWorkspaceProjectId(
+                                        r.project_id || r.name,
+                                      );
+                                      setWorkspaceInitialReport(r);
+                                      navigate("Project workspace");
+                                    }}
+                                    style={{
+                                      background: "rgba(99, 102, 241, 0.12)",
+                                      border:
+                                        "1px solid rgba(99, 102, 241, 0.3)",
+                                      color: "var(--accent)",
+                                      borderRadius: "4px",
+                                      padding: "3px 8px",
+                                      fontSize: "11px",
+                                      cursor: "pointer",
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      gap: "4px",
+                                      fontWeight: 500,
+                                    }}
+                                    title="Open in Project Investigation Workspace"
+                                  >
+                                    <span>Investigate</span>
+                                    <ChevronRight size={12} />
+                                  </button>
+                                </span>
+                              </div>
+                            );
+                          })}
+                      </>
+                    )}
+                  </div>
+                </section>
               )}
             </motion.div>
           )}
@@ -1159,9 +1220,9 @@ function Methodology() {
       </div>
 
       <Note>
-        DevGuardian is a local supply-chain defense engine. It performs bounded AST
-        static analysis and exact OSV database cross-referencing. Explanation
-        responses are evidence-grounded in stored scan findings.
+        DevGuardian is a local supply-chain defense engine. It performs bounded
+        AST static analysis and exact OSV database cross-referencing.
+        Explanation responses are evidence-grounded in stored scan findings.
       </Note>
     </div>
   );

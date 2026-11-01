@@ -50,10 +50,10 @@ export default function CliReportImport({
       </summary>
       <div className="cli-import-content">
         <p className="cli-import-desc">
-          Export JSON with <code>guardian report --output report.json</code>, then
-          choose it here. This saves report evidence in this local website. Source
-          archives are never uploaded. Imported results are labeled and are not
-          reverified scans. Account sync is unavailable.
+          Export JSON with <code>guardian report --output report.json</code>,
+          then choose it here. This saves report evidence in this local website.
+          Source archives are never uploaded. Imported results are labeled and
+          are not reverified scans. Account sync is unavailable.
         </p>
         <div className="cli-import-file-row">
           <input
@@ -77,7 +77,10 @@ export default function CliReportImport({
             disabled={busy}
             aria-label="Consent to save report locally"
           />
-          <span>I consent to saving this report and its evidence in this local website.</span>
+          <span>
+            I consent to saving this report and its evidence in this local
+            website.
+          </span>
         </label>
         <div>
           <button

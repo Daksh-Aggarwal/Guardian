@@ -313,7 +313,9 @@ export default function ReportView({
             <button
               type="button"
               className="btn-header-autopilot"
-              onClick={() => onPrepareFix(elevatedFindings[0] || report.findings[0])}
+              onClick={() =>
+                onPrepareFix(elevatedFindings[0] || report.findings[0])
+              }
               title="Launch Guardian Autopilot code remediation"
             >
               <Wrench size={14} />
@@ -381,146 +383,191 @@ export default function ReportView({
       </div>
 
       {/* CLI Installation & Decision Review (Minimized by default to reduce scrolling) */}
-      {report.cli && (() => {
-        const reasons = report.cli.decision?.reasons || [];
-        const decision = report.cli.decision?.decision || "Decision unavailable";
-        const decisionLower = decision.toLowerCase();
-        const decisionClass =
-          decisionLower === "block"
-            ? "block"
-            : decisionLower === "allow"
-              ? "allow"
-              : "review";
+      {report.cli &&
+        (() => {
+          const reasons = report.cli.decision?.reasons || [];
+          const decision =
+            report.cli.decision?.decision || "Decision unavailable";
+          const decisionLower = decision.toLowerCase();
+          const decisionClass =
+            decisionLower === "block"
+              ? "block"
+              : decisionLower === "allow"
+                ? "allow"
+                : "review";
 
-        return (
-          <section
-            className="cli-decision-card"
-            aria-label="CLI installation decision"
-          >
-            <div
-              className="cli-decision-header-row"
-              onClick={() => setCliDetailsOpen((prev) => !prev)}
-              role="button"
-              tabIndex={0}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  setCliDetailsOpen((prev) => !prev);
-                }
-              }}
-              aria-expanded={cliDetailsOpen}
+          return (
+            <section
+              className="cli-decision-card"
+              aria-label="CLI installation decision"
             >
-              <div className="cli-decision-left">
-                <div className="cli-decision-icon" aria-hidden="true">
-                  <Terminal size={15} />
-                </div>
-                <strong className="cli-decision-title">
-                  Guardian CLI · {report.cli.ecosystem} · {decision}
-                </strong>
-                <span className={`cli-decision-tag ${decisionClass}`}>
-                  {decision}
-                </span>
-                <span className="cli-meta-summary-text">
-                  <span>Installation: {report.cli.installation?.status || "not attempted"}.</span>
-                  <span>Lifecycle scripts: {report.cli.lifecycle_scripts || "disabled"}.</span>
-                  {reasons.length > 0 && (
-                    <span>({reasons.length} {reasons.length === 1 ? "review reason" : "review reasons"})</span>
-                  )}
-                </span>
-                {report.cli.imported && (
-                  <span className="cli-imported-badge">
-                    Imported local evidence (unreverified)
-                  </span>
-                )}
-              </div>
-              <button
-                type="button"
-                className="btn-cli-toggle"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setCliDetailsOpen((prev) => !prev);
+              <div
+                className="cli-decision-header-row"
+                onClick={() => setCliDetailsOpen((prev) => !prev)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setCliDetailsOpen((prev) => !prev);
+                  }
                 }}
-                aria-label={cliDetailsOpen ? "Minimize CLI review" : "Expand CLI review"}
+                aria-expanded={cliDetailsOpen}
               >
-                <span>{cliDetailsOpen ? "Minimize details" : `Show CLI details (${reasons.length})`}</span>
-                {cliDetailsOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-              </button>
-            </div>
-
-            <AnimatePresence>
-              {cliDetailsOpen && (
-                <motion.div
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: "auto", opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
-                  transition={{ duration: 0.2 }}
-                  className="cli-decision-body"
-                >
+                <div className="cli-decision-left">
+                  <div className="cli-decision-icon" aria-hidden="true">
+                    <Terminal size={15} />
+                  </div>
+                  <strong className="cli-decision-title">
+                    Guardian CLI · {report.cli.ecosystem} · {decision}
+                  </strong>
+                  <span className={`cli-decision-tag ${decisionClass}`}>
+                    {decision}
+                  </span>
+                  <span className="cli-meta-summary-text">
+                    <span>
+                      Installation:{" "}
+                      {report.cli.installation?.status || "not attempted"}.
+                    </span>
+                    <span>
+                      Lifecycle scripts:{" "}
+                      {report.cli.lifecycle_scripts || "disabled"}.
+                    </span>
+                    {reasons.length > 0 && (
+                      <span>
+                        ({reasons.length}{" "}
+                        {reasons.length === 1
+                          ? "review reason"
+                          : "review reasons"}
+                        )
+                      </span>
+                    )}
+                  </span>
                   {report.cli.imported && (
-                    <div className="cli-import-notice">
-                      <Info size={14} style={{ flexShrink: 0, marginTop: 2 }} />
-                      <p style={{ margin: 0 }}>
-                        Imported local evidence. Findings, artifact hashes and
-                        installation claims were not reverified by this website.
-                      </p>
-                    </div>
+                    <span className="cli-imported-badge">
+                      Imported local evidence (unreverified)
+                    </span>
                   )}
+                </div>
+                <button
+                  type="button"
+                  className="btn-cli-toggle"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setCliDetailsOpen((prev) => !prev);
+                  }}
+                  aria-label={
+                    cliDetailsOpen ? "Minimize CLI review" : "Expand CLI review"
+                  }
+                >
+                  <span>
+                    {cliDetailsOpen
+                      ? "Minimize details"
+                      : `Show CLI details (${reasons.length})`}
+                  </span>
+                  {cliDetailsOpen ? (
+                    <ChevronUp size={14} />
+                  ) : (
+                    <ChevronDown size={14} />
+                  )}
+                </button>
+              </div>
 
-                  <div className="cli-status-grid">
-                    <div className="cli-status-item">
-                      <strong>Decision Verdict</strong>
-                      <span className={`cli-decision-tag ${decisionClass}`}>{decision}</span>
-                    </div>
-                    <div className="cli-status-item">
-                      <strong>Installation Status</strong>
-                      <span>{report.cli.installation?.status || "not attempted"}</span>
-                    </div>
-                    <div className="cli-status-item">
-                      <strong>Lifecycle Scripts</strong>
-                      <span>{report.cli.lifecycle_scripts || "disabled"}</span>
-                    </div>
-                    {(report.cli.location_count || report.cli.unique_artifacts) && (
-                      <div className="cli-status-item">
-                        <strong>Audit Scope</strong>
-                        <span>
-                          {report.cli.unique_artifacts ?? 0} packages across {report.cli.location_count ?? 0} locations
-                        </span>
+              <AnimatePresence>
+                {cliDetailsOpen && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.2 }}
+                    className="cli-decision-body"
+                  >
+                    {report.cli.imported && (
+                      <div className="cli-import-notice">
+                        <Info
+                          size={14}
+                          style={{ flexShrink: 0, marginTop: 2 }}
+                        />
+                        <p style={{ margin: 0 }}>
+                          Imported local evidence. Findings, artifact hashes and
+                          installation claims were not reverified by this
+                          website.
+                        </p>
                       </div>
                     )}
-                  </div>
 
-                  {reasons.length > 0 && (
-                    <div className="cli-reasons-container">
-                      <div className="cli-reasons-title">
-                        Decision Reasons ({reasons.length})
+                    <div className="cli-status-grid">
+                      <div className="cli-status-item">
+                        <strong>Decision Verdict</strong>
+                        <span className={`cli-decision-tag ${decisionClass}`}>
+                          {decision}
+                        </span>
                       </div>
-                      <ul className="cli-reasons-list">
-                        {reasons.map((reason, index) => (
-                          <li key={index} className="cli-reason-item">
-                            <span className="cli-reason-dot" aria-hidden="true" />
-                            <span>{reason}</span>
-                          </li>
-                        ))}
-                      </ul>
+                      <div className="cli-status-item">
+                        <strong>Installation Status</strong>
+                        <span>
+                          {report.cli.installation?.status || "not attempted"}
+                        </span>
+                      </div>
+                      <div className="cli-status-item">
+                        <strong>Lifecycle Scripts</strong>
+                        <span>
+                          {report.cli.lifecycle_scripts || "disabled"}
+                        </span>
+                      </div>
+                      {(report.cli.location_count ||
+                        report.cli.unique_artifacts) && (
+                        <div className="cli-status-item">
+                          <strong>Audit Scope</strong>
+                          <span>
+                            {report.cli.unique_artifacts ?? 0} packages across{" "}
+                            {report.cli.location_count ?? 0} locations
+                          </span>
+                        </div>
+                      )}
                     </div>
-                  )}
 
-                  <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "12px" }}>
-                    <button
-                      type="button"
-                      className="btn-cli-toggle"
-                      onClick={() => setCliDetailsOpen(false)}
+                    {reasons.length > 0 && (
+                      <div className="cli-reasons-container">
+                        <div className="cli-reasons-title">
+                          Decision Reasons ({reasons.length})
+                        </div>
+                        <ul className="cli-reasons-list">
+                          {reasons.map((reason, index) => (
+                            <li key={index} className="cli-reason-item">
+                              <span
+                                className="cli-reason-dot"
+                                aria-hidden="true"
+                              />
+                              <span>{reason}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "flex-end",
+                        marginTop: "12px",
+                      }}
                     >
-                      <span>Minimize details</span>
-                      <ChevronUp size={14} />
-                    </button>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </section>
-        );
-      })()}
+                      <button
+                        type="button"
+                        className="btn-cli-toggle"
+                        onClick={() => setCliDetailsOpen(false)}
+                      >
+                        <span>Minimize details</span>
+                        <ChevronUp size={14} />
+                      </button>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </section>
+          );
+        })()}
 
       {/* Main Report Header */}
       <header className="report-main-header">
@@ -660,7 +707,9 @@ export default function ReportView({
               <button
                 type="button"
                 className="summary-autopilot-quick-btn"
-                onClick={() => onPrepareFix(elevatedFindings[0] || report.findings[0])}
+                onClick={() =>
+                  onPrepareFix(elevatedFindings[0] || report.findings[0])
+                }
                 title="Prepare precision remediation plan with Guardian Autopilot"
               >
                 <Wrench size={13} />
@@ -837,7 +886,12 @@ export default function ReportView({
       <div className="report-body-layout">
         <div className="report-main-col">
           {/* Navigation Tabs */}
-          <div ref={tabsRef} className="report-tab-nav" role="tablist" id="report-tabs">
+          <div
+            ref={tabsRef}
+            className="report-tab-nav"
+            role="tablist"
+            id="report-tabs"
+          >
             <button
               type="button"
               role="tab"
@@ -1315,18 +1369,20 @@ export default function ReportView({
       </div>
 
       {/* Persistent Collapsible Right-Side Guardian Intelligence Panel */}
-      {!cloudMode && <IntelligencePanel
-        report={report}
-        isOpen={copilotOpen}
-        onClose={() => setCopilotOpen(false)}
-        selectedFinding={copilotActiveFinding}
-        onClearSelectedFinding={() => setCopilotFindingId(null)}
-        onFocusFinding={(fid) => {
-          focusFinding(fid);
-          setCopilotFindingId(fid);
-        }}
-        advanced={advanced}
-      />}
+      {!cloudMode && (
+        <IntelligencePanel
+          report={report}
+          isOpen={copilotOpen}
+          onClose={() => setCopilotOpen(false)}
+          selectedFinding={copilotActiveFinding}
+          onClearSelectedFinding={() => setCopilotFindingId(null)}
+          onFocusFinding={(fid) => {
+            focusFinding(fid);
+            setCopilotFindingId(fid);
+          }}
+          advanced={advanced}
+        />
+      )}
 
       {/* Guardian Handoff 1.0 Modal */}
       {handoffOpen && (
@@ -1386,7 +1442,10 @@ function PackageFindingsGroup({
         className="package-group-header"
         onClick={() => setCollapsed((p) => !p)}
         onKeyDown={(e) => {
-          if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) {
+          if (
+            e.target === e.currentTarget &&
+            (e.key === "Enter" || e.key === " ")
+          ) {
             e.preventDefault();
             setCollapsed((p) => !p);
           }
@@ -1488,7 +1547,10 @@ function FindingItemCard({
         className="finding-card-header"
         onClick={onToggle}
         onKeyDown={(e) => {
-          if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) {
+          if (
+            e.target === e.currentTarget &&
+            (e.key === "Enter" || e.key === " ")
+          ) {
             e.preventDefault();
             onToggle();
           }
@@ -1562,17 +1624,28 @@ function FindingItemCard({
           className="finding-card-body"
         >
           <ol className="evidence-trail" aria-label="Finding evidence trail">
-            <li><span className="evidence-index">01</span><div>
-              <h4>What Guardian found</h4>
-              <p>{advanced ? f.observed : f.explanation}</p>
-              <code>{f.id}</code>
-            </div></li>
-            <li><span className="evidence-index">02</span><div>
-              <h4>Why it matters</h4><p>{f.implication}</p>
-            </div></li>
-            <li><span className="evidence-index">03</span><div>
-              <h4>What you can do</h4><p>{f.recommendation}</p>
-            </div></li>
+            <li>
+              <span className="evidence-index">01</span>
+              <div>
+                <h4>What Guardian found</h4>
+                <p>{advanced ? f.observed : f.explanation}</p>
+                <code>{f.id}</code>
+              </div>
+            </li>
+            <li>
+              <span className="evidence-index">02</span>
+              <div>
+                <h4>Why it matters</h4>
+                <p>{f.implication}</p>
+              </div>
+            </li>
+            <li>
+              <span className="evidence-index">03</span>
+              <div>
+                <h4>What you can do</h4>
+                <p>{f.recommendation}</p>
+              </div>
+            </li>
           </ol>
 
           {/* Interactive Data Flows */}

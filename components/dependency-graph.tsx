@@ -352,17 +352,24 @@ function getBalancedLayoutedElements(
   // Layout transitive nodes beneath the direct grid
   if (transitiveNodes.length > 0) {
     const maxDirectY = startY + Math.ceil(N / cols) * dy + 60;
-    const tCols = Math.max(3, Math.min(6, Math.ceil(Math.sqrt(transitiveNodes.length))));
+    const tCols = Math.max(
+      3,
+      Math.min(6, Math.ceil(Math.sqrt(transitiveNodes.length))),
+    );
     transitiveNodes.forEach((node, idx) => {
       const parentEdge = edges.find(
         (e) => e.target === node.id && e.source !== "root",
       );
-      const parentPos = parentEdge ? nodePositions.get(parentEdge.source) : null;
+      const parentPos = parentEdge
+        ? nodePositions.get(parentEdge.source)
+        : null;
       if (parentPos) {
         const siblings = childEdges.get(parentEdge!.source) || [];
         const sibIndex = siblings.indexOf(node.id);
         nodePositions.set(node.id, {
-          x: Math.round(parentPos.x + (sibIndex - (siblings.length - 1) / 2) * (dx * 0.95)),
+          x: Math.round(
+            parentPos.x + (sibIndex - (siblings.length - 1) / 2) * (dx * 0.95),
+          ),
           y: parentPos.y + dy * 1.35,
         });
       } else {
@@ -676,9 +683,15 @@ export default function DependencyGraph({
 
     const rfEdges: Edge[] = filteredEdges.map((fe) => {
       const targetNode = filteredNodes.find((n) => n.id === fe.target);
-      const targetVulns = targetNode ? (packageFindings.advMap.get(targetNode.name)?.length || 0) : 0;
-      const targetBeh = targetNode ? (packageFindings.behMap.get(targetNode.name)?.length || 0) : 0;
-      const isConnectedToSelected = selectedNodeId ? (fe.source === selectedNodeId || fe.target === selectedNodeId) : false;
+      const targetVulns = targetNode
+        ? packageFindings.advMap.get(targetNode.name)?.length || 0
+        : 0;
+      const targetBeh = targetNode
+        ? packageFindings.behMap.get(targetNode.name)?.length || 0
+        : 0;
+      const isConnectedToSelected = selectedNodeId
+        ? fe.source === selectedNodeId || fe.target === selectedNodeId
+        : false;
 
       let strokeColor = "rgba(100, 116, 139, 0.4)";
       let strokeWidth = 1.2;

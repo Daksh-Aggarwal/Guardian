@@ -1,12 +1,7 @@
 "use client";
 
 import React, { useState, useMemo } from "react";
-import {
-  ShieldAlert,
-  Info,
-  Filter,
-  Share2,
-} from "lucide-react";
+import { ShieldAlert, Info, Filter, Share2 } from "lucide-react";
 import {
   Search,
   ExternalLink,
@@ -46,7 +41,7 @@ export default function VulnerabilitiesExplorer({
     null,
   );
   const [selectedFindingIds, setSelectedFindingIds] = useState<Set<string>>(
-    new Set()
+    new Set(),
   );
 
   const toggleSelectFinding = (findingId: string) => {

@@ -1,12 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import {
-  Info,
-  AlertTriangle,
-  AlertCircle,
-  ShieldAlert,
-} from "lucide-react";
+import { Info, AlertTriangle, AlertCircle, ShieldAlert } from "lucide-react";
 import {
   ShieldCheck,
   ArrowUpRight,
@@ -30,7 +25,10 @@ export function Brand({ size = "default" }: { size?: "default" | "compact" }) {
         whileHover={{ scale: 1.06, rotate: -3 }}
         transition={{ type: "spring", stiffness: 400, damping: 15 }}
       >
-        <ShieldCheckIcon size={pixelSize} className="inline-flex items-center justify-center" />
+        <ShieldCheckIcon
+          size={pixelSize}
+          className="inline-flex items-center justify-center"
+        />
       </motion.span>
       <span className="brand-text">
         DevGuardian<span className="brand-dot">.</span>
@@ -52,7 +50,9 @@ export function Badge({
       ? "Observation"
       : norm.charAt(0).toUpperCase() + norm.slice(1);
   return (
-    <span className={size === "sm" ? `badge ${norm} badge-sm` : `badge ${norm}`}>
+    <span
+      className={size === "sm" ? `badge ${norm} badge-sm` : `badge ${norm}`}
+    >
       <i className="badge-dot" />
       {label}
     </span>

@@ -1,12 +1,7 @@
 "use client";
 
 import { useRef, useState, useEffect } from "react";
-import {
-  UploadCloud,
-  FileArchive,
-  Loader2,
-  FileCode2,
-} from "lucide-react";
+import { UploadCloud, FileArchive, Loader2, FileCode2 } from "lucide-react";
 import {
   ArrowRight,
   Package,
@@ -45,7 +40,9 @@ export default function ScanPanel({
   onAnalyzing?: () => void;
   onImportReport?: (report: Report) => void;
 }) {
-  const [internalTab, setInternalTab] = useState<"upload" | "package" | "github" | "cli">("upload");
+  const [internalTab, setInternalTab] = useState<
+    "upload" | "package" | "github" | "cli"
+  >("upload");
   const tab = activeTab ?? internalTab;
   const setTab = (nextTab: "upload" | "package" | "github" | "cli") => {
     setInternalTab(nextTab);
@@ -120,7 +117,10 @@ export default function ScanPanel({
         files.forEach((f) => data.append("files", f));
         result = await api("/scans/upload", { method: "POST", body: data });
       } else {
-        if (!name.trim()) throw new Error(`Enter ${ecosystem === "pypi" ? "a PyPI" : "an npm"} package name.`);
+        if (!name.trim())
+          throw new Error(
+            `Enter ${ecosystem === "pypi" ? "a PyPI" : "an npm"} package name.`,
+          );
         result = await api("/scans/package", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -184,7 +184,11 @@ export default function ScanPanel({
       </div>
 
       {/* Mode Tabs */}
-      <div className="launchpad-tabs" role="tablist" aria-label="Investigation source options">
+      <div
+        className="launchpad-tabs"
+        role="tablist"
+        aria-label="Investigation source options"
+      >
         <button
           type="button"
           role="tab"
@@ -261,8 +265,24 @@ export default function ScanPanel({
         </div>
       ) : tab === "package" ? (
         <div className="launchpad-package-area">
-          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "14px", flexWrap: "wrap" }}>
-            <span style={{ fontSize: "11px", fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase", color: "var(--muted)" }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              marginBottom: "14px",
+              flexWrap: "wrap",
+            }}
+          >
+            <span
+              style={{
+                fontSize: "11px",
+                fontWeight: 600,
+                letterSpacing: "0.05em",
+                textTransform: "uppercase",
+                color: "var(--muted)",
+              }}
+            >
               Target Ecosystem:
             </span>
             <button
@@ -272,8 +292,13 @@ export default function ScanPanel({
                 cursor: "pointer",
                 padding: "4px 12px",
                 borderRadius: "14px",
-                border: "1px solid " + (ecosystem === "npm" ? "var(--accent-border)" : "var(--line)"),
-                background: ecosystem === "npm" ? "var(--accent)" : "var(--surface)",
+                border:
+                  "1px solid " +
+                  (ecosystem === "npm"
+                    ? "var(--accent-border)"
+                    : "var(--line)"),
+                background:
+                  ecosystem === "npm" ? "var(--accent)" : "var(--surface)",
                 color: ecosystem === "npm" ? "var(--on-accent)" : "var(--text)",
                 fontWeight: ecosystem === "npm" ? 600 : 400,
                 fontSize: "12px",
@@ -292,9 +317,15 @@ export default function ScanPanel({
                 cursor: "pointer",
                 padding: "4px 12px",
                 borderRadius: "14px",
-                border: "1px solid " + (ecosystem === "pypi" ? "var(--accent-border)" : "var(--line)"),
-                background: ecosystem === "pypi" ? "var(--accent)" : "var(--surface)",
-                color: ecosystem === "pypi" ? "var(--on-accent)" : "var(--text)",
+                border:
+                  "1px solid " +
+                  (ecosystem === "pypi"
+                    ? "var(--accent-border)"
+                    : "var(--line)"),
+                background:
+                  ecosystem === "pypi" ? "var(--accent)" : "var(--surface)",
+                color:
+                  ecosystem === "pypi" ? "var(--on-accent)" : "var(--text)",
                 fontWeight: ecosystem === "pypi" ? 600 : 400,
                 fontSize: "12px",
               }}
@@ -311,7 +342,9 @@ export default function ScanPanel({
             <div className="package-name-field">
               <label htmlFor="pkg-name-input">
                 Package Name
-                <span className="label-sub">(from {ecosystem === "pypi" ? "PyPI" : "npm"} registry)</span>
+                <span className="label-sub">
+                  (from {ecosystem === "pypi" ? "PyPI" : "npm"} registry)
+                </span>
               </label>
               <div className="input-with-icon">
                 <Package size={17} className="input-prefix-icon" />
@@ -319,7 +352,11 @@ export default function ScanPanel({
                   id="pkg-name-input"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder={ecosystem === "pypi" ? "e.g. requests, urllib3, flask, django" : "e.g. express, lodash, @babel/core"}
+                  placeholder={
+                    ecosystem === "pypi"
+                      ? "e.g. requests, urllib3, flask, django"
+                      : "e.g. express, lodash, @babel/core"
+                  }
                   disabled={disabled}
                 />
               </div>
@@ -339,7 +376,10 @@ export default function ScanPanel({
 
           <div className="quick-suggestions-row">
             <span className="suggestions-label">Try:</span>
-            {(ecosystem === "pypi" ? ["requests", "urllib3", "flask", "django"] : ["express", "lodash", "axios", "cors"]).map((pkg) => (
+            {(ecosystem === "pypi"
+              ? ["requests", "urllib3", "flask", "django"]
+              : ["express", "lodash", "axios", "cors"]
+            ).map((pkg) => (
               <button
                 key={pkg}
                 type="button"
@@ -357,8 +397,11 @@ export default function ScanPanel({
 
           <Note>
             Guardian fetches and extracts the official published distribution
-            directly from {ecosystem === "pypi" ? "pypi.org / files.pythonhosted.org" : "registry.npmjs.org"} into bounded memory. No lifecycle or setup
-            scripts are run.
+            directly from{" "}
+            {ecosystem === "pypi"
+              ? "pypi.org / files.pythonhosted.org"
+              : "registry.npmjs.org"}{" "}
+            into bounded memory. No lifecycle or setup scripts are run.
           </Note>
         </div>
       ) : tab === "github" ? (
@@ -405,7 +448,10 @@ export default function ScanPanel({
               disabled={cliImporting || disabled}
               style={{ marginTop: "3px", accentColor: "var(--accent)" }}
             />
-            <span>I consent to saving this report and its evidence in this local website.</span>
+            <span>
+              I consent to saving this report and its evidence in this local
+              website.
+            </span>
           </label>
           <div style={{ display: "flex", justifyContent: "flex-end" }}>
             <button
@@ -490,9 +536,7 @@ export default function ScanPanel({
                   <span className="step-circle">
                     {isPast ? <Check size={11} /> : i + 1}
                   </span>
-                  <span className="step-label">
-                    {stageItem.label}
-                  </span>
+                  <span className="step-label">{stageItem.label}</span>
                 </div>
               );
             })}

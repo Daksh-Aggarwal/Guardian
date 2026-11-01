@@ -37,12 +37,7 @@ import {
 } from "@/components/icons";
 import { api, Report, ScanJob, ProjectMetadata, Finding } from "@/lib/types";
 import { getDependencyAccounting, getFindingBreakdown } from "@/lib/accounting";
-import {
-  Eyebrow,
-  Note,
-  Badge,
-  ClassificationBadge,
-} from "./ui";
+import { Eyebrow, Note, Badge, ClassificationBadge } from "./ui";
 import RemediationPanel from "./remediation-panel";
 import ReportView from "./report";
 import DependencyGraph from "./dependency-graph";
@@ -206,7 +201,9 @@ export default function ProjectWorkspace({
   // Guardian Handoff 1.0 modal state
   const [handoffOpen, setHandoffOpen] = useState(false);
   const [handoffFindingId, setHandoffFindingId] = useState<string | null>(null);
-  const [handoffFindingIds, setHandoffFindingIds] = useState<string[] | null>(null);
+  const [handoffFindingIds, setHandoffFindingIds] = useState<string[] | null>(
+    null,
+  );
 
   const openHandoff = (findingId?: string) => {
     setHandoffFindingId(findingId || null);
@@ -321,7 +318,9 @@ export default function ProjectWorkspace({
   }
 
   // Trigger project scan
-  async function runProjectScan(scanProfile?: "fast" | "deep"): Promise<Report | void> {
+  async function runProjectScan(
+    scanProfile?: "fast" | "deep",
+  ): Promise<Report | void> {
     if (!projectData) return;
     const activeProfile = scanProfile || profile;
     setError(null);
@@ -356,7 +355,7 @@ export default function ProjectWorkspace({
       const rep = await pollScanJob(jobId);
       const b = getFindingBreakdown(rep.findings);
       notifyRescanSuccess(
-        `Project rescanned (${rep.findings.length} findings: ${b.critical + b.high} high/crit, ${b.medium} med) under ${activeProfile} profile.`
+        `Project rescanned (${rep.findings.length} findings: ${b.critical + b.high} high/crit, ${b.medium} med) under ${activeProfile} profile.`,
       );
       return rep;
     } catch (err) {
@@ -366,7 +365,9 @@ export default function ProjectWorkspace({
     }
   }
 
-  async function handleRescan(targetProfile?: "fast" | "deep"): Promise<Report | void> {
+  async function handleRescan(
+    targetProfile?: "fast" | "deep",
+  ): Promise<Report | void> {
     const scanProfile = targetProfile || profile;
     if (targetProfile && targetProfile !== profile) {
       setProfile(targetProfile);
@@ -391,7 +392,7 @@ export default function ProjectWorkspace({
         const rep = await pollScanJob(res.id);
         const b = getFindingBreakdown(rep.findings);
         notifyRescanSuccess(
-          `Repository rescanned (${rep.findings.length} findings: ${b.critical + b.high} high/crit, ${b.medium} med) under ${scanProfile} profile.`
+          `Repository rescanned (${rep.findings.length} findings: ${b.critical + b.high} high/crit, ${b.medium} med) under ${scanProfile} profile.`,
         );
         return rep;
       }
@@ -436,7 +437,7 @@ export default function ProjectWorkspace({
         const rep = await pollScanJob(res.id);
         const b = getFindingBreakdown(rep.findings);
         notifyRescanSuccess(
-          `Project rescanned (${rep.findings.length} findings: ${b.critical + b.high} high/crit, ${b.medium} med) under ${scanProfile} profile.`
+          `Project rescanned (${rep.findings.length} findings: ${b.critical + b.high} high/crit, ${b.medium} med) under ${scanProfile} profile.`,
         );
         return rep;
       }
@@ -458,7 +459,7 @@ export default function ProjectWorkspace({
         const rep = await pollScanJob(res.id);
         const b = getFindingBreakdown(rep.findings);
         notifyRescanSuccess(
-          `Demo fixture rescanned (${rep.findings.length} findings) under ${scanProfile} profile.`
+          `Demo fixture rescanned (${rep.findings.length} findings) under ${scanProfile} profile.`,
         );
         return rep;
       }
@@ -490,7 +491,7 @@ export default function ProjectWorkspace({
       const rep = await pollScanJob(res.id);
       const b = getFindingBreakdown(rep.findings);
       notifyRescanSuccess(
-        `Project connected & scanned (${rep.findings.length} findings) under ${scanProfile} profile.`
+        `Project connected & scanned (${rep.findings.length} findings) under ${scanProfile} profile.`,
       );
       return rep;
     } catch (err) {
@@ -529,7 +530,8 @@ export default function ProjectWorkspace({
             <div className="workspace-project-title-row">
               <h1 className="workspace-project-title">
                 {activeReport?.name ||
-                  uniqueProjects.find((p) => p.id === selectedProjectId)?.name ||
+                  uniqueProjects.find((p) => p.id === selectedProjectId)
+                    ?.name ||
                   "Local Project"}
               </h1>
 
@@ -571,7 +573,8 @@ export default function ProjectWorkspace({
                       gap: "4px",
                     }}
                   >
-                    <GitBranch size={11} /> {activeReport.source_metadata.branch}
+                    <GitBranch size={11} />{" "}
+                    {activeReport.source_metadata.branch}
                   </span>
 
                   <span
@@ -674,7 +677,9 @@ export default function ProjectWorkspace({
                   border: "none",
                   cursor: loading ? "not-allowed" : "pointer",
                   background:
-                    profile === "fast" ? "var(--accent, #c5f467)" : "transparent",
+                    profile === "fast"
+                      ? "var(--accent, #c5f467)"
+                      : "transparent",
                   color:
                     profile === "fast"
                       ? "var(--on-accent, #111c08)"
@@ -697,7 +702,9 @@ export default function ProjectWorkspace({
                   border: "none",
                   cursor: loading ? "not-allowed" : "pointer",
                   background:
-                    profile === "deep" ? "var(--accent, #c5f467)" : "transparent",
+                    profile === "deep"
+                      ? "var(--accent, #c5f467)"
+                      : "transparent",
                   color:
                     profile === "deep"
                       ? "var(--on-accent, #111c08)"
@@ -947,7 +954,9 @@ export default function ProjectWorkspace({
           >
             {/* Project Switcher */}
             {uniqueProjects.length > 1 && (
-              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <div
+                style={{ display: "flex", alignItems: "center", gap: "6px" }}
+              >
                 <span style={{ fontSize: "11px", color: "var(--muted)" }}>
                   Project:
                 </span>
@@ -983,7 +992,9 @@ export default function ProjectWorkspace({
 
             {/* Historical Scan Version Switcher */}
             {projectScans.length > 1 && (
-              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <div
+                style={{ display: "flex", alignItems: "center", gap: "6px" }}
+              >
                 <span style={{ fontSize: "11px", color: "var(--muted)" }}>
                   Scan:
                 </span>
@@ -1001,7 +1012,11 @@ export default function ProjectWorkspace({
                 >
                   {projectScans.map((s, idx) => (
                     <option key={s.id} value={s.id}>
-                      #{projectScans.length - idx}: {s.source_metadata?.branch ? `[${s.source_metadata.branch}] ` : ""}v{s.version} (
+                      #{projectScans.length - idx}:{" "}
+                      {s.source_metadata?.branch
+                        ? `[${s.source_metadata.branch}] `
+                        : ""}
+                      v{s.version} (
                       {new Date(s.created_at).toLocaleDateString()})
                     </option>
                   ))}
