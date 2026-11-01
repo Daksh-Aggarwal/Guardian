@@ -653,8 +653,8 @@ export default function RemediationPanel({
         className="card"
         style={{
           width: "100%",
-          maxWidth: "960px",
-          maxHeight: "90vh",
+          maxWidth: "1000px",
+          maxHeight: "92vh",
           display: "flex",
           flexDirection: "column",
           padding: 0,
@@ -677,31 +677,33 @@ export default function RemediationPanel({
           <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
             <div
               style={{
-                width: "32px",
-                height: "32px",
+                width: "34px",
+                height: "34px",
                 borderRadius: "8px",
                 background: "rgba(59, 130, 246, 0.15)",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
                 color: "var(--accent-blue, #3b82f6)",
+                flexShrink: 0,
               }}
             >
               <Wrench size={18} />
             </div>
             <div>
-              <h3 style={{ margin: 0, fontSize: "16px" }}>
+              <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 600 }}>
                 Guardian Autopilot Remediation
               </h3>
               <p
                 style={{
                   margin: "2px 0 0",
-                  fontSize: "11px",
+                  fontSize: "12px",
                   color: "var(--muted)",
                 }}
               >
-                AI-assisted software remediation with deterministic verification
-                and local rollback protection.
+                {plan
+                  ? "Deterministic solution generated with verified safety checks and rollback protection."
+                  : "AI-assisted software remediation with deterministic verification and local rollback protection."}
               </p>
             </div>
           </div>
@@ -720,10 +722,10 @@ export default function RemediationPanel({
           style={{
             flex: 1,
             overflowY: "auto",
-            padding: "20px",
+            padding: "18px 20px",
             display: "flex",
             flexDirection: "column",
-            gap: "18px",
+            gap: "14px",
           }}
         >
           {/* Alerts / Error messages */}
@@ -793,164 +795,119 @@ export default function RemediationPanel({
             </div>
           )}
 
-          {/* Folder Connection Status Banner */}
-          {!directoryHandle ? (
-            <div
-              style={{
-                padding: "12px 16px",
-                background: "rgba(59, 130, 246, 0.08)",
-                borderRadius: "8px",
-                border: "1px solid rgba(59, 130, 246, 0.25)",
-                fontSize: "12px",
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                gap: "12px",
-                flexWrap: "wrap",
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "flex-start",
-                  gap: "10px",
-                }}
-              >
-                <FolderOpen
-                  size={18}
-                  color="var(--accent-blue, #3b82f6)"
-                  style={{ flexShrink: 0, marginTop: "2px" }}
-                />
-                <div>
-                  <strong style={{ color: "var(--foreground)" }}>
-                    Direct Disk Modification Available
-                  </strong>
-                  <p
-                    style={{
-                      margin: "2px 0 0",
-                      color: "var(--muted)",
-                      lineHeight: "1.5",
-                    }}
-                  >
-                    Standard browser uploads provide an in-memory copy only. To
-                    apply approved fixes directly to your local files, link your
-                    folder on disk.
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={connectFolder}
-                className="button primary compact"
-                style={{
-                  fontSize: "11px",
-                  whiteSpace: "nowrap",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "6px",
-                }}
-              >
-                <FolderOpen size={13} />
-                Connect local folder
-              </button>
-            </div>
-          ) : (
-            <div
-              style={{
-                padding: "10px 14px",
-                background: "rgba(16, 185, 129, 0.06)",
-                borderRadius: "8px",
-                border: "1px solid rgba(16, 185, 129, 0.2)",
-                fontSize: "12px",
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                gap: "10px",
-              }}
-            >
-              <div
-                style={{ display: "flex", alignItems: "center", gap: "8px" }}
-              >
-                <FolderOpen size={16} color="var(--accent-green, #10b981)" />
-                <span>
-                  <strong>Connected Folder:</strong> {directoryHandle.name}{" "}
-                  (Direct in-place application enabled)
-                </span>
-              </div>
-              <button
-                onClick={connectFolder}
-                className="button secondary compact"
-                style={{ fontSize: "10px", padding: "2px 8px" }}
-              >
-                Change folder
-              </button>
-            </div>
-          )}
-
-          {/* Dedicated Project-Code Consent Section */}
-          <div
-            style={{
-              padding: "12px 16px",
-              background: consent
-                ? "rgba(16, 185, 129, 0.05)"
-                : "rgba(255, 255, 255, 0.02)",
-              borderRadius: "8px",
-              border: `1px solid ${consent ? "rgba(16, 185, 129, 0.2)" : "var(--border)"}`,
-              fontSize: "12px",
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              flexWrap: "wrap",
-              gap: "10px",
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <Sparkles
-                size={16}
-                color={
-                  consent ? "var(--accent-green, #10b981)" : "var(--muted)"
-                }
-              />
-              <div>
-                <strong>Gemini Cognitive Remediation Planning:</strong>{" "}
-                <span style={{ color: "var(--muted)" }}>
-                  {consent
-                    ? "Opted-in. Selected redacted project context is shared for structured reasoning."
-                    : "Running locally (deterministic). Project code remains strictly local."}
-                </span>
-              </div>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-              <button
-                onClick={() => setShowConsentModal(true)}
-                className="button secondary compact"
-                style={{ fontSize: "11px" }}
-              >
-                Privacy settings & details
-              </button>
-              <label
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "6px",
-                  cursor: "pointer",
-                  fontSize: "12px",
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={consent}
-                  onChange={(e) => handleConsentChange(e.target.checked)}
-                />
-                Enable AI inference
-              </label>
-            </div>
-          </div>
-
-          {/* If no plan generated yet, show findings selection and generate button */}
+          {/* If no plan generated yet, show pre-flight controls and findings list */}
           {!plan && (
             <div
               style={{ display: "flex", flexDirection: "column", gap: "14px" }}
             >
+              {/* Compact Pre-flight Configuration Ribbon */}
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "10px 14px",
+                  background: "var(--surface)",
+                  border: "1px solid var(--border)",
+                  borderRadius: "8px",
+                  gap: "12px",
+                  flexWrap: "wrap",
+                }}
+              >
+                {/* Left: Folder connection status */}
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    fontSize: "12px",
+                  }}
+                >
+                  <FolderOpen
+                    size={16}
+                    color={
+                      directoryHandle
+                        ? "var(--accent-green, #10b981)"
+                        : "var(--accent-blue, #3b82f6)"
+                    }
+                  />
+                  <span>
+                    {directoryHandle ? (
+                      <>
+                        <strong>Linked Folder:</strong> {directoryHandle.name}{" "}
+                        <span style={{ color: "var(--muted)" }}>
+                          (Direct disk modification enabled)
+                        </span>
+                      </>
+                    ) : (
+                      <span style={{ color: "var(--muted)" }}>
+                        Memory session · Direct disk apply requires linking local folder
+                      </span>
+                    )}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={connectFolder}
+                    className="button secondary compact"
+                    style={{ fontSize: "11px", padding: "2px 8px" }}
+                  >
+                    {directoryHandle ? "Change folder" : "Link folder"}
+                  </button>
+                </div>
+
+                {/* Right: AI Consent toggle */}
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "10px",
+                    fontSize: "12px",
+                  }}
+                >
+                  <label
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "6px",
+                      cursor: "pointer",
+                      userSelect: "none",
+                    }}
+                  >
+                    <Sparkles
+                      size={14}
+                      color={
+                        consent
+                          ? "var(--accent-green, #10b981)"
+                          : "var(--muted)"
+                      }
+                    />
+                    <span style={{ fontWeight: 500 }}>AI Inference</span>
+                    <input
+                      type="checkbox"
+                      checked={consent}
+                      onChange={(e) => handleConsentChange(e.target.checked)}
+                      style={{
+                        cursor: "pointer",
+                        accentColor: "var(--accent-blue, #3b82f6)",
+                      }}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowConsentModal(true)}
+                    className="button secondary compact"
+                    style={{
+                      fontSize: "11px",
+                      padding: "2px 8px",
+                      color: "var(--muted)",
+                    }}
+                    title="View privacy boundaries"
+                  >
+                    Privacy info
+                  </button>
+                </div>
+              </div>
+
               <div>
                 <div
                   style={{
@@ -1079,7 +1036,7 @@ export default function RemediationPanel({
                     display: "flex",
                     flexDirection: "column",
                     gap: "8px",
-                    maxHeight: "240px",
+                    maxHeight: "260px",
                     overflowY: "auto",
                   }}
                 >
@@ -1186,7 +1143,7 @@ export default function RemediationPanel({
                 style={{
                   display: "flex",
                   justifyContent: "flex-end",
-                  marginTop: "10px",
+                  marginTop: "6px",
                 }}
               >
                 <button
@@ -1218,7 +1175,7 @@ export default function RemediationPanel({
           {loading && (
             <div
               style={{
-                padding: "24px",
+                padding: "36px 20px",
                 display: "flex",
                 flexDirection: "column",
                 alignItems: "center",
@@ -1227,7 +1184,7 @@ export default function RemediationPanel({
               }}
             >
               <Loader2
-                size={24}
+                size={28}
                 className="animate-spin"
                 color="var(--accent-blue, #3b82f6)"
               />
@@ -1240,107 +1197,132 @@ export default function RemediationPanel({
           {/* Plan View if plan exists */}
           {plan && !loading && (
             <div
-              style={{ display: "flex", flexDirection: "column", gap: "20px" }}
+              style={{ display: "flex", flexDirection: "column", gap: "14px" }}
             >
-              <RemediationPlanView
-                plan={plan}
-                onFindingClick={onFindingClick}
-              />
-
-              {/* Verification Results Banner if verified */}
-              {verification && (
+              {/* Compact Plan Metadata Strip */}
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "8px 14px",
+                  background: "var(--surface)",
+                  border: "1px solid var(--border)",
+                  borderRadius: "8px",
+                  fontSize: "12px",
+                  flexWrap: "wrap",
+                  gap: "8px",
+                }}
+              >
                 <div
-                  id="remediation-verification-outcome"
-                  className="card"
                   style={{
-                    padding: "16px",
-                    background: "rgba(16, 185, 129, 0.05)",
-                    border: "1px solid rgba(16, 185, 129, 0.3)",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "10px",
+                    flexWrap: "wrap",
                   }}
                 >
                   <div
                     style={{
                       display: "flex",
                       alignItems: "center",
-                      gap: "8px",
-                      marginBottom: "8px",
+                      gap: "6px",
                     }}
                   >
-                    <ShieldCheck
-                      size={18}
-                      color="var(--accent-green, #10b981)"
+                    <FolderOpen
+                      size={14}
+                      color={
+                        directoryHandle
+                          ? "var(--accent-green, #10b981)"
+                          : "var(--accent-blue, #3b82f6)"
+                      }
                     />
-                    <strong
-                      style={{
-                        fontSize: "14px",
-                        color: "var(--accent-green, #10b981)",
-                      }}
-                    >
-                      Verification Outcome
-                    </strong>
+                    <span>
+                      {directoryHandle ? (
+                        <>
+                          <strong>Target Folder:</strong> {directoryHandle.name}
+                        </>
+                      ) : (
+                        <span style={{ color: "var(--muted)" }}>
+                          Memory-only session · Local folder unlinked
+                        </span>
+                      )}
+                    </span>
+                    {!directoryHandle && (
+                      <button
+                        type="button"
+                        onClick={connectFolder}
+                        className="button secondary compact"
+                        style={{ fontSize: "10px", padding: "1px 6px" }}
+                      >
+                        Link folder
+                      </button>
+                    )}
                   </div>
-                  <p
-                    style={{
-                      margin: "0 0 10px",
-                      fontSize: "12px",
-                      color: "var(--foreground)",
-                    }}
-                  >
-                    {verification.summary}
-                  </p>
+
+                  <span style={{ color: "var(--border)" }}>•</span>
 
                   <div
                     style={{
-                      display: "grid",
-                      gridTemplateColumns: "1fr 1fr",
-                      gap: "10px",
-                      fontSize: "12px",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "6px",
                     }}
                   >
-                    <div>
-                      <strong style={{ color: "var(--accent-green, #10b981)" }}>
-                        Resolved ({verification.resolved_findings.length}):
-                      </strong>
-                      <ul
-                        style={{
-                          margin: "4px 0",
-                          paddingLeft: "16px",
-                          color: "var(--muted)",
-                        }}
-                      >
-                        {verification.resolved_findings.map((f, i) => (
-                          <li key={i}>{f}</li>
-                        ))}
-                      </ul>
-                    </div>
-                    <div>
-                      <strong
-                        style={{ color: "var(--accent-orange, #f97316)" }}
-                      >
-                        Persistent / Remaining (
-                        {verification.persistent_findings.length}):
-                      </strong>
-                      <ul
-                        style={{
-                          margin: "4px 0",
-                          paddingLeft: "16px",
-                          color: "var(--muted)",
-                        }}
-                      >
-                        {verification.persistent_findings.map((f, i) => (
-                          <li key={i}>{f}</li>
-                        ))}
-                      </ul>
-                    </div>
+                    <Sparkles
+                      size={14}
+                      color={
+                        consent
+                          ? "var(--accent-green, #10b981)"
+                          : "var(--muted)"
+                      }
+                    />
+                    <span style={{ color: "var(--muted)" }}>
+                      {consent
+                        ? "Gemini AI-assisted plan"
+                        : "Deterministic local engine"}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowConsentModal(true)}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        color: "var(--muted)",
+                        cursor: "pointer",
+                        padding: 0,
+                        fontSize: "11px",
+                        textDecoration: "underline",
+                      }}
+                    >
+                      Privacy
+                    </button>
                   </div>
                 </div>
-              )}
+
+                {isGitHubTarget && report.source_metadata?.branch && (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "6px",
+                      color: "var(--muted)",
+                      fontSize: "11px",
+                    }}
+                  >
+                    <GitBranch size={13} />
+                    <span>
+                      Target: <code>{report.source_metadata.branch}</code>
+                    </span>
+                  </div>
+                )}
+              </div>
 
               {/* GitHub Pull Request Link Banner if applied */}
-              {plan && plan.pr_url && (
+              {plan.pr_url && (
                 <div
                   style={{
-                    padding: "14px 18px",
+                    padding: "10px 14px",
                     background: "rgba(16, 185, 129, 0.1)",
                     border: "1px solid rgba(16, 185, 129, 0.3)",
                     borderRadius: "8px",
@@ -1406,143 +1388,171 @@ export default function RemediationPanel({
                 </div>
               )}
 
-              {/* Pre-application Advisory before Approval */}
-              {confirmApply && (
-                <div
-                  style={{
-                    padding: "14px 18px",
-                    background: isGitHubTarget
-                      ? "rgba(99, 102, 241, 0.1)"
-                      : "rgba(249, 115, 22, 0.1)",
-                    border: isGitHubTarget
-                      ? "1px solid rgba(99, 102, 241, 0.3)"
-                      : "1px solid rgba(249, 115, 22, 0.3)",
-                    borderRadius: "8px",
-                    fontSize: "12px",
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: "8px",
-                  }}
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "8px",
-                    }}
-                  >
-                    {isGitHubTarget ? (
-                      <GitPullRequest
-                        size={16}
-                        color="var(--accent, #6366f1)"
-                      />
-                    ) : (
-                      <GitBranch
-                        size={16}
-                        color="var(--accent-orange, #f97316)"
-                      />
-                    )}
-                    <strong
-                      style={{
-                        color: isGitHubTarget
-                          ? "var(--accent, #6366f1)"
-                          : "var(--accent-orange, #f97316)",
-                      }}
-                    >
-                      {isGitHubTarget
-                        ? "GitHub Autopilot Remediation Advisory:"
-                        : "Pre-application advisory:"}
-                    </strong>
-                  </div>
-                  <p style={{ margin: 0, lineHeight: "1.5" }}>
-                    {isGitHubTarget ? (
-                      <>
-                        Guardian Autopilot will create a dedicated remediation
-                        branch (
-                        <code>
-                          guardian/remediation/{plan.plan_id.slice(0, 8)}
-                        </code>
-                        ) from commit{" "}
-                        <code>
-                          {(
-                            report.source_metadata?.commit_sha ||
-                            plan.commit_sha ||
-                            ""
-                          ).slice(0, 7)}
-                        </code>
-                        , apply atomic Git tree modifications, and open a Pull
-                        Request against{" "}
-                        <code>
-                          {report.source_metadata?.branch ||
-                            plan.branch ||
-                            "main"}
-                        </code>
-                        . Guardian will never directly modify the default branch
-                        or automatically merge pull requests.
-                      </>
-                    ) : (
-                      <>
-                        Guardian will write exact file modifications to your
-                        local project. It is strongly recommended to work on a
-                        dedicated Git branch and ensure untracked files are
-                        committed. A local IndexedDB recovery backup will be
-                        captured automatically before modification.
-                      </>
-                    )}
-                  </p>
-                  <div
-                    style={{ display: "flex", gap: "10px", marginTop: "4px" }}
-                  >
-                    <button
-                      onClick={isGitHubTarget ? applyGitHubPR : applyPlan}
-                      disabled={
-                        loading ||
-                        (plan.validation_status &&
-                          plan.validation_status !== "VERIFIED")
-                      }
-                      className="button primary compact"
-                      style={{
-                        background: isGitHubTarget
-                          ? "var(--accent, #6366f1)"
-                          : "var(--accent-green, #10b981)",
-                        borderColor: isGitHubTarget
-                          ? "var(--accent, #6366f1)"
-                          : "var(--accent-green, #10b981)",
-                        opacity:
-                          plan.validation_status &&
-                          plan.validation_status !== "VERIFIED"
-                            ? 0.6
-                            : 1,
-                        cursor:
-                          plan.validation_status &&
-                          plan.validation_status !== "VERIFIED"
-                            ? "not-allowed"
-                            : "pointer",
-                      }}
-                    >
-                      {isGitHubTarget
-                        ? "Confirm and Create Pull Request"
-                        : plan.status === "reverted"
-                          ? "Confirm and reapply modifications"
-                          : "Confirm and apply modifications"}
-                    </button>
-                    <button
-                      onClick={() => setConfirmApply(false)}
-                      className="button secondary compact"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              )}
+              {/* The Enhanced Remediation Plan View with Segmented Tabs */}
+              <RemediationPlanView
+                plan={plan}
+                findings={report.findings}
+                verification={verification}
+                onFindingClick={onFindingClick}
+              />
             </div>
           )}
         </div>
 
+        {/* Pinned Pre-Application Confirmation Sheet (Docked right above footer) */}
+        <AnimatePresence>
+          {confirmApply && plan && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              style={{
+                borderTop: isGitHubTarget
+                  ? "1px solid rgba(99, 102, 241, 0.4)"
+                  : "1px solid rgba(249, 115, 22, 0.4)",
+                background: isGitHubTarget
+                  ? "rgba(99, 102, 241, 0.08)"
+                  : "rgba(249, 115, 22, 0.08)",
+                padding: "12px 20px",
+                display: "flex",
+                flexDirection: "column",
+                gap: "8px",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: "10px",
+                  flexWrap: "wrap",
+                }}
+              >
+                <div
+                  style={{ display: "flex", alignItems: "center", gap: "8px" }}
+                >
+                  {isGitHubTarget ? (
+                    <GitPullRequest
+                      size={16}
+                      color="var(--accent, #6366f1)"
+                    />
+                  ) : (
+                    <GitBranch
+                      size={16}
+                      color="var(--accent-orange, #f97316)"
+                    />
+                  )}
+                  <strong
+                    style={{
+                      fontSize: "13px",
+                      color: isGitHubTarget
+                        ? "var(--accent, #6366f1)"
+                        : "var(--accent-orange, #f97316)",
+                    }}
+                  >
+                    {isGitHubTarget
+                      ? "Confirm GitHub Pull Request Creation"
+                      : "Pre-Application Advisory: Confirm Local Disk Write"}
+                  </strong>
+                </div>
+
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <button
+                    onClick={isGitHubTarget ? applyGitHubPR : applyPlan}
+                    disabled={
+                      loading ||
+                      (plan.validation_status &&
+                        plan.validation_status !== "VERIFIED")
+                    }
+                    className="button primary compact"
+                    style={{
+                      background: isGitHubTarget
+                        ? "var(--accent, #6366f1)"
+                        : "var(--accent-green, #10b981)",
+                      borderColor: isGitHubTarget
+                        ? "var(--accent, #6366f1)"
+                        : "var(--accent-green, #10b981)",
+                      opacity:
+                        plan.validation_status &&
+                        plan.validation_status !== "VERIFIED"
+                          ? 0.6
+                          : 1,
+                      cursor:
+                        plan.validation_status &&
+                        plan.validation_status !== "VERIFIED"
+                          ? "not-allowed"
+                          : "pointer",
+                      fontSize: "12px",
+                      padding: "4px 12px",
+                    }}
+                  >
+                    {isGitHubTarget
+                      ? "Confirm & Create Pull Request"
+                      : plan.status === "reverted"
+                        ? "Confirm & Reapply modifications"
+                        : "Confirm & Apply modifications"}
+                  </button>
+                  <button
+                    onClick={() => setConfirmApply(false)}
+                    className="button secondary compact"
+                    style={{ fontSize: "12px", padding: "4px 10px" }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: "11px",
+                  lineHeight: "1.5",
+                  color: "var(--foreground)",
+                  opacity: 0.9,
+                }}
+              >
+                {isGitHubTarget ? (
+                  <>
+                    Guardian Autopilot will create a dedicated remediation branch (
+                    <code>
+                      guardian/remediation/{plan.plan_id.slice(0, 8)}
+                    </code>
+                    ) from commit{" "}
+                    <code>
+                      {(
+                        report.source_metadata?.commit_sha ||
+                        plan.commit_sha ||
+                        ""
+                      ).slice(0, 7)}
+                    </code>
+                    , apply atomic Git modifications, and open a Pull Request
+                    against{" "}
+                    <code>
+                      {report.source_metadata?.branch ||
+                        plan.branch ||
+                        "main"}
+                    </code>
+                    . Guardian will never directly push to your default branch or
+                    automatically merge.
+                  </>
+                ) : (
+                  <>
+                    Guardian will write exact file modifications directly to
+                    your local project on disk. A local IndexedDB rollback
+                    snapshot will be captured automatically before modification,
+                    allowing safe 1-click undo. It is strongly recommended to
+                    work on a clean Git branch with untracked files committed.
+                  </>
+                )}
+              </p>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* Panel Footer Controls */}
         <div
           style={{
-            padding: "14px 20px",
+            padding: "12px 20px",
             borderTop: "1px solid var(--border)",
             display: "flex",
             justifyContent: "space-between",

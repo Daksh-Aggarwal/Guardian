@@ -409,20 +409,49 @@ def select_patched_dependency_version(
     safe_candidates.sort(key=lambda item: (item[0][0], item[0][1], item[0][2]))
 
     same_major = [c for c in safe_candidates if c[0][0] == orig_semver[0]]
-    ordered_candidates = same_major if same_major else safe_candidates
+    higher_majors = [c for c in safe_candidates if c[0][0] > orig_semver[0]]
+
+    candidates_to_test: List[str] = []
+    fixed_versions = getattr(advisory, "fixed_versions", []) or []
+    clean_fixed = [re.sub(r"^[vV^~>=< ]+", "", str(fv)).split()[0] for fv in fixed_versions]
+
+    # Priority 1: Safe candidates in same major version (prevents unnecessary major upgrades)
+    if same_major:
+        for cfv in clean_fixed:
+            if any(c[1] == cfv for c in same_major) and cfv not in candidates_to_test:
+                candidates_to_test.append(cfv)
+        # Test newest release in same major branch (holds all accumulated backported fixes)
+        if same_major[-1][1] not in candidates_to_test:
+            candidates_to_test.append(same_major[-1][1])
+        for c in same_major[:3]:
+            if c[1] not in candidates_to_test:
+                candidates_to_test.append(c[1])
+
+    # Priority 2: Latest release or higher major versions if same major is unavailable or insecure
+    latest_tag = packument.get("dist-tags", {}).get("latest") if packument else None
+    if latest_tag and any(c[1] == latest_tag for c in safe_candidates) and latest_tag not in candidates_to_test:
+        candidates_to_test.append(latest_tag)
+
+    if higher_majors:
+        for cfv in clean_fixed:
+            if any(c[1] == cfv for c in higher_majors) and cfv not in candidates_to_test:
+                candidates_to_test.append(cfv)
+        if higher_majors[-1][1] not in candidates_to_test:
+            candidates_to_test.append(higher_majors[-1][1])
+        for c in higher_majors[:3]:
+            if c[1] not in candidates_to_test:
+                candidates_to_test.append(c[1])
 
     selected_ver = None
-    # Pick the smallest safe upgrade not reported vulnerable by OSV
-    for cand in ordered_candidates:
-        ver = cand[1]
+    for ver in candidates_to_test:
         vulns, st = query_osv_vulnerability(pkg_name, ver)
         if st == "ok" and vulns:
             continue
         selected_ver = ver
         break
 
-    if not selected_ver and ordered_candidates:
-        selected_ver = ordered_candidates[0][1]
+    if not selected_ver:
+        return None, None, f"No verified vulnerability-free version found in registry for '{pkg_name}'"
 
     dist_meta = None
     if packument and "versions" in packument and selected_ver in packument["versions"]:
@@ -474,7 +503,12 @@ def generate_lockfile_edits(
 
         if old_res and new_resolved:
             old_res_text = f'"resolved": "{old_res}"'
-            new_res_text = f'"resolved": "{new_resolved}"'
+            if not old_int and new_integrity:
+                m_indent = re.search(rf'([ \t]+)"resolved":\s*"{re.escape(old_res)}"', lock_content)
+                indent = m_indent.group(1) if m_indent else "      "
+                new_res_text = f'"resolved": "{new_resolved}",\n{indent}"integrity": "{new_integrity}"'
+            else:
+                new_res_text = f'"resolved": "{new_resolved}"'
             if lock_content.count(old_res_text) == 1:
                 edits.append(TextEdit(old_text=old_res_text, new_text=new_res_text))
 
@@ -492,6 +526,31 @@ def generate_lockfile_edits(
                 new_v_text = m.group(1) + new_version + m.group(2)
                 if lock_content.count(old_v_text) == 1:
                     edits.append(TextEdit(old_text=old_v_text, new_text=new_v_text))
+
+    # 3. Legacy v1/v2 dependencies block
+    if "dependencies" in data and isinstance(data["dependencies"], dict) and pkg_name in data["dependencies"]:
+        leg_entry = data["dependencies"][pkg_name]
+        leg_v = leg_entry.get("version", "")
+        leg_res = leg_entry.get("resolved", "")
+        leg_int = leg_entry.get("integrity", "")
+        if leg_v and new_version:
+            pat = rf'("{re.escape(pkg_name)}"\s*:\s*\{{[^}}]*?"version"\s*:\s*"){re.escape(leg_v)}(")'
+            m = re.search(pat, lock_content)
+            if m:
+                old_v_text = m.group(0)
+                new_v_text = m.group(1) + new_version + m.group(2)
+                if lock_content.count(old_v_text) == 1 and not any(e.old_text == old_v_text for e in edits):
+                    edits.append(TextEdit(old_text=old_v_text, new_text=new_v_text))
+        if leg_res and new_resolved:
+            old_res_text = f'"resolved": "{leg_res}"'
+            new_res_text = f'"resolved": "{new_resolved}"'
+            if lock_content.count(old_res_text) == 1 and not any(e.old_text == old_res_text for e in edits):
+                edits.append(TextEdit(old_text=old_res_text, new_text=new_res_text))
+        if leg_int and new_integrity:
+            old_int_text = f'"integrity": "{leg_int}"'
+            new_int_text = f'"integrity": "{new_integrity}"'
+            if lock_content.count(old_int_text) == 1 and not any(e.old_text == old_int_text for e in edits):
+                edits.append(TextEdit(old_text=old_int_text, new_text=new_int_text))
 
     return edits
 
@@ -786,6 +845,14 @@ class RemediationPlanner:
                     relevant_files.add(ev.file)
                     f_files.append(ev.file)
 
+            rec_safe = None
+            if f.rule == "OSV" and f.package and "package.json" in snapshot.files:
+                pkg_name, _ = parse_package_specifier(f.package)
+                if pkg_name:
+                    m = re.search(rf'("{re.escape(pkg_name)}"\s*:\s*")([^"]+)(")', snapshot.files.get("package.json", ""))
+                    if m:
+                        rec_safe, _, _ = select_patched_dependency_version(pkg_name, m.group(2), f.advisory)
+
             findings_context.append({
                 "id": f.id,
                 "rule": f.rule,
@@ -798,7 +865,8 @@ class RemediationPlanner:
                 "recommendation": f.recommendation,
                 "package": f.package,
                 "associated_files": f_files,
-                "fixed_versions": f.advisory.fixed_versions if f.advisory else []
+                "fixed_versions": f.advisory.fixed_versions if f.advisory else [],
+                "recommended_safe_version": rec_safe
             })
 
         # Include package.json if present (never include raw lockfiles in LLM context to prevent token bloat and timeouts)
@@ -858,8 +926,9 @@ class RemediationPlanner:
             "Do NOT directly edit package-lock.json; Guardian's deterministic engine automatically generates verified lockfile entries with authentic SRI hashes.\n"
             "4. EVIDENCE-BACKED DEPENDENCY PROPOSALS: For any dependency modification, populate dependency_proposals "
             "identifying original and proposed versions, explaining why the target version addresses the specific finding, "
-            "identifying any major-version change, and stating any uncertainty. Prefer the smallest safe upgrade that resolves "
-            "the finding, and never propose unexplained major-version downgrades.\n"
+            "identifying any major-version change, and stating any uncertainty. If a 'recommended_safe_version' is provided "
+            "in the finding context, use it as the proposed version upgrade to ensure all advisories are resolved safely. "
+            "Prefer the smallest safe upgrade that resolves the finding, and never propose unexplained major-version downgrades.\n"
             "5. NO UNVERIFIED CLAIMS: Never claim that registry or advisory verification has occurred unless Guardian "
             "independently performed it. You are an advisor, NOT the security validator.\n"
             "6. FORBIDDEN OPERATIONS: Never modify .env files, credentials, private keys, or .git.\n"
@@ -910,7 +979,60 @@ class RemediationPlanner:
             cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
             cleaned = re.sub(r"\s*```$", "", cleaned)
         data = json.loads(cleaned)
-        return LLMRemediationOutput.model_validate(data)
+        plan_output = LLMRemediationOutput.model_validate(data)
+
+        # Synchronize lockfile if Gemini modified package.json dependencies and project has package-lock.json
+        if "package-lock.json" in snapshot.files and not any(ch.file_path == "package-lock.json" for ch in plan_output.proposed_changes):
+            pkg_change = next((ch for ch in plan_output.proposed_changes if ch.file_path == "package.json"), None)
+            if pkg_change:
+                orig_pkg_str = snapshot.files.get("package.json", "")
+                prop_pkg_str = orig_pkg_str
+                for ed in pkg_change.edits:
+                    if ed.old_text in prop_pkg_str:
+                        prop_pkg_str = prop_pkg_str.replace(ed.old_text, ed.new_text, 1)
+
+                dep_changes = extract_manifest_dependency_changes(orig_pkg_str, prop_pkg_str)
+                lock_content = snapshot.files.get("package-lock.json", "")
+                synthesized_lock_edits: List[LLMTextEdit] = []
+
+                for pkg_name, info in dep_changes.items():
+                    prop_ver = info.get("prop_ver", "")
+                    prop_spec = info.get("prop_spec", "")
+                    if not prop_ver:
+                        continue
+                    reg_data, reg_status, _ = query_npm_registry(pkg_name, prop_ver)
+                    if reg_status == "ok" and reg_data:
+                        dist = reg_data.get("dist", {})
+                        tarball = dist.get("tarball", f"https://registry.npmjs.org/{pkg_name}/-/{pkg_name}-{prop_ver}.tgz")
+                        integrity = dist.get("integrity", "")
+                        if not integrity and dist.get("shasum"):
+                            shasum = dist["shasum"]
+                            if re.fullmatch(r"[0-9a-fA-F]{40}", shasum):
+                                integrity = "sha1-" + base64.b64encode(bytes.fromhex(shasum)).decode()
+
+                        l_edits = generate_lockfile_edits(
+                            lock_content=lock_content,
+                            pkg_name=pkg_name,
+                            new_spec=prop_spec,
+                            new_version=prop_ver,
+                            new_resolved=tarball,
+                            new_integrity=integrity
+                        )
+                        for le in l_edits:
+                            lock_content = lock_content.replace(le.old_text, le.new_text, 1)
+                            synthesized_lock_edits.append(LLMTextEdit(old_text=le.old_text, new_text=le.new_text))
+
+                if synthesized_lock_edits:
+                    plan_output.proposed_changes.append(LLMProposedFileChange(
+                        file_path="package-lock.json",
+                        operation="update",
+                        edits=synthesized_lock_edits,
+                        rationale="Synchronize package-lock.json dependency resolution and verified SRI integrity hashes with package.json manifest.",
+                        finding_ids=pkg_change.finding_ids,
+                        expected_result="Ensures lockfile resolution and integrity hashes match updated package.json dependencies."
+                    ))
+
+        return plan_output
 
     def _generate_deterministic_plan(
         self,

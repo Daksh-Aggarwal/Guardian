@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { FileCode } from "lucide-react";
-import { Download, ArrowRight, CopyIcon, CheckIcon } from "@/components/icons";
+import { Download, CopyIcon, CheckIcon } from "@/components/icons";
 import { ProposedFileChange } from "@/lib/types";
 
 export default function DiffViewer({
@@ -32,6 +32,16 @@ export default function DiffViewer({
     navigator.clipboard.writeText(activeChange.diff);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  }
+
+  function getLineStats(diff: string) {
+    let add = 0;
+    let del = 0;
+    for (const line of diff.split("\n")) {
+      if (line.startsWith("+") && !line.startsWith("+++")) add++;
+      else if (line.startsWith("-") && !line.startsWith("---")) del++;
+    }
+    return { add, del };
   }
 
   // Parse unified diff into structured lines
@@ -68,40 +78,57 @@ export default function DiffViewer({
             overflowX: "auto",
           }}
         >
-          {changes.map((c, i) => (
-            <button
-              key={c.file_path}
-              onClick={() => setSelectedIdx(i)}
-              className={`button compact ${selectedIdx === i ? "primary" : "secondary"}`}
-              style={{
-                fontSize: "12px",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "6px",
-                padding: "4px 10px",
-              }}
-            >
-              <FileCode size={14} />
-              <span>{c.file_path}</span>
-              <span
+          {changes.map((c, i) => {
+            const { add, del } = getLineStats(c.diff);
+            return (
+              <button
+                key={c.file_path}
+                onClick={() => setSelectedIdx(i)}
+                className={`button compact ${selectedIdx === i ? "primary" : "secondary"}`}
                 style={{
-                  fontSize: "10px",
-                  padding: "1px 5px",
-                  borderRadius: "4px",
-                  background:
-                    c.operation === "create"
-                      ? "rgba(16, 185, 129, 0.2)"
-                      : "rgba(59, 130, 246, 0.2)",
-                  color:
-                    c.operation === "create"
-                      ? "var(--accent-green, #10b981)"
-                      : "var(--accent-blue, #3b82f6)",
+                  fontSize: "12px",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: "4px 10px",
                 }}
               >
-                {c.operation}
-              </span>
-            </button>
-          ))}
+                <FileCode size={14} />
+                <span>{c.file_path}</span>
+                <span
+                  style={{
+                    fontSize: "10px",
+                    padding: "1px 5px",
+                    borderRadius: "4px",
+                    background:
+                      c.operation === "create"
+                        ? "rgba(16, 185, 129, 0.2)"
+                        : "rgba(59, 130, 246, 0.2)",
+                    color:
+                      c.operation === "create"
+                        ? "var(--accent-green, #10b981)"
+                        : "var(--accent-blue, #3b82f6)",
+                  }}
+                >
+                  {c.operation}
+                </span>
+                {(add > 0 || del > 0) && (
+                  <span
+                    style={{
+                      fontSize: "10px",
+                      fontFamily: "var(--font-mono, monospace)",
+                      display: "inline-flex",
+                      gap: "3px",
+                      fontWeight: 600,
+                    }}
+                  >
+                    {add > 0 && <span style={{ color: "#10b981" }}>+{add}</span>}
+                    {del > 0 && <span style={{ color: "#ef4444" }}>-{del}</span>}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -151,26 +178,43 @@ export default function DiffViewer({
           style={{
             display: "flex",
             justifyContent: "space-between",
+            alignItems: "center",
             marginBottom: "4px",
+            flexWrap: "wrap",
+            gap: "6px",
           }}
         >
-          <strong>{activeChange.file_path}</strong>
+          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+            <FileCode size={14} color="var(--accent-blue, #3b82f6)" />
+            <strong>{activeChange.file_path}</strong>
+          </div>
           <span
             style={{
               color: "var(--muted)",
-              fontFamily: "monospace",
-              fontSize: "10px",
+              fontFamily: "var(--font-mono, monospace)",
+              fontSize: "11px",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "4px",
+              background: "var(--surface-muted, rgba(255, 255, 255, 0.04))",
+              padding: "2px 8px",
+              borderRadius: "4px",
+              border: "1px solid var(--border)",
             }}
           >
-            SHA:{" "}
-            {activeChange.original_sha256
-              ? activeChange.original_sha256.substring(0, 8)
-              : "none"}{" "}
-            <ArrowRight size={10} style={{ display: "inline" }} />{" "}
-            {activeChange.proposed_sha256.substring(0, 8)}
+            <span>SHA:</span>
+            <span>
+              {activeChange.original_sha256
+                ? activeChange.original_sha256.substring(0, 8)
+                : "none"}
+            </span>
+            <span style={{ opacity: 0.6 }}>→</span>
+            <span style={{ color: "var(--accent-green, #10b981)" }}>
+              {activeChange.proposed_sha256.substring(0, 8)}
+            </span>
           </span>
         </div>
-        <p style={{ margin: "0", color: "var(--foreground)", opacity: 0.85 }}>
+        <p style={{ margin: "2px 0 0", color: "var(--foreground)", opacity: 0.85, lineHeight: "1.5" }}>
           {activeChange.rationale}
         </p>
         {activeChange.expected_result && (
@@ -181,7 +225,8 @@ export default function DiffViewer({
               fontSize: "11px",
             }}
           >
-            <em>Outcome:</em> {activeChange.expected_result}
+            <strong style={{ color: "var(--foreground)" }}>Outcome:</strong>{" "}
+            {activeChange.expected_result}
           </p>
         )}
       </div>
@@ -192,10 +237,11 @@ export default function DiffViewer({
         style={{
           fontFamily: "var(--font-mono, monospace)",
           fontSize: "12px",
-          lineHeight: "1.5",
+          lineHeight: "1.6",
           overflowX: "auto",
-          background: "var(--diff-bg, rgba(0, 0, 0, 0.2))",
-          padding: "12px 0",
+          maxHeight: "440px",
+          background: "var(--diff-bg, rgba(0, 0, 0, 0.25))",
+          padding: "8px 0",
         }}
       >
         {lines.map((line, idx) => {
