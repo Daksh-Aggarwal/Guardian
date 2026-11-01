@@ -29,6 +29,7 @@ class TextEdit(BaseModel):
 
 class ProposedFileChange(BaseModel):
     file_path: str = Field(description="Project-relative file path.")
+    edit_source: Literal['proposal', 'npm_registry'] = Field(default='proposal', description="Server-assigned provenance; only deterministic npm construction may mark a lockfile npm_registry.")
     operation: OperationType = Field(default='update', description="File operation: 'update' or 'create'.")
     original_sha256: str = Field(description="SHA-256 hash of original file content before modification.")
     proposed_sha256: str = Field(description="SHA-256 hash of proposed file content after modification.")

@@ -275,3 +275,41 @@ def test_yarn_manifests_upload():
     ]))
     assert len(report['dependencies']) >= 1
     assert any(d['name'] == 'react' for d in report['dependencies'])
+
+def test_delete_single_scan():
+    report = completed(client.post('/api/scans/example/benign'))
+    scan_id = report['id']
+    assert client.get(f'/api/scans/{scan_id}').status_code == 200
+
+    from backend.guardian import storage
+    storage.save_message(scan_id, 'conv-test-1', 'user', 'hello')
+
+    del_res = client.delete(f'/api/scans/{scan_id}')
+    assert del_res.status_code == 200
+    assert del_res.json()['status'] == 'deleted'
+    assert del_res.json()['id'] == scan_id
+
+    assert client.get(f'/api/scans/{scan_id}').status_code == 404
+    assert storage.list_messages(scan_id, 'conv-test-1') == []
+    assert client.delete(f'/api/scans/{scan_id}').status_code == 404
+
+def test_batch_delete_scans():
+    rep1 = completed(client.post('/api/scans/example/benign'))
+    rep2 = completed(client.post('/api/scans/example/obfuscated'))
+    id1, id2 = rep1['id'], rep2['id']
+
+    assert client.get(f'/api/scans/{id1}').status_code == 200
+    assert client.get(f'/api/scans/{id2}').status_code == 200
+
+    bad_req = client.post('/api/scans/delete-batch', json={'scan_ids': []})
+    assert bad_req.status_code == 400
+
+    batch_res = client.post('/api/scans/delete-batch', json={'scan_ids': [id1, id2, 'non-existent-id']})
+    assert batch_res.status_code == 200
+    data = batch_res.json()
+    assert data['status'] == 'deleted'
+    assert data['deleted_count'] == 2
+    assert set(data['deleted_ids']) == {id1, id2}
+
+    assert client.get(f'/api/scans/{id1}').status_code == 404
+    assert client.get(f'/api/scans/{id2}').status_code == 404

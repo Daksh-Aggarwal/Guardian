@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import {
   Loader2,
@@ -8,6 +8,8 @@ import {
   AlertTriangle,
   FileCode2,
   ShieldAlert,
+  Trash2,
+  CheckSquare,
 } from "lucide-react";
 import {
   LayoutDashboard,
@@ -106,6 +108,15 @@ export default function Home() {
   const [heatmapMode, setHeatmapMode] = useState<"activity" | "threats">(
     "activity",
   );
+  const [selectedScanIds, setSelectedScanIds] = useState<Set<string>>(new Set());
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState<{
+    mode: "single" | "batch";
+    id?: string;
+    count?: number;
+    name?: string;
+  } | null>(null);
+  const headerCheckboxRef = useRef<HTMLInputElement>(null);
 
   // Transform scan history into dual-gradient calendar data streams
   const { activityHeatmapData, threatHeatmapData } = useMemo(() => {
@@ -179,6 +190,58 @@ export default function Home() {
       setLoading(false);
     }
   }, []);
+
+  const handleDeleteConfirmed = useCallback(async () => {
+    if (!deleteConfirm) return;
+    setIsDeleting(true);
+    setError("");
+    try {
+      if (deleteConfirm.mode === "single" && deleteConfirm.id) {
+        const targetId = deleteConfirm.id;
+        await api(`/scans/${targetId}`, { method: "DELETE" });
+        setReports((current) => current.filter((r) => r.id !== targetId));
+        setSelectedScanIds((prev) => {
+          const next = new Set(prev);
+          next.delete(targetId);
+          return next;
+        });
+        setNotice(
+          `Deleted scan "${deleteConfirm.name || targetId}" from history.`,
+        );
+        if (report?.id === targetId) {
+          setReport(null);
+          setPage("Scan history");
+        }
+      } else if (deleteConfirm.mode === "batch") {
+        const idsToDelete = Array.from(selectedScanIds);
+        if (idsToDelete.length === 0) return;
+        const res = await api<{
+          status: string;
+          deleted_count: number;
+          deleted_ids: string[];
+        }>("/scans/delete-batch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ scan_ids: idsToDelete }),
+        });
+        const deletedSet = new Set(res.deleted_ids || idsToDelete);
+        setReports((current) => current.filter((r) => !deletedSet.has(r.id)));
+        setSelectedScanIds(new Set());
+        setNotice(
+          `Deleted ${deletedSet.size} ${deletedSet.size === 1 ? "scan" : "scans"} from history.`,
+        );
+        if (report && deletedSet.has(report.id)) {
+          setReport(null);
+          setPage("Scan history");
+        }
+      }
+      setDeleteConfirm(null);
+    } catch (err) {
+      setError((err as Error).message || "Failed to delete scan data.");
+    } finally {
+      setIsDeleting(false);
+    }
+  }, [deleteConfirm, selectedScanIds, report]);
 
   useEffect(() => {
     initSession().finally(() => {
@@ -376,6 +439,32 @@ export default function Home() {
       return true;
     });
   }, [reports, datasetFilter]);
+
+  const displayedReports = useMemo(() => {
+    return filteredReports
+      .filter((r) => {
+        const q = search.toLowerCase();
+        return (
+          r.name.toLowerCase().includes(q) ||
+          r.version.toLowerCase().includes(q) ||
+          r.source.toLowerCase().includes(q)
+        );
+      })
+      .slice(0, 50);
+  }, [filteredReports, search]);
+
+  const allDisplayedSelected =
+    displayedReports.length > 0 &&
+    displayedReports.every((r) => selectedScanIds.has(r.id));
+  const someDisplayedSelected =
+    displayedReports.some((r) => selectedScanIds.has(r.id)) &&
+    !allDisplayedSelected;
+
+  useEffect(() => {
+    if (headerCheckboxRef.current) {
+      headerCheckboxRef.current.indeterminate = someDisplayedSelected;
+    }
+  }, [someDisplayedSelected]);
 
   // Reconcile workspace and active report selections when dataset filter changes
   useEffect(() => {
@@ -963,6 +1052,44 @@ export default function Home() {
                     </div>
                   </div>
 
+                  {selectedScanIds.size > 0 && (
+                    <div className="batch-selection-bar">
+                      <div className="batch-selection-info">
+                        <CheckSquare
+                          size={16}
+                          style={{ color: "var(--accent)" }}
+                        />
+                        <span>
+                          <strong>{selectedScanIds.size}</strong>{" "}
+                          {selectedScanIds.size === 1 ? "scan" : "scans"}{" "}
+                          selected
+                        </span>
+                      </div>
+                      <div className="batch-selection-actions">
+                        <button
+                          type="button"
+                          className="batch-delete-btn"
+                          onClick={() =>
+                            setDeleteConfirm({
+                              mode: "batch",
+                              count: selectedScanIds.size,
+                            })
+                          }
+                        >
+                          <Trash2 size={13} />
+                          <span>Delete Selected ({selectedScanIds.size})</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="batch-clear-btn"
+                          onClick={() => setSelectedScanIds(new Set())}
+                        >
+                          Clear selection
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="card scan-table">
                     {loading ? (
                       <div className="empty-loading-state">
@@ -993,163 +1120,202 @@ export default function Home() {
                     ) : (
                       <>
                         <div className="table-header">
+                          <span className="table-checkbox-cell">
+                            <input
+                              ref={headerCheckboxRef}
+                              type="checkbox"
+                              className="scan-checkbox"
+                              checked={allDisplayedSelected}
+                              onChange={() => {
+                                if (allDisplayedSelected) {
+                                  setSelectedScanIds(new Set());
+                                } else {
+                                  setSelectedScanIds(
+                                    new Set(displayedReports.map((r) => r.id)),
+                                  );
+                                }
+                              }}
+                              aria-label="Select all displayed scans"
+                            />
+                          </span>
                           <span>PACKAGE / PROJECT</span>
                           <span>BEHAVIORAL ASSESSMENT</span>
                           <span>FINDINGS</span>
                           <span>SCANNED AT</span>
-                          <span>ACTION</span>
+                          <span style={{ textAlign: "right" }}>ACTION</span>
                         </div>
 
-                        {filteredReports
-                          .filter((r) => {
-                            const q = search.toLowerCase();
-                            return (
-                              r.name.toLowerCase().includes(q) ||
-                              r.version.toLowerCase().includes(q) ||
-                              r.source.toLowerCase().includes(q)
-                            );
-                          })
-                          .slice(0, 50)
-                          .map((r) => {
-                            const hasElevated = r.findings.some((f) =>
-                              ["critical", "high"].includes(f.severity),
-                            );
-                            const hasMedium = r.findings.some(
-                              (f) => f.severity === "medium",
-                            );
-                            const bd = getFindingBreakdown(r.findings);
+                        {displayedReports.map((r) => {
+                          const hasElevated = r.findings.some((f) =>
+                            ["critical", "high"].includes(f.severity),
+                          );
+                          const hasMedium = r.findings.some(
+                            (f) => f.severity === "medium",
+                          );
+                          const bd = getFindingBreakdown(r.findings);
+                          const isSelected = selectedScanIds.has(r.id);
 
-                            return (
-                              <div
-                                key={r.id}
-                                className="table-row"
-                                style={{ cursor: "pointer" }}
-                                onClick={() => openReport(r)}
+                          return (
+                            <div
+                              key={r.id}
+                              className={`table-row ${isSelected ? "selected" : ""}`}
+                              style={{ cursor: "pointer" }}
+                              onClick={() => openReport(r)}
+                            >
+                              <span
+                                className="table-checkbox-cell"
+                                onClick={(e) => e.stopPropagation()}
                               >
-                                <span className="package-cell">
-                                  <span className="package-symbol">
-                                    <Package size={18} />
-                                  </span>
-                                  <span className="package-titles">
-                                    <div
-                                      style={{
-                                        display: "flex",
-                                        alignItems: "center",
-                                        gap: "6px",
-                                      }}
-                                    >
-                                      <strong>{r.name}</strong>
-                                      <ClassificationBadge
-                                        classification={
-                                          r.classification ||
-                                          (r.source === "synthetic fixture"
-                                            ? "demo"
-                                            : "real")
-                                        }
-                                        size="sm"
-                                      />
-                                    </div>
-                                    <small>
-                                      v{r.version} · {r.source} ·{" "}
-                                      {r.files_analyzed} files
-                                    </small>
-                                  </span>
-                                </span>
-
-                                <span>
-                                  <span
-                                    className={`risk-pill ${hasElevated ? "high" : hasMedium ? "medium" : "clear"}`}
-                                  >
-                                    <i />
-                                    {r.risk}
-                                  </span>
-                                </span>
-
-                                <span className="findings-cell">
-                                  <strong>{bd.actionable}</strong>
-                                  <small>
-                                    {" "}
-                                    {bd.actionable === 1
-                                      ? "signal"
-                                      : "signals"}{" "}
-                                    to review
-                                  </small>
-                                  {bd.informational > 0 && (
-                                    <small
-                                      style={{
-                                        color: "var(--muted)",
-                                        fontSize: "10px",
-                                        display: "block",
-                                      }}
-                                    >
-                                      +{bd.informational} observations
-                                    </small>
-                                  )}
-                                </span>
-
-                                <span className="date-cell">
-                                  <strong>
-                                    {new Date(r.created_at).toLocaleDateString(
-                                      undefined,
-                                      {
-                                        month: "short",
-                                        day: "numeric",
-                                      },
-                                    )}
-                                  </strong>
-                                  <small>
-                                    {new Date(r.created_at).toLocaleTimeString(
-                                      undefined,
-                                      {
-                                        hour: "2-digit",
-                                        minute: "2-digit",
-                                      },
-                                    )}
-                                  </small>
-                                </span>
-
-                                <span
-                                  style={{
-                                    display: "flex",
-                                    alignItems: "center",
-                                    gap: "8px",
-                                    justifyContent: "flex-end",
+                                <input
+                                  type="checkbox"
+                                  className="scan-checkbox"
+                                  checked={isSelected}
+                                  onChange={() => {
+                                    setSelectedScanIds((prev) => {
+                                      const next = new Set(prev);
+                                      if (next.has(r.id)) next.delete(r.id);
+                                      else next.add(r.id);
+                                      return next;
+                                    });
                                   }}
-                                >
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setWorkspaceProjectName(r.name);
-                                      setWorkspaceProjectId(
-                                        r.project_id || r.name,
-                                      );
-                                      setWorkspaceInitialReport(r);
-                                      navigate("Project workspace");
-                                    }}
-                                    style={{
-                                      background: "rgba(99, 102, 241, 0.12)",
-                                      border:
-                                        "1px solid rgba(99, 102, 241, 0.3)",
-                                      color: "var(--accent)",
-                                      borderRadius: "4px",
-                                      padding: "3px 8px",
-                                      fontSize: "11px",
-                                      cursor: "pointer",
-                                      display: "inline-flex",
-                                      alignItems: "center",
-                                      gap: "4px",
-                                      fontWeight: 500,
-                                    }}
-                                    title="Open in Project Investigation Workspace"
-                                  >
-                                    <span>Investigate</span>
-                                    <ChevronRight size={12} />
-                                  </button>
+                                  aria-label={`Select ${r.name} v${r.version}`}
+                                />
+                              </span>
+
+                              <span className="package-cell">
+                                <span className="package-symbol">
+                                  <Package size={18} />
                                 </span>
-                              </div>
-                            );
-                          })}
+                                <span className="package-titles">
+                                  <div
+                                    style={{
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: "6px",
+                                    }}
+                                  >
+                                    <strong>{r.name}</strong>
+                                    <ClassificationBadge
+                                      classification={
+                                        r.classification ||
+                                        (r.source === "synthetic fixture"
+                                          ? "demo"
+                                          : "real")
+                                      }
+                                      size="sm"
+                                    />
+                                  </div>
+                                  <small>
+                                    v{r.version} · {r.source} ·{" "}
+                                    {r.files_analyzed} files
+                                  </small>
+                                </span>
+                              </span>
+
+                              <span>
+                                <span
+                                  className={`risk-pill ${hasElevated ? "high" : hasMedium ? "medium" : "clear"}`}
+                                >
+                                  <i />
+                                  {r.risk}
+                                </span>
+                              </span>
+
+                              <span className="findings-cell">
+                                <strong>{bd.actionable}</strong>
+                                <small>
+                                  {" "}
+                                  {bd.actionable === 1
+                                    ? "signal"
+                                    : "signals"}{" "}
+                                  to review
+                                </small>
+                                {bd.informational > 0 && (
+                                  <small
+                                    style={{
+                                      color: "var(--muted)",
+                                      fontSize: "10px",
+                                      display: "block",
+                                    }}
+                                  >
+                                    +{bd.informational} observations
+                                  </small>
+                                )}
+                              </span>
+
+                              <span className="date-cell">
+                                <strong>
+                                  {new Date(r.created_at).toLocaleDateString(
+                                    undefined,
+                                    {
+                                      month: "short",
+                                      day: "numeric",
+                                    },
+                                  )}
+                                </strong>
+                                <small>
+                                  {new Date(r.created_at).toLocaleTimeString(
+                                    undefined,
+                                    {
+                                      hour: "2-digit",
+                                      minute: "2-digit",
+                                    },
+                                  )}
+                                </small>
+                              </span>
+
+                              <span
+                                className="table-actions-cell"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setWorkspaceProjectName(r.name);
+                                    setWorkspaceProjectId(
+                                      r.project_id || r.name,
+                                    );
+                                    setWorkspaceInitialReport(r);
+                                    navigate("Project workspace");
+                                  }}
+                                  style={{
+                                    background: "rgba(99, 102, 241, 0.12)",
+                                    border:
+                                      "1px solid rgba(99, 102, 241, 0.3)",
+                                    color: "var(--accent)",
+                                    borderRadius: "4px",
+                                    padding: "3px 8px",
+                                    fontSize: "11px",
+                                    cursor: "pointer",
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: "4px",
+                                    fontWeight: 500,
+                                  }}
+                                  title="Open in Project Investigation Workspace"
+                                >
+                                  <span>Investigate</span>
+                                  <ChevronRight size={12} />
+                                </button>
+                                <button
+                                  type="button"
+                                  className="row-delete-btn"
+                                  onClick={() => {
+                                    setDeleteConfirm({
+                                      mode: "single",
+                                      id: r.id,
+                                      name: `${r.name} v${r.version}`,
+                                    });
+                                  }}
+                                  title={`Delete ${r.name} v${r.version} from history`}
+                                  aria-label={`Delete ${r.name} v${r.version}`}
+                                >
+                                  <Trash2 size={13} />
+                                </button>
+                              </span>
+                            </div>
+                          );
+                        })}
                       </>
                     )}
                   </div>
@@ -1170,6 +1336,84 @@ export default function Home() {
           </footer>
         </main>
       </div>
+
+      {/* Deletion Confirmation Modal */}
+      <AnimatePresence>
+        {deleteConfirm && (
+          <motion.div
+            className="delete-modal-overlay"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => {
+              if (!isDeleting) setDeleteConfirm(null);
+            }}
+          >
+            <motion.div
+              className="delete-modal-card"
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              transition={{ duration: 0.18, ease: "easeOut" }}
+              onClick={(e) => e.stopPropagation()}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="delete-dialog-title"
+            >
+              <div className="delete-modal-header">
+                <div className="delete-modal-icon-badge">
+                  <Trash2 size={20} />
+                </div>
+                <div>
+                  <h3 id="delete-dialog-title" className="delete-modal-title">
+                    {deleteConfirm.mode === "batch"
+                      ? `Delete ${deleteConfirm.count} Scans?`
+                      : `Delete Scan from History?`}
+                  </h3>
+                  <span style={{ fontSize: "11px", color: "var(--muted)" }}>
+                    {deleteConfirm.mode === "batch"
+                      ? `${deleteConfirm.count} records selected for removal`
+                      : deleteConfirm.name}
+                  </span>
+                </div>
+              </div>
+
+              <p className="delete-modal-body">
+                {deleteConfirm.mode === "batch"
+                  ? `Are you sure you want to delete these ${deleteConfirm.count} inspection records? Their stored behavioral assessments, evidence trails, and remediation history will be permanently deleted from Guardian's database. You can re-run these scans at any time for your demo.`
+                  : `Are you sure you want to delete this scan from your history? The stored assessment, findings, and evidence trails for "${deleteConfirm.name}" will be removed. You can re-scan it anytime to repeat your demo.`}
+              </p>
+
+              <div className="delete-modal-actions">
+                <button
+                  type="button"
+                  className="button secondary"
+                  disabled={isDeleting}
+                  onClick={() => setDeleteConfirm(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="batch-delete-btn"
+                  style={{ padding: "8px 16px", fontSize: "13px" }}
+                  disabled={isDeleting}
+                  onClick={handleDeleteConfirmed}
+                >
+                  {isDeleting ? (
+                    <Loader2 size={15} className="spin" />
+                  ) : (
+                    <Trash2 size={15} />
+                  )}
+                  <span>
+                    {isDeleting ? "Deleting..." : "Delete Permanently"}
+                  </span>
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

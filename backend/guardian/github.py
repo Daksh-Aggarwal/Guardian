@@ -1201,15 +1201,19 @@ def preflight_validate_remediation(
     aggregate_proposed_size = 0
 
     for change in plan.proposed_changes:
-        raw_path = change.file_path.strip().lstrip('/')
-        norm_path = validate_and_normalize_path(raw_path)
+        norm_path = validate_and_normalize_path(change.file_path)
 
         if norm_path in seen_paths:
             raise ValueError(f"Duplicate/conflicting change proposed for file '{norm_path}'.")
         seen_paths.add(norm_path)
 
         # Forbid modification of lockfiles by LLM
-        if posixpath.basename(norm_path) in PROTECTED_REMEDIATION_FILES:
+        trusted_npm_lock = (
+            norm_path == "package-lock.json" and change.edit_source == "npm_registry"
+            and plan.validation_status == "VERIFIED" and change.operation == "update"
+            and any(c.file_path == "package.json" for c in plan.proposed_changes)
+        )
+        if posixpath.basename(norm_path) in PROTECTED_REMEDIATION_FILES and not trusted_npm_lock:
             raise ValueError(f"Modification of lockfile '{norm_path}' by automated remediation is forbidden.")
 
         if change.operation not in ("create", "update"):

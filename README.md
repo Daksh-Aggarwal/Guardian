@@ -187,6 +187,7 @@ flowchart TD
 * **Verbatim Text Edits**: Edits require unique text anchors and exact before/after matching.
 * **Pre-Flight SHA-256 Verification**: Verifies disk contents match the snapshot before touching a single byte.
 * **Instant IndexedDB Recovery**: Before any change is written, full file bytes are snapshotted in IndexedDB for 1-click atomic rollback.
+* **Verified npm Dependency Patches**: AI and deterministic proposals share a registry-backed manifest and npm v2/v3 lockfile builder. Invalid or unverified plans cannot be approved or applied. [Remediation contract, supported formats, and regression coverage](docs/AUTOPILOT-REMEDIATION.md).
 
 ---
 

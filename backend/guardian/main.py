@@ -47,6 +47,7 @@ app.add_middleware(CORSMiddleware, allow_origins=[origin.strip() for origin in o
 JOBS = {}
 CANCELLATIONS = {}
 JOB_INSTALLATIONS = {}
+REMEDIATION_JOBS = {}
 LOCK = threading.Lock()
 SLOTS = threading.BoundedSemaphore(2)
 FIXTURES = Path(__file__).resolve().parents[2] / 'fixtures'
@@ -368,12 +369,65 @@ def job(job_id: str):
         return {'id':job_id,'status':'complete','stage':'Complete'}
     raise HTTPException(404, 'Scan not found; an unfinished scan may have been interrupted by a server restart.')
 
+class BatchDeleteScansRequest(BaseModel):
+    scan_ids: list[str]
+
 @app.get('/api/scans/{scan_id}')
 def report(scan_id: str):
     result = storage.get(scan_id)
     if not result:
         raise HTTPException(404, 'Report not found')
     return result
+
+@app.delete('/api/scans/{scan_id}')
+def delete_scan(scan_id: str, request: Request):
+    rep = storage.get(scan_id)
+    if not rep:
+        raise HTTPException(404, 'Scan not found')
+    _verify_scan_access(rep, request)
+
+    with LOCK:
+        if scan_id in JOBS:
+            del JOBS[scan_id]
+        CANCELLATIONS.pop(scan_id, None)
+    JOB_INSTALLATIONS.pop(scan_id, None)
+    project_manager.discard_snapshot(scan_id)
+
+    success = storage.delete_scan(scan_id)
+    if not success:
+        raise HTTPException(404, 'Scan not found')
+    return {'status': 'deleted', 'id': scan_id}
+
+@app.post('/api/scans/delete-batch')
+def delete_scans_batch(batch_req: BatchDeleteScansRequest, request: Request):
+    if not batch_req.scan_ids:
+        raise HTTPException(400, 'scan_ids list cannot be empty')
+
+    to_delete = []
+    unauthorized = False
+    for sid in batch_req.scan_ids:
+        rep = storage.get(sid)
+        if not rep:
+            continue
+        try:
+            _verify_scan_access(rep, request)
+            to_delete.append(sid)
+        except HTTPException:
+            unauthorized = True
+
+    if unauthorized and not to_delete:
+        raise HTTPException(403, 'Unauthorized to delete the requested scans')
+
+    for sid in to_delete:
+        with LOCK:
+            if sid in JOBS:
+                del JOBS[sid]
+            CANCELLATIONS.pop(sid, None)
+        JOB_INSTALLATIONS.pop(sid, None)
+        project_manager.discard_snapshot(sid)
+
+    deleted = storage.delete_scans(to_delete)
+    return {'status': 'deleted', 'deleted_count': len(deleted), 'deleted_ids': deleted}
 
 @app.get('/api/ai/status')
 def ai_status():
@@ -664,6 +718,55 @@ def get_handoff(
     except ValueError as err:
         raise HTTPException(400, str(err))
 
+@app.post('/api/scans/{scan_id}/remediation/jobs', status_code=202)
+def queue_remediation_plan(scan_id: str, request: PlanGenerationRequest, req: Request):
+    rep = storage.get(scan_id)
+    if not rep:
+        raise HTTPException(404, 'Report not found')
+    _verify_scan_access(rep, req)
+    if request.finding_ids and set(request.finding_ids) - {f.id for f in rep.findings}:
+        raise HTTPException(404, 'Findings not found in report')
+    if not SLOTS.acquire(blocking=False):
+        raise HTTPException(429, 'Two analysis jobs are already running. Try again shortly.')
+    identifier = uuid4().hex
+    with LOCK:
+        if len(REMEDIATION_JOBS) >= 100:
+            for old, state in list(REMEDIATION_JOBS.items()):
+                if state['status'] in ('complete', 'failed'):
+                    del REMEDIATION_JOBS[old]
+                    break
+        REMEDIATION_JOBS[identifier] = {'id': identifier, 'scan_id': scan_id, 'status': 'queued', 'stage': 'Queued'}
+
+    def work():
+        try:
+            with LOCK:
+                REMEDIATION_JOBS[identifier].update(status='running', stage='Resolving published versions, advisories and dependency graph')
+            plan = create_remediation_plan(scan_id, request, req)
+            with LOCK:
+                REMEDIATION_JOBS[identifier].update(status='complete', stage='Complete', plan=plan.model_dump())
+        except Exception as error:
+            detail = str(error.detail) if isinstance(error, HTTPException) else f'Remediation planning failed ({type(error).__name__}): {error}'
+            with LOCK:
+                REMEDIATION_JOBS[identifier].update(status='failed', stage='Stopped', error=detail)
+        finally:
+            SLOTS.release()
+    threading.Thread(target=work, daemon=True).start()
+    return {'id': identifier, 'status': 'queued'}
+
+
+@app.get('/api/remediation/jobs/{identifier}')
+def get_remediation_job(identifier: str, req: Request):
+    with LOCK:
+        state = dict(REMEDIATION_JOBS.get(identifier, {}))
+    if not state:
+        raise HTTPException(404, 'Remediation job expired or backend restarted. Generate a fresh plan.')
+    rep = storage.get(state['scan_id'])
+    if not rep:
+        raise HTTPException(404, 'Report not found')
+    _verify_scan_access(rep, req)
+    return state
+
+
 @app.post('/api/scans/{scan_id}/remediation/plan')
 def create_remediation_plan(scan_id: str, request: PlanGenerationRequest, req: Request):
     rep = storage.get(scan_id)
@@ -797,6 +900,12 @@ def verify_remediation_plan(plan_id: str, req: VerificationRequest, request: Req
     if not rescanned_rep:
         raise HTTPException(404, 'Rescanned report not found')
     _verify_scan_access(rescanned_rep, request)
+
+    rescanned_snapshot = project_manager.get_snapshot(req.rescanned_scan_id)
+    if rescanned_snapshot:
+        for change in plan.proposed_changes:
+            if rescanned_snapshot.file_hashes.get(change.file_path) != change.proposed_sha256:
+                raise HTTPException(400, f"Rescanned file '{change.file_path}' does not match the applied plan SHA-256. Rescan the modified project before verification.")
 
     try:
         storage.update_plan_status(plan_id, 'verified')

@@ -3958,8 +3958,8 @@ select {
 .table-header {
   display: grid;
   grid-template-columns:
-    minmax(220px, 2.2fr) minmax(130px, 1.4fr) minmax(110px, 1fr)
-    minmax(100px, 1fr) 40px;
+    36px minmax(200px, 2.2fr) minmax(130px, 1.4fr) minmax(100px, 1fr)
+    minmax(90px, 1fr) minmax(130px, auto);
   padding: 12px 20px;
   background: var(--subtle);
   border-bottom: 1px solid var(--line);
@@ -3968,12 +3968,13 @@ select {
   letter-spacing: 0.8px;
   color: var(--muted);
   text-transform: uppercase;
+  align-items: center;
 }
 .table-row {
   display: grid;
   grid-template-columns:
-    minmax(220px, 2.2fr) minmax(130px, 1.4fr) minmax(110px, 1fr)
-    minmax(100px, 1fr) 40px;
+    36px minmax(200px, 2.2fr) minmax(130px, 1.4fr) minmax(100px, 1fr)
+    minmax(90px, 1fr) minmax(130px, auto);
   align-items: center;
   padding: 15px 20px;
   border-bottom: 1px solid var(--line);
@@ -3986,6 +3987,157 @@ select {
 }
 .table-row:hover {
   background: var(--surface-muted);
+}
+.table-row.selected {
+  background: rgba(99, 102, 241, 0.08);
+}
+.table-checkbox-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.scan-checkbox {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: var(--accent);
+  border-radius: 4px;
+}
+.table-actions-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.row-delete-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--muted);
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-size: 11px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+.row-delete-btn:hover {
+  background: var(--danger-soft);
+  border-color: var(--danger-border);
+  color: var(--danger);
+}
+.batch-selection-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 18px;
+  margin-bottom: 14px;
+  background: var(--surface-card);
+  border: 1px solid var(--accent-border);
+  border-radius: 8px;
+  gap: 12px;
+}
+.batch-selection-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text);
+}
+.batch-selection-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.batch-delete-btn {
+  background: var(--danger-soft);
+  border: 1px solid var(--danger-border);
+  color: var(--danger);
+  border-radius: 6px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.batch-delete-btn:hover:not(:disabled) {
+  background: var(--danger);
+  color: #ffffff;
+  border-color: var(--danger);
+}
+.batch-clear-btn {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.batch-clear-btn:hover {
+  background: var(--surface-subtle);
+  color: var(--text);
+}
+.delete-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(4px);
+}
+.delete-modal-card {
+  width: 100%;
+  max-width: 480px;
+  background: var(--surface-card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: var(--shadow-lg);
+  color: var(--text);
+}
+.delete-modal-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.delete-modal-icon-badge {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: var(--danger-soft);
+  border: 1px solid var(--danger-border);
+  color: var(--danger);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+.delete-modal-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0;
+}
+.delete-modal-body {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+  margin-bottom: 22px;
+}
+.delete-modal-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
 }
 .package-cell {
   display: flex;
@@ -6424,9 +6576,9 @@ select {
   }
   .table-header,
   .table-row {
-    grid-template-columns: 1.8fr 1fr 1fr 30px;
+    grid-template-columns: 36px 1.8fr 1fr 1fr minmax(110px, auto);
   }
-  .table-header span:nth-child(4),
+  .table-header span:nth-child(5),
   .table-row .date-cell {
     display: none;
   }

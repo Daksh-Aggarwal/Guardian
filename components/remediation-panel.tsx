@@ -185,8 +185,8 @@ export default function RemediationPanel({
 
     try {
       setStage("Generating structured patch with Guardian...");
-      const res = await api<RemediationPlan>(
-        `/scans/${report.id}/remediation/plan`,
+      const job = await api<{ id: string }>(
+        `/scans/${report.id}/remediation/jobs`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -198,7 +198,24 @@ export default function RemediationPanel({
         },
       );
 
-      setPlan(res);
+      for (;;) {
+        const state = await api<{
+          status: "queued" | "running" | "complete" | "failed";
+          stage: string;
+          plan?: RemediationPlan;
+          error?: string;
+        }>(`/remediation/jobs/${job.id}`);
+        setStage(state.stage);
+        if (state.status === "failed") {
+          throw new Error(state.error || "Remediation generation failed.");
+        }
+        if (state.status === "complete") {
+          if (!state.plan) throw new Error("Completed remediation job returned no plan.");
+          setPlan(state.plan);
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 750));
+      }
       setConfirmApply(false);
     } catch (err) {
       setError((err as Error).message);

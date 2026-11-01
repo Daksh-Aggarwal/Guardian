@@ -203,6 +203,40 @@ class MockDirectoryHandle {
   }
 }
 
+// The API regression passes a real backend-generated plan through the same
+// browser filesystem/IndexedDB implementation used by Autopilot.
+if (process.argv[2] === "--case") {
+  test("Generated dependency plan applies, undoes, and reapplies", async () => {
+    const { readFile, writeFile } = await import("node:fs/promises");
+    const { plan, files } = JSON.parse(await readFile(process.argv[3], "utf8"));
+    const directory = new MockDirectoryHandle();
+    for (const [name, content] of Object.entries(files)) {
+      directory.files.set(name, new MockFileHandle(name, content));
+    }
+    const applied = await applyPlanToFileSystem(directory, plan);
+    assert.equal(applied.success, true);
+    const modified = Object.fromEntries([...directory.files].map(([name, handle]) => [name, handle.content]));
+    await undoPlanFromFileSystem(directory, { ...plan, status: "verified" });
+    const restored = Object.fromEntries([...directory.files].map(([name, handle]) => [name, handle.content]));
+    assert.deepEqual(restored, files);
+    await applyPlanToFileSystem(directory, { ...plan, status: "reverted" });
+    assert.deepEqual(Object.fromEntries([...directory.files].map(([name, handle]) => [name, handle.content])), modified);
+    await writeFile(process.argv[4], JSON.stringify({ modified, restored, applied }));
+  });
+}
+
+test("Unverified and rejected plans cannot write files or create backups", async () => {
+  for (const validation_status of ["UNVERIFIED", "REJECTED", "VALIDATION_FAILED"]) {
+    const directory = new MockDirectoryHandle();
+    const sizeBefore = backupStore.size;
+    await assert.rejects(applyPlanToFileSystem(directory, {
+      plan_id: "blocked", validation_status, validation_reasons: ["Unsafe target"], proposed_changes: [],
+    }), /Cannot apply remediation plan/);
+    assert.equal(backupStore.size, sizeBefore);
+    assert.equal(directory.files.size, 0);
+  }
+});
+
 test("1. Reapplication refuses when an affected file's hash has changed", async () => {
   const originalText = '{\n  "dependencies": {\n    "express": "^4.18.2"\n  }\n}';
   const originalHash = await computeBrowserSHA256(originalText);

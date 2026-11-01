@@ -1,10 +1,12 @@
 """Structured remediation planning, edit validation, unified diff generation, and verification."""
-import base64
 import difflib
 import json
 import logging
 import re
+import time
+from contextvars import ContextVar
 from datetime import datetime, timezone
+from functools import cmp_to_key, wraps
 from typing import Any, Dict, List, Optional, Tuple, Set
 from urllib.parse import quote
 from uuid import uuid4
@@ -12,9 +14,11 @@ from uuid import uuid4
 import httpx
 from pydantic import BaseModel, Field
 
-from .advisor import get_ai_config, DEFAULT_MODEL
+from .advisor import get_ai_config
+from .config import Budget, NpmBudget
+from .dependencies import RegistrySession
 from .models import Report, Finding, Advisory
-from .projects import ProjectSnapshot, compute_sha256, is_secret_file, project_manager, parse_package_specifier
+from .projects import ProjectSnapshot, compute_sha256, is_secret_file, project_manager, parse_package_specifier, validate_and_normalize_path
 from .redact import redact_text, redact_data
 from .remediation_models import (
     RemediationPlan,
@@ -22,178 +26,228 @@ from .remediation_models import (
     TextEdit,
     VerificationResult,
     PlanPriority,
-    PlanStatus,
     ValidationStatus
 )
 
+from . import remediation_npm as npm
+
 logger = logging.getLogger("guardian.remediation")
 
-SEMVER_REGEX = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+([0-9A-Za-z.-]+))?$")
+SEMVER_REGEX = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z.-]+))?(?:\+([0-9A-Za-z.-]+))?$")
 
 def parse_semver(s: str) -> Optional[Tuple[int, int, int, str]]:
-    """Extracts and parses semver components from a version string or specifier."""
-    if not s or not isinstance(s, str):
+    """Parse exact versions or a single manifest lower bound, never truncate ranges."""
+    if not isinstance(s, str):
         return None
-    clean = re.sub(r"^[vV^~>=< ]+", "", s.strip()).split()[0]
-    m = SEMVER_REGEX.match(clean)
+    clean = re.sub(r"^(?:[vV]|[~^]|>=|=)?\s*", "", s.strip())
+    m = SEMVER_REGEX.fullmatch(clean)
     if not m:
         return None
-    return (int(m.group(1)), int(m.group(2)), int(m.group(3)), m.group(4) or "")
+    pre = m.group(4) or ""
+    if pre and any(not part or (part.isdigit() and len(part) > 1 and part[0] == "0") for part in pre.split(".")):
+        return None
+    if m.group(5) and any(not part for part in m.group(5).split(".")):
+        return None
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3)), pre)
+
+
+def exact_version(spec: str) -> Optional[str]:
+    if not isinstance(spec, str) or not parse_semver(spec):
+        return None
+    return re.sub(r"^(?:[vV]|[~^]|>=|=)?\s*", "", spec.strip())
+
 
 def compare_semver(v1_str: str, v2_str: str) -> int:
-    """Returns -1 if v1 < v2, 0 if v1 == v2, 1 if v1 > v2."""
-    v1 = parse_semver(v1_str)
-    v2 = parse_semver(v2_str)
+    v1, v2 = parse_semver(v1_str), parse_semver(v2_str)
     if not v1 or not v2:
-        return 0
-    t1 = (v1[0], v1[1], v1[2])
-    t2 = (v2[0], v2[1], v2[2])
-    if t1 < t2:
-        return -1
-    elif t1 > t2:
-        return 1
-    if v1[3] and not v2[3]:
-        return -1
-    if not v1[3] and v2[3]:
-        return 1
-    if v1[3] < v2[3]:
-        return -1
-    elif v1[3] > v2[3]:
-        return 1
-    return 0
+        raise ValueError(f"Cannot compare invalid semantic versions: {v1_str!r}, {v2_str!r}")
+    if v1[:3] != v2[:3]:
+        return 1 if v1[:3] > v2[:3] else -1
+    if not v1[3] or not v2[3]:
+        return (bool(v2[3]) - bool(v1[3]))
+    a, b = v1[3].split("."), v2[3].split(".")
+    for x, y in zip(a, b):
+        if x == y:
+            continue
+        if x.isdigit() and y.isdigit():
+            return 1 if int(x) > int(y) else -1
+        if x.isdigit() != y.isdigit():
+            return -1 if x.isdigit() else 1
+        return 1 if x > y else -1
+    return (len(a) > len(b)) - (len(a) < len(b))
+
 
 def is_major_downgrade(orig_spec: str, proposed_spec: str) -> bool:
-    """Detects whether proposed version is a major version downgrade."""
-    orig_v = parse_semver(orig_spec)
-    prop_v = parse_semver(proposed_spec)
-    if not orig_v or not prop_v:
-        return False
-    return prop_v[0] < orig_v[0]
+    orig_v, prop_v = parse_semver(orig_spec), parse_semver(proposed_spec)
+    return bool(orig_v and prop_v and prop_v[0] < orig_v[0])
+
+
+def advisory_version_status(version: str, advisory: Advisory) -> Optional[bool]:
+    """OSV intervals are authoritative; fixed versions alone are only a fallback.
+
+    None means the advisory cannot be evaluated, rather than proof of safety.
+    """
+    if not parse_semver(version):
+        return None
+    ranges = advisory.affected_ranges
+    if ranges:
+        evaluated = False
+        for interval in ranges:
+            if interval.get("type") not in ("SEMVER", "ECOSYSTEM"):
+                return None
+            introduced = None
+            events = interval.get("events", [])
+            if not isinstance(events, list):
+                return None
+            for event in events:
+                if not isinstance(event, dict) or len(event) != 1:
+                    return None
+                if "introduced" in event:
+                    introduced = "0.0.0" if str(event["introduced"]) == "0" else str(event["introduced"])
+                    if not parse_semver(introduced):
+                        return None
+                    evaluated = True
+                elif any(key in event for key in ("fixed", "last_affected", "limit")):
+                    key = next(key for key in ("fixed", "last_affected", "limit") if key in event)
+                    end = str(event[key])
+                    if introduced is None or not parse_semver(end):
+                        return None
+                    if compare_semver(version, introduced) >= 0 and (compare_semver(version, end) <= 0 if key == "last_affected" else compare_semver(version, end) < 0):
+                        return True
+                    introduced = None
+            if introduced is not None and compare_semver(version, introduced) >= 0:
+                return True
+        return False if evaluated else None
+    fixed = [v for v in advisory.fixed_versions if parse_semver(v)]
+    if not fixed:
+        return None
+    same_major = [v for v in fixed if parse_semver(v)[0] == parse_semver(version)[0]]
+    boundary = min(same_major or fixed, key=cmp_to_key(compare_semver))
+    return compare_semver(version, boundary) < 0
+
 
 def is_version_vulnerable_to_advisory(ver_str: str, advisory: Optional[Advisory]) -> bool:
-    """Checks whether ver_str falls within affected ranges or below fixed versions."""
-    if not advisory:
-        return False
-    target = parse_semver(ver_str)
-    if not target:
-        return True
+    return advisory is not None and advisory_version_status(ver_str, advisory) is not False
 
-    # 1. Check affected_ranges
-    ranges = getattr(advisory, "affected_ranges", []) or []
-    for r in ranges:
-        if not isinstance(r, dict):
-            continue
-        events = r.get("events", [])
-        current_intro = None
-        for ev in events:
-            if not isinstance(ev, dict):
-                continue
-            if "introduced" in ev:
-                intro_val = str(ev["introduced"]).strip()
-                current_intro = (0, 0, 0, "") if intro_val in ("0", "") else parse_semver(intro_val)
-            elif "fixed" in ev and current_intro is not None:
-                fixed_v = parse_semver(str(ev["fixed"]))
-                if fixed_v:
-                    if (current_intro[:3] <= target[:3]) and (target[:3] < fixed_v[:3]):
-                        return True
-                current_intro = None
-            elif "last_affected" in ev and current_intro is not None:
-                last_v = parse_semver(str(ev["last_affected"]))
-                if last_v:
-                    if (current_intro[:3] <= target[:3]) and (target[:3] <= last_v[:3]):
-                        return True
-                current_intro = None
+_METADATA_SESSION = ContextVar("guardian_remediation_metadata", default=None)
 
-    # 2. Check fixed_versions
-    fixed_versions = getattr(advisory, "fixed_versions", []) or []
-    if fixed_versions:
-        parsed_fixed = [parse_semver(fv) for fv in fixed_versions if parse_semver(fv)]
-        if parsed_fixed:
-            same_major_fixed = [pf for pf in parsed_fixed if pf[0] == target[0]]
-            if same_major_fixed:
-                if target[:3] < min(same_major_fixed)[:3]:
-                    return True
-            else:
-                if target[:3] < min(parsed_fixed)[:3]:
-                    return True
 
-    return False
+def metadata_session(function):
+    @wraps(function)
+    def scoped(*args, **kwargs):
+        token = _METADATA_SESSION.set({"cache": {}, "requests": 0, "osv_requests": 0, "bytes": 0,
+                                       "started": time.monotonic(), "budget": NpmBudget.from_env(), "registry": RegistrySession(budget=NpmBudget.from_env())})
+        try:
+            return function(*args, **kwargs)
+        finally:
+            _METADATA_SESSION.reset(token)
+    return scoped
 
-_NPM_REGISTRY_CACHE: Dict[Tuple[str, Optional[str]], Tuple[Optional[Dict[str, Any]], str, Optional[str]]] = {}
-_OSV_CACHE: Dict[Tuple[str, str], Tuple[List[Dict[str, Any]], str]] = {}
 
 def clear_remediation_caches():
-    """Clears in-memory registry and OSV caches (useful for tests)."""
-    _NPM_REGISTRY_CACHE.clear()
-    _OSV_CACHE.clear()
+    session = _METADATA_SESSION.get()
+    if session:
+        session["cache"].clear()
+
+
+def _metadata_request(method, url, payload=None):
+    session = _METADATA_SESSION.get()
+    budget = session["budget"] if session else NpmBudget.from_env()
+    if session:
+        counter = "requests" if method == "GET" else "osv_requests"
+        if session[counter] >= budget.requests or time.monotonic() - session["started"] >= budget.seconds:
+            raise ValueError("Remediation metadata request/time budget reached")
+        session[counter] += 1
+    limit = min(4 * 1024 * 1024 if payload is not None else 10 * 1024 * 1024,
+                budget.bytes - (session["bytes"] if session else 0))
+    if limit <= 0:
+        raise ValueError("Remediation metadata byte budget reached")
+    if method == "GET":
+        registry = session["registry"] if session else RegistrySession()
+        raw = registry.fetch(url)
+        if session:
+            session["bytes"] += len(raw)
+        return 200, json.loads(raw)
+    chunks, size = [], 0
+    with httpx.stream(method, url, json=payload, timeout=5.0, follow_redirects=False) as response:
+        if response.status_code != 200:
+            return response.status_code, None
+        for chunk in response.iter_bytes():
+            size += len(chunk)
+            if size > limit:
+                raise ValueError("Registry/advisory response exceeds metadata byte limit")
+            if session:
+                session["bytes"] += len(chunk)
+                if time.monotonic() - session["started"] >= budget.seconds:
+                    raise ValueError("Remediation metadata time budget reached")
+            chunks.append(chunk)
+    return 200, json.loads(b"".join(chunks))
+
 
 def query_npm_registry(pkg_name: str, version: Optional[str] = None) -> Tuple[Optional[Dict[str, Any]], str, Optional[str]]:
-    """
-    Queries npm registry for package or package@version.
-    Returns (data, status, error_detail):
-    status: 'ok', 'not_found', 'unavailable', 'invalid'
-    """
-    clean_name = pkg_name.strip()
-    clean_ver = re.sub(r"^[vV^~>=< ]+", "", str(version).strip()).split()[0] if version else None
-    cache_key = (clean_name, clean_ver)
-    if cache_key in _NPM_REGISTRY_CACHE:
-        return _NPM_REGISTRY_CACHE[cache_key]
-
-    if clean_ver:
-        url = f"https://registry.npmjs.org/{quote(clean_name, safe='')}/{quote(clean_ver, safe='')}"
-    else:
-        url = f"https://registry.npmjs.org/{quote(clean_name, safe='')}"
-
+    """Bounded allowlisted npm metadata, normalized by exact package identity."""
     try:
-        resp = httpx.get(url, timeout=5.0, follow_redirects=False)
-        if resp.status_code == 200:
-            try:
-                data = resp.json()
-                if not isinstance(data, dict):
-                    res = (None, "invalid", "Malformed JSON payload from registry")
-                else:
-                    res = (data, "ok", None)
-            except Exception as e:
-                res = (None, "invalid", f"JSON decode error: {e}")
-        elif resp.status_code == 404:
-            res = (None, "not_found", "Package or version not found (HTTP 404)")
-        elif resp.status_code in (401, 403):
-            res = (None, "unavailable", f"Registry authentication or permission error (HTTP {resp.status_code})")
-        else:
-            res = (None, "unavailable", f"Registry returned HTTP status {resp.status_code}")
-    except (httpx.TimeoutException, httpx.RequestError) as err:
-        res = (None, "unavailable", f"Registry request failed ({type(err).__name__}: {err})")
-    except Exception as err:
-        res = (None, "unavailable", f"Unexpected error during registry query ({type(err).__name__}: {err})")
+        npm._requirement(pkg_name, version or "*")
+        clean_ver = exact_version(version) if version else None
+        if version and not clean_ver:
+            return None, "not_found", f"Invalid exact target {version!r}"
+        key = ("npm", pkg_name, clean_ver)
+        session = _METADATA_SESSION.get()
+        if session and key in session["cache"]:
+            return session["cache"][key]
+        url = f"https://registry.npmjs.org/{quote(pkg_name, safe='')}"
+        if clean_ver:
+            url += f"/{quote(clean_ver, safe='')}"
+        status, data = _metadata_request("GET", url)
+        if status == 404:
+            return None, "not_found", "Package or version not found (HTTP 404)"
+        if status != 200:
+            return None, "unavailable", f"Registry returned HTTP {status}"
+        if not isinstance(data, dict) or data.get("name") != pkg_name:
+            return None, "invalid", f"Registry package identity mismatch for {pkg_name}"
+        if clean_ver and data.get("version") != clean_ver:
+            return None, "invalid", f"Registry version identity mismatch for {pkg_name}@{clean_ver}"
+        if not clean_ver and not isinstance(data.get("versions"), dict):
+            return None, "invalid", f"Registry versions map is missing for {pkg_name}"
+        result = data, "ok", None
+        if session:
+            session["cache"][key] = result
+            if not clean_ver:
+                for ver, meta in data["versions"].items():
+                    if isinstance(meta, dict) and meta.get("name") == pkg_name and meta.get("version") == ver:
+                        session["cache"][("npm", pkg_name, ver)] = (meta, "ok", None)
+        return result
+    except Exception as error:
+        return None, "unavailable", f"Registry verification unavailable: {error}"
 
-    _NPM_REGISTRY_CACHE[cache_key] = res
-    return res
 
 def query_osv_vulnerability(pkg_name: str, version: str) -> Tuple[List[Dict[str, Any]], str]:
-    """Queries OSV for known vulnerabilities for pkg_name@version."""
-    clean_ver = re.sub(r"^[vV^~>=< ]+", "", str(version).strip()).split()[0]
-    cache_key = (pkg_name, clean_ver)
-    if cache_key in _OSV_CACHE:
-        return _OSV_CACHE[cache_key]
-
+    """A malformed, paginated, or unavailable OSV response never proves safety."""
     try:
-        resp = httpx.post(
-            "https://api.osv.dev/v1/query",
-            json={"package": {"name": pkg_name, "ecosystem": "npm"}, "version": clean_ver},
-            timeout=5.0,
-            follow_redirects=False
-        )
-        if resp.status_code == 200:
-            data = resp.json()
-            vulns = data.get("vulns", []) if isinstance(data, dict) else []
-            res = (vulns if isinstance(vulns, list) else []), "ok"
-        else:
-            res = [], "unavailable"
-    except Exception:
-        res = [], "unavailable"
-
-    _OSV_CACHE[cache_key] = res
-    return res
+        clean_ver = exact_version(version)
+        if not clean_ver:
+            return [], "unavailable"
+        key = ("osv", pkg_name, clean_ver)
+        session = _METADATA_SESSION.get()
+        if session and key in session["cache"]:
+            return session["cache"][key]
+        status, data = _metadata_request("POST", "https://api.osv.dev/v1/query", {
+            "package": {"name": pkg_name, "ecosystem": "npm"}, "version": clean_ver,
+        })
+        if status != 200 or not isinstance(data, dict) or data.get("next_page_token"):
+            return [], "unavailable"
+        vulns = data.get("vulns", [])
+        if not isinstance(vulns, list) or any(not isinstance(v, dict) or not isinstance(v.get("id"), str) for v in vulns):
+            return [], "unavailable"
+        result = vulns, "ok"
+        if session:
+            session["cache"][key] = result
+        return result
+    except Exception as error:
+        session = _METADATA_SESSION.get()
+        if session:
+            session["osv_error"] = f"{type(error).__name__}: {error}"
+        return [], "unavailable"
 
 def extract_manifest_dependency_changes(orig_pkg_json: str, prop_pkg_json: str) -> Dict[str, Dict[str, str]]:
     """Compares original and proposed package.json contents and extracts changed dependencies."""
@@ -212,8 +266,8 @@ def extract_manifest_dependency_changes(orig_pkg_json: str, prop_pkg_json: str) 
         for pkg, prop_spec in prop_deps.items():
             orig_spec = orig_deps.get(pkg)
             if orig_spec != prop_spec:
-                orig_clean = re.sub(r"^[vV^~>=< ]+", "", str(orig_spec or "")).split()[0]
-                prop_clean = re.sub(r"^[vV^~>=< ]+", "", str(prop_spec or "")).split()[0]
+                orig_clean = (exact_version(str(orig_spec or "")) or "")
+                prop_clean = (exact_version(str(prop_spec or "")) or "")
                 changes[pkg] = {
                     "name": pkg,
                     "deptype": key,
@@ -225,7 +279,7 @@ def extract_manifest_dependency_changes(orig_pkg_json: str, prop_pkg_json: str) 
 
         for pkg, orig_spec in orig_deps.items():
             if pkg not in prop_deps and pkg not in changes:
-                orig_clean = re.sub(r"^[vV^~>=< ]+", "", str(orig_spec or "")).split()[0]
+                orig_clean = (exact_version(str(orig_spec or "")) or "")
                 changes[pkg] = {
                     "name": pkg,
                     "deptype": key,
@@ -237,454 +291,214 @@ def extract_manifest_dependency_changes(orig_pkg_json: str, prop_pkg_json: str) 
 
     return changes
 
-def validate_lockfile_consistency(
-    orig_lock: str,
-    prop_lock: str,
-    dep_changes: Dict[str, Dict[str, str]],
-    registry_metadata_map: Dict[str, Dict[str, Any]]
-) -> List[str]:
-    """Validates that proposed package-lock.json matches proposed package.json and registry metadata."""
-    errors: List[str] = []
+def validate_lockfile_consistency(orig_lock, prop_lock, dep_changes, registry_metadata_map):
+    """Compatibility entry point using the same graph/metadata invariants as the gate."""
     try:
-        lock_data = json.loads(prop_lock)
-    except Exception as e:
-        return [f"Proposed package-lock.json is not valid JSON: {e}"]
+        lock = npm.object_json(prop_lock, "package-lock.json")
+        packages = npm.lock_graph(lock)
+        errors = []
+        for name, change in dep_changes.items():
+            actual = packages[""].get(change["deptype"], {}).get(name)
+            if actual != change["prop_spec"]:
+                errors.append(f"Lockfile root declaration for {name} ({actual}) does not match package.json ({change['prop_spec']}).")
+            path = f"node_modules/{name}"
+            node = packages.get(path)
+            if not isinstance(node, dict):
+                errors.append(f"Lockfile is missing resolved entry for {path}.")
+                continue
+            if npm._semver([node.get("version", "")], change["prop_spec"]) != node.get("version"):
+                errors.append(f"Lockfile {path} version does not satisfy intended target {change['prop_spec']}.")
+            meta = registry_metadata_map.get(path, registry_metadata_map.get(name))
+            if meta:
+                errors.extend(npm.published_node_errors(lock, path, meta))
+        return errors
+    except Exception as error:
+        return [str(error)]
 
-    packages = lock_data.get("packages")
-    if not isinstance(packages, dict):
-        return ["Proposed package-lock.json is missing modern 'packages' graph."]
-
-    root_pkg = packages.get("", {})
-    if not isinstance(root_pkg, dict):
-        return ["Proposed package-lock.json root entry packages[''] is missing or invalid."]
-
-    for pkg_name, change in dep_changes.items():
-        prop_spec = change["prop_spec"]
-        prop_ver = change["prop_ver"]
-        deptype = change["deptype"]
-
-        # 1. Verify root declaration in lockfile packages[""]
-        root_deps = root_pkg.get(deptype, {})
-        if not isinstance(root_deps, dict) or pkg_name not in root_deps:
-            found = False
-            for dt in ("dependencies", "devDependencies", "optionalDependencies", "peerDependencies"):
-                if pkg_name in root_pkg.get(dt, {}):
-                    found = True
-                    actual_spec = root_pkg[dt][pkg_name]
-                    if actual_spec != prop_spec:
-                        errors.append(
-                            f"Lockfile root declaration for '{pkg_name}' ({actual_spec}) "
-                            f"does not match package.json ({prop_spec})."
-                        )
-                    break
-            if not found:
-                errors.append(
-                    f"Lockfile root packages[''] is missing entry for '{pkg_name}' (expected {prop_spec})."
-                )
-        else:
-            actual_spec = root_deps[pkg_name]
-            if actual_spec != prop_spec:
-                errors.append(
-                    f"Lockfile root declaration for '{pkg_name}' ({actual_spec}) "
-                    f"does not match package.json ({prop_spec})."
-                )
-
-        # 2. Verify resolved node_modules entry
-        nm_key = f"node_modules/{pkg_name}"
-        if nm_key not in packages or not isinstance(packages[nm_key], dict):
-            errors.append(f"Lockfile is missing resolved entry for '{nm_key}'.")
+def hydrated_advisories(name, installed, advisories):
+    if all(a.affected_ranges or a.fixed_versions for a in advisories):
+        return advisories
+    records, status = query_osv_vulnerability(name, installed)
+    if status != "ok":
+        session = _METADATA_SESSION.get() or {}
+        raise npm.NpmPlanError(f"OSV enrichment unavailable for {name}@{installed}: {session.get('osv_error', 'incomplete OSV response')}", "UNVERIFIED")
+    lookup = {record["id"]: record for record in records}
+    result = []
+    for advisory in advisories:
+        if advisory.affected_ranges or advisory.fixed_versions:
+            result.append(advisory)
             continue
+        record = lookup.get(advisory.id, {})
+        affected = [entry for entry in record.get("affected", []) if entry.get("package", {}).get("name") == name and entry.get("package", {}).get("ecosystem") == "npm"]
+        ranges = [interval for entry in affected for interval in entry.get("ranges", []) if interval.get("type") in ("SEMVER", "ECOSYSTEM")]
+        if not ranges:
+            raise npm.NpmPlanError(f"OSV advisory {advisory.id} lacks npm affected ranges for {name}@{installed}; enrichment incomplete.", "UNVERIFIED")
+        result.append(advisory.model_copy(update={"affected_ranges": ranges}))
+    return result
 
-        entry = packages[nm_key]
-        entry_ver = str(entry.get("version", ""))
-        if entry_ver != prop_ver:
-            errors.append(
-                f"Lockfile resolved version '{entry_ver}' for '{pkg_name}' "
-                f"does not match intended target version '{prop_ver}'."
-            )
-
-        entry_resolved = entry.get("resolved")
-        entry_integrity = entry.get("integrity")
-
-        if not entry_resolved or not isinstance(entry_resolved, str):
-            errors.append(f"Lockfile entry for '{nm_key}' is missing 'resolved' URL.")
-        if not entry_integrity or not isinstance(entry_integrity, str):
-            errors.append(f"Lockfile entry for '{nm_key}' is missing 'integrity' checksum.")
-
-        # 3. Verify against registry metadata
-        reg_meta = registry_metadata_map.get(pkg_name)
-        if reg_meta and isinstance(reg_meta, dict):
-            dist = reg_meta.get("dist", {})
-            if isinstance(dist, dict):
-                reg_tarball = dist.get("tarball")
-                reg_integrity = dist.get("integrity")
-                reg_shasum = dist.get("shasum")
-
-                if reg_tarball and entry_resolved and entry_resolved != reg_tarball:
-                    errors.append(
-                        f"Lockfile resolved URL '{entry_resolved}' for '{pkg_name}' "
-                        f"does not match registry tarball URL '{reg_tarball}'."
-                    )
-
-                if reg_integrity and entry_integrity and entry_integrity != reg_integrity:
-                    errors.append(
-                        f"Lockfile integrity metadata '{entry_integrity}' for '{pkg_name}@{prop_ver}' "
-                        f"does not match registry published integrity '{reg_integrity}'."
-                    )
-                elif not reg_integrity and reg_shasum and entry_integrity:
-                    expected_sha1 = "sha1-" + base64.b64encode(bytes.fromhex(reg_shasum)).decode() if re.fullmatch(r"[0-9a-fA-F]{40}", reg_shasum) else ""
-                    if expected_sha1 and entry_integrity != expected_sha1:
-                        errors.append(
-                            f"Lockfile integrity metadata '{entry_integrity}' for '{pkg_name}@{prop_ver}' "
-                            f"does not match registry published shasum '{expected_sha1}'."
-                        )
-
-        # 4. Check root 'dependencies' if lockfileVersion 1 or 2
-        if "dependencies" in lock_data and isinstance(lock_data["dependencies"], dict):
-            legacy_deps = lock_data["dependencies"]
-            if pkg_name in legacy_deps and isinstance(legacy_deps[pkg_name], dict):
-                leg_entry = legacy_deps[pkg_name]
-                if leg_entry.get("version") and leg_entry["version"] != prop_ver:
-                    errors.append(
-                        f"Lockfile v1/v2 dependencies['{pkg_name}'].version '{leg_entry['version']}' "
-                        f"does not match intended target version '{prop_ver}'."
-                    )
-                if reg_meta and isinstance(reg_meta.get("dist"), dict):
-                    reg_dist = reg_meta["dist"]
-                    if reg_dist.get("integrity") and leg_entry.get("integrity") and leg_entry["integrity"] != reg_dist["integrity"]:
-                        errors.append(
-                            f"Lockfile v1/v2 dependencies['{pkg_name}'].integrity mismatch."
-                        )
-
-    return errors
 
 def select_patched_dependency_version(
-    pkg_name: str,
-    orig_spec: str,
-    advisory: Optional[Advisory] = None,
-    candidate_versions: Optional[List[str]] = None
+    pkg_name: str, orig_spec: str, advisory: Optional[Advisory] = None,
+    candidate_versions: Optional[List[str]] = None,
+    advisories: Optional[List[Advisory]] = None
 ) -> Tuple[Optional[str], Optional[Dict[str, Any]], Optional[str]]:
-    """
-    Selects the smallest safe upgrade resolving the security advisory.
-    Queries actual npm metadata, verifies candidate versions, avoids major upgrades
-    if a fix exists in the same major, and avoids vulnerable ranges.
-    Returns (target_version, dist_metadata, error_message).
-    """
-    clean_orig = re.sub(r"^[vV^~>=< ]+", "", str(orig_spec)).split()[0]
-    orig_semver = parse_semver(clean_orig)
-    if not orig_semver:
-        return None, None, f"Invalid original version specifier: '{orig_spec}'"
-
-    packument = None
-    all_versions: List[str] = []
-
-    if candidate_versions is not None:
-        all_versions = candidate_versions
-    else:
-        data, status, err = query_npm_registry(pkg_name)
-        if status == "unavailable":
-            return None, None, f"Registry unavailable: {err}"
-        elif status == "not_found" or not data:
-            return None, None, f"Package '{pkg_name}' not found in registry"
-        packument = data
-        all_versions = list(data.get("versions", {}).keys())
-
-    if not all_versions:
-        return None, None, f"No published versions found for '{pkg_name}'"
-
-    safe_candidates: List[Tuple[Tuple[int, int, int, str], str]] = []
-    for v_str in all_versions:
-        parsed = parse_semver(v_str)
-        if not parsed:
+    """Prefer a verified fix in the installed major; never treat outages as safety."""
+    original = exact_version(orig_spec)
+    if not original:
+        return None, None, f"Invalid original version specifier: {orig_spec!r}"
+    if candidate_versions is None:
+        data, status, error = query_npm_registry(pkg_name)
+        if status != "ok" or not data or not isinstance(data.get("versions"), dict):
+            return None, None, f"Registry unavailable or invalid metadata for {pkg_name}: {error}; UNVERIFIED"
+        candidate_versions = list(data["versions"])
+    try:
+        constraints = hydrated_advisories(pkg_name, original, advisories or ([advisory] if advisory else []))
+    except npm.NpmPlanError as error:
+        return None, None, str(error)
+    candidates = [version for version in candidate_versions
+                  if isinstance(version, str) and SEMVER_REGEX.fullmatch(version) and parse_semver(version)
+                  and compare_semver(version, original) > 0
+                  and (not parse_semver(version)[3] or parse_semver(original)[3])
+                  and all(advisory_version_status(version, a) is False for a in constraints)]
+    candidates.sort(key=cmp_to_key(compare_semver))
+    same_major = [v for v in candidates if parse_semver(v)[0] == parse_semver(original)[0]]
+    higher = [v for v in candidates if parse_semver(v)[0] > parse_semver(original)[0]]
+    preferred = [v for a in constraints for v in a.fixed_versions]
+    ordered = []
+    for group in (same_major, higher):
+        # Old fixed boundaries can have newer, unrelated advisories. Try the
+        # latest release in this major before spending the budget on intermediates.
+        for version in [v for v in preferred if v in group] + group[-1:] + group:
+            if version not in ordered:
+                ordered.append(version)
+    for version in ordered:
+        vulns, status = query_osv_vulnerability(pkg_name, version)
+        if status != "ok":
+            return None, None, f"Advisory verification unavailable for {pkg_name}@{version}; UNVERIFIED"
+        if vulns:
             continue
-        if (parsed[0], parsed[1], parsed[2]) <= (orig_semver[0], orig_semver[1], orig_semver[2]):
-            continue
-        if is_version_vulnerable_to_advisory(v_str, advisory):
-            continue
-        safe_candidates.append((parsed, v_str))
-
-    if not safe_candidates:
-        return None, None, f"No safe fixed versions found in registry for '{pkg_name}' that resolve the advisory"
-
-    safe_candidates.sort(key=lambda item: (item[0][0], item[0][1], item[0][2]))
-
-    same_major = [c for c in safe_candidates if c[0][0] == orig_semver[0]]
-    higher_majors = [c for c in safe_candidates if c[0][0] > orig_semver[0]]
-
-    candidates_to_test: List[str] = []
-    fixed_versions = getattr(advisory, "fixed_versions", []) or []
-    clean_fixed = [re.sub(r"^[vV^~>=< ]+", "", str(fv)).split()[0] for fv in fixed_versions]
-
-    # Priority 1: Safe candidates in same major version (prevents unnecessary major upgrades)
-    if same_major:
-        for cfv in clean_fixed:
-            if any(c[1] == cfv for c in same_major) and cfv not in candidates_to_test:
-                candidates_to_test.append(cfv)
-        # Test newest release in same major branch (holds all accumulated backported fixes)
-        if same_major[-1][1] not in candidates_to_test:
-            candidates_to_test.append(same_major[-1][1])
-        for c in same_major[:3]:
-            if c[1] not in candidates_to_test:
-                candidates_to_test.append(c[1])
-
-    # Priority 2: Latest release or higher major versions if same major is unavailable or insecure
-    latest_tag = packument.get("dist-tags", {}).get("latest") if packument else None
-    if latest_tag and any(c[1] == latest_tag for c in safe_candidates) and latest_tag not in candidates_to_test:
-        candidates_to_test.append(latest_tag)
-
-    if higher_majors:
-        for cfv in clean_fixed:
-            if any(c[1] == cfv for c in higher_majors) and cfv not in candidates_to_test:
-                candidates_to_test.append(cfv)
-        if higher_majors[-1][1] not in candidates_to_test:
-            candidates_to_test.append(higher_majors[-1][1])
-        for c in higher_majors[:3]:
-            if c[1] not in candidates_to_test:
-                candidates_to_test.append(c[1])
-
-    selected_ver = None
-    for ver in candidates_to_test:
-        vulns, st = query_osv_vulnerability(pkg_name, ver)
-        if st == "ok" and vulns:
-            continue
-        selected_ver = ver
-        break
-
-    if not selected_ver:
-        return None, None, f"No verified vulnerability-free version found in registry for '{pkg_name}'"
-
-    dist_meta = None
-    if packument and "versions" in packument and selected_ver in packument["versions"]:
-        dist_meta = packument["versions"][selected_ver].get("dist", {})
-    else:
-        v_data, v_status, _ = query_npm_registry(pkg_name, selected_ver)
-        if v_status == "ok" and v_data:
-            dist_meta = v_data.get("dist", {})
-
-    return selected_ver, dist_meta, None
+        try:
+            meta = npm.published_metadata(query_npm_registry, pkg_name, version)
+        except Exception as error:
+            return None, None, str(error)
+        return version, meta["dist"], None
+    return None, None, f"No verified safe published upgrade for {pkg_name} from {original}; manual review required."
 
 def generate_lockfile_edits(
-    lock_content: str,
-    pkg_name: str,
-    new_spec: str,
-    new_version: str,
-    new_resolved: str,
-    new_integrity: str
+    lock_content: str, pkg_name: str, new_spec: str, new_version: str,
+    new_resolved: str, new_integrity: str
 ) -> List[TextEdit]:
-    """Generates exact, non-overlapping TextEdits for package-lock.json."""
-    edits: List[TextEdit] = []
+    """Compatibility helper: patch JSON paths atomically, including duplicate v2 metadata."""
     try:
-        data = json.loads(lock_content)
-    except Exception:
-        return edits
-
-    # 1. Root package specifier in packages[""]
-    if "packages" in data and "" in data["packages"]:
-        root_pkg = data["packages"][""]
-        for deptype in ("dependencies", "devDependencies", "optionalDependencies"):
-            if pkg_name in root_pkg.get(deptype, {}):
-                old_spec = root_pkg[deptype][pkg_name]
-                pat = rf'("{re.escape(pkg_name)}"\s*:\s*"){re.escape(old_spec)}(")'
-                m = re.search(pat, lock_content)
-                if m:
-                    old_text = m.group(0)
-                    new_text = f'"{pkg_name}": "{new_spec}"'
-                    if lock_content.count(old_text) == 1:
-                        edits.append(TextEdit(old_text=old_text, new_text=new_text))
-                break
-
-    # 2. node_modules entry
-    nm_key = f"node_modules/{pkg_name}"
-    if "packages" in data and nm_key in data["packages"]:
-        nm_entry = data["packages"][nm_key]
-        old_v = nm_entry.get("version", "")
-        old_res = nm_entry.get("resolved", "")
-        old_int = nm_entry.get("integrity", "")
-
-        if old_res and new_resolved:
-            old_res_text = f'"resolved": "{old_res}"'
-            if not old_int and new_integrity:
-                m_indent = re.search(rf'([ \t]+)"resolved":\s*"{re.escape(old_res)}"', lock_content)
-                indent = m_indent.group(1) if m_indent else "      "
-                new_res_text = f'"resolved": "{new_resolved}",\n{indent}"integrity": "{new_integrity}"'
-            else:
-                new_res_text = f'"resolved": "{new_resolved}"'
-            if lock_content.count(old_res_text) == 1:
-                edits.append(TextEdit(old_text=old_res_text, new_text=new_res_text))
-
-        if old_int and new_integrity:
-            old_int_text = f'"integrity": "{old_int}"'
-            new_int_text = f'"integrity": "{new_integrity}"'
-            if lock_content.count(old_int_text) == 1:
-                edits.append(TextEdit(old_text=old_int_text, new_text=new_int_text))
-
-        if old_v and new_version:
-            pat = rf'("{re.escape(nm_key)}"\s*:\s*\{{[^}}]*?"version"\s*:\s*"){re.escape(old_v)}(")'
-            m = re.search(pat, lock_content)
-            if m:
-                old_v_text = m.group(0)
-                new_v_text = m.group(1) + new_version + m.group(2)
-                if lock_content.count(old_v_text) == 1:
-                    edits.append(TextEdit(old_text=old_v_text, new_text=new_v_text))
-
-    # 3. Legacy v1/v2 dependencies block
-    if "dependencies" in data and isinstance(data["dependencies"], dict) and pkg_name in data["dependencies"]:
-        leg_entry = data["dependencies"][pkg_name]
-        leg_v = leg_entry.get("version", "")
-        leg_res = leg_entry.get("resolved", "")
-        leg_int = leg_entry.get("integrity", "")
-        if leg_v and new_version:
-            pat = rf'("{re.escape(pkg_name)}"\s*:\s*\{{[^}}]*?"version"\s*:\s*"){re.escape(leg_v)}(")'
-            m = re.search(pat, lock_content)
-            if m:
-                old_v_text = m.group(0)
-                new_v_text = m.group(1) + new_version + m.group(2)
-                if lock_content.count(old_v_text) == 1 and not any(e.old_text == old_v_text for e in edits):
-                    edits.append(TextEdit(old_text=old_v_text, new_text=new_v_text))
-        if leg_res and new_resolved:
-            old_res_text = f'"resolved": "{leg_res}"'
-            new_res_text = f'"resolved": "{new_resolved}"'
-            if lock_content.count(old_res_text) == 1 and not any(e.old_text == old_res_text for e in edits):
-                edits.append(TextEdit(old_text=old_res_text, new_text=new_res_text))
-        if leg_int and new_integrity:
-            old_int_text = f'"integrity": "{leg_int}"'
-            new_int_text = f'"integrity": "{new_integrity}"'
-            if lock_content.count(old_int_text) == 1 and not any(e.old_text == old_int_text for e in edits):
-                edits.append(TextEdit(old_text=old_int_text, new_text=new_int_text))
-
-    return edits
+        data = npm.object_json(lock_content, "package-lock.json")
+        packages = npm.lock_graph(data)
+        for group in npm.GROUPS:
+            if pkg_name in packages[""].get(group, {}):
+                packages[""][group][pkg_name] = new_spec
+        key = f"node_modules/{pkg_name}"
+        if key not in packages:
+            return []
+        packages[key].update(version=new_version, resolved=new_resolved, integrity=new_integrity)
+        npm.sync_legacy(data, {key})
+        proposed = npm.serialize_like(lock_content, data)
+        return [TextEdit(old_text=lock_content, new_text=proposed)] if proposed != lock_content else []
+    except ValueError:
+        return []
 
 def validate_remediation_plan(
-    plan: RemediationPlan,
-    snapshot: ProjectSnapshot,
-    report: Report,
+    plan: RemediationPlan, snapshot: ProjectSnapshot, report: Report,
     target_findings: List[Finding]
 ) -> Tuple[ValidationStatus, List[str]]:
-    """
-    Executes mandatory deterministic validation pipeline:
-    AI proposal -> Structural validation -> Registry verification ->
-    Advisory verification -> Manifest/lockfile consistency -> Diff validation.
-    """
-    reasons: List[str] = []
-
+    """Validate the final bytes and changed graph, independent of proposal origin."""
     if not plan.proposed_changes:
+        return "UNVERIFIED", ["No applicable file changes were produced; this is guidance, not an approvable remediation."]
+    try:
+        files = dict(snapshot.files)
+        for change in plan.proposed_changes:
+            if change.operation == "create":
+                files[change.file_path] = change.created_content or ""
+            else:
+                content = files[change.file_path]
+                for edit in change.edits:
+                    content = content.replace(edit.old_text, edit.new_text, 1)
+                files[change.file_path] = content
+        # Invalid JSON must not be mistaken for 'no dependency changes'.
+        for path in files:
+            if path in {c.file_path for c in plan.proposed_changes} and (path == "package.json" or path.endswith("/package.json")):
+                proposed = npm.object_json(files[path], path)
+                original = snapshot.files.get(path, "{}")
+                if path != "package.json" and extract_manifest_dependency_changes(original, files[path]):
+                    raise npm.NpmPlanError(f"Dependency changes in {path} require a supported root npm workspace resolution; application blocked.")
+        original_manifest = snapshot.files.get("package.json", "{}")
+        manifest_content = files.get("package.json", "{}")
+        dep_changes = extract_manifest_dependency_changes(original_manifest, manifest_content)
+        orig_lock = snapshot.files.get("package-lock.json")
+        lock_content = files.get("package-lock.json")
+        lock_changed = orig_lock != lock_content
+        if not dep_changes and not lock_changed:
+            return "VERIFIED", []
+        if not orig_lock or not lock_content:
+            raise npm.NpmPlanError("package.json-only dependency change is rejected: package-lock.json is not present; manifest and lockfile must be updated together.")
+        if dep_changes and not lock_changed:
+            raise npm.NpmPlanError("package.json-only dependency change is rejected: package-lock.json exists but was not updated alongside package.json.")
+        manifest = npm.object_json(manifest_content, "package.json")
+        lock = npm.object_json(lock_content, "package-lock.json")
+        old_lock = npm.object_json(orig_lock, "original package-lock.json")
+        packages = npm.lock_graph(lock)
+        old_packages = npm.lock_graph(old_lock)
+        if lock["lockfileVersion"] != old_lock["lockfileVersion"]:
+            raise npm.NpmPlanError("Changing package-lock.json format during remediation requires manual review.")
+        for group in npm.GROUPS:
+            if manifest.get(group, {}) != packages[""].get(group, {}):
+                raise npm.NpmPlanError(f"Lockfile root packages[''].{group} does not match package.json: {packages[''].get(group, {})!r} vs {manifest.get(group, {})!r}.")
+        if manifest.get("workspaces") or manifest.get("overrides"):
+            raise npm.NpmPlanError("npm workspaces/overrides require manual package-manager resolution.")
+        errors = npm.graph_errors(packages)
+        if errors:
+            raise npm.NpmPlanError("; ".join(errors))
+        # Verify every changed resolved node, including transitive and nested copies.
+        checked = set()
+        for path, node in packages.items():
+            if not path or node == old_packages.get(path):
+                continue
+            name, version = npm.package_name(path), node.get("version", "")
+            if not isinstance(version, str) or not SEMVER_REGEX.fullmatch(version) or not parse_semver(version):
+                raise npm.NpmPlanError(f"Invalid/nonexistent package version {version!r} at package-lock.json:{path}.")
+            old_version = old_packages.get(path, {}).get("version", "")
+            if is_major_downgrade(old_version, version):
+                raise npm.NpmPlanError(f"Unexplained major-version downgrade is rejected: {name} at {path} downgraded from {old_version} to {version}.")
+            meta = npm.published_metadata(query_npm_registry, name, version)
+            errors = npm.published_node_errors(lock, path, meta)
+            if errors:
+                raise npm.NpmPlanError("; ".join(errors))
+            if (name, version) in checked:
+                continue
+            checked.add((name, version))
+            # Package identity is exact; unrelated OSV findings never constrain this target.
+            matching = [f for f in report.findings if f.advisory and parse_package_specifier(f.package)[0] == name]
+            evaluated = hydrated_advisories(name, old_version or (parse_package_specifier(matching[0].package)[1] if matching else version), [f.advisory for f in matching])
+            for finding, advisory in zip(matching, evaluated):
+                affected = advisory_version_status(version, advisory)
+                if affected is None:
+                    raise npm.NpmPlanError(f"Cannot interpret affected ranges for {finding.advisory.id} on {name}@{version}; UNVERIFIED.", "UNVERIFIED")
+                if affected:
+                    raise npm.NpmPlanError(f"Vulnerable target version is rejected: {name}@{version} remains within the affected version range of {finding.advisory.id}.")
+            vulns, status = query_osv_vulnerability(name, version)
+            if status != "ok":
+                raise npm.NpmPlanError(f"Advisory verification unavailable for {name}@{version}; UNVERIFIED; application blocked.", "UNVERIFIED")
+            if vulns:
+                raise npm.NpmPlanError(f"Vulnerable target version is rejected: {name}@{version} is reported vulnerable by OSV ({', '.join(v.get('id', 'unknown') for v in vulns)}).")
+            if old_version and name in dep_changes and path == f"node_modules/{name}" and parse_semver(version)[0] > (parse_semver(old_version) or (0,))[0]:
+                # A higher major is justified only if no verified same-major fix exists.
+                safe, _, detail = select_patched_dependency_version(name, old_version, advisories=[f.advisory for f in matching])
+                if not safe:
+                    raise npm.NpmPlanError(f"Cannot justify major upgrade {name} {old_version} -> {version}: {detail}; UNVERIFIED.", "UNVERIFIED")
+                if parse_semver(safe)[0] == parse_semver(old_version)[0]:
+                    raise npm.NpmPlanError(f"Unnecessary major upgrade {name} {old_version} -> {version}: verified same-major fix {safe} is available.")
+                plan.potential_risks.append(f"Major upgrade {name} {old_version} -> {version} is necessary: no verified safe same-major candidate was found; review API compatibility.")
         return "VERIFIED", []
-
-    orig_pkg_json = snapshot.files.get("package.json")
-    orig_lock_json = snapshot.files.get("package-lock.json")
-
-    prop_pkg_json = None
-    prop_lock_json = None
-
-    for ch in plan.proposed_changes:
-        if ch.file_path == "package.json":
-            if orig_pkg_json:
-                cur = orig_pkg_json
-                for ed in ch.edits:
-                    cur = cur.replace(ed.old_text, ed.new_text, 1)
-                prop_pkg_json = cur
-        elif ch.file_path == "package-lock.json":
-            if orig_lock_json:
-                cur = orig_lock_json
-                for ed in ch.edits:
-                    cur = cur.replace(ed.old_text, ed.new_text, 1)
-                prop_lock_json = cur
-
-    dep_changes: Dict[str, Dict[str, str]] = {}
-    if orig_pkg_json and prop_pkg_json:
-        dep_changes = extract_manifest_dependency_changes(orig_pkg_json, prop_pkg_json)
-
-    if not dep_changes:
-        return "VERIFIED", []
-
-    # 1. Consistency check: package.json dependency modifications require consistent package-lock.json update
-    if orig_lock_json is not None:
-        if prop_lock_json is None:
-            reasons.append(
-                "package.json-only dependency change is rejected: "
-                "package-lock.json exists in project but was not updated alongside package.json. "
-                "Manifest and lockfile must be updated together."
-            )
-            return "REJECTED", reasons
-    else:
-        reasons.append(
-            "package-lock.json is not present in project; Guardian cannot safely regenerate or validate "
-            "lockfile consistency without executing package lifecycle scripts or arbitrary project code. "
-            "Proposed dependency remediation is rejected."
-        )
-        return "REJECTED", reasons
-
-    # 2. Verify each dependency modification
-    registry_meta_map: Dict[str, Dict[str, Any]] = {}
-
-    for pkg_name, change in dep_changes.items():
-        orig_spec = change["orig_spec"]
-        prop_spec = change["prop_spec"]
-        prop_ver = change["prop_ver"]
-
-        target_semver = parse_semver(prop_ver)
-        if not target_semver:
-            reasons.append(
-                f"Invalid/nonexistent package version is rejected: '{prop_ver}' is not a valid semver for '{pkg_name}'."
-            )
-            return "REJECTED", reasons
-
-        if is_major_downgrade(orig_spec, prop_spec):
-            reasons.append(
-                f"Unexplained major-version downgrade is rejected: package '{pkg_name}' downgraded from {orig_spec} to {prop_spec}."
-            )
-            return "REJECTED", reasons
-
-        reg_data, reg_status, reg_err = query_npm_registry(pkg_name, prop_ver)
-        if reg_status == "unavailable":
-            reasons.append(
-                f"npm registry verification is unavailable for '{pkg_name}@{prop_ver}' ({reg_err}). "
-                "Remediation marked UNVERIFIED; application is blocked."
-            )
-            return "UNVERIFIED", reasons
-        elif reg_status == "not_found" or not reg_data:
-            reasons.append(
-                f"Invalid/nonexistent package version is rejected: package '{pkg_name}' version '{prop_ver}' does not exist in npm registry."
-            )
-            return "REJECTED", reasons
-
-        registry_meta_map[pkg_name] = reg_data
-
-        matching_findings = [
-            f for f in target_findings
-            if (f.package and pkg_name in f.package) or (f.advisory and f.rule == "OSV")
-        ]
-        for f in matching_findings:
-            if f.advisory and is_version_vulnerable_to_advisory(prop_ver, f.advisory):
-                adv_id = f.advisory.id or "security advisory"
-                reasons.append(
-                    f"Vulnerable target version is rejected: version '{prop_ver}' for '{pkg_name}' "
-                    f"remains within the affected version range of {adv_id}."
-                )
-                return "REJECTED", reasons
-
-        osv_vulns, osv_status = query_osv_vulnerability(pkg_name, prop_ver)
-        if osv_status == "ok" and osv_vulns:
-            for v in osv_vulns:
-                vid = v.get("id", "OSV finding")
-                reasons.append(
-                    f"Vulnerable target version is rejected: '{pkg_name}@{prop_ver}' is reported vulnerable by OSV ({vid})."
-                )
-                return "REJECTED", reasons
-
-    # 3. Validate lockfile consistency and integrity metadata
-    if orig_lock_json and prop_lock_json:
-        lock_errors = validate_lockfile_consistency(
-            orig_lock=orig_lock_json,
-            prop_lock=prop_lock_json,
-            dep_changes=dep_changes,
-            registry_metadata_map=registry_meta_map
-        )
-        if lock_errors:
-            reasons.extend(lock_errors)
-            return "REJECTED", reasons
-
-    return "VERIFIED", []
+    except Exception as error:
+        return (error.status if isinstance(error, npm.NpmPlanError) else "REJECTED"), [str(error)]
 
 # Pydantic schema for structured Gemini output
 class LLMTextEdit(BaseModel):
@@ -746,6 +560,7 @@ class RemediationPlanner:
     Maintains strict separation between LLM proposal generation and deterministic validation.
     """
 
+    @metadata_session
     def generate_plan(
         self,
         report: Report,
@@ -755,7 +570,6 @@ class RemediationPlanner:
         instructions: Optional[str] = None
     ) -> RemediationPlan:
         # 1. Select targeted findings
-        available_finding_ids = {f.id for f in report.findings}
         target_findings: List[Finding] = []
 
         if finding_ids:
@@ -792,19 +606,118 @@ class RemediationPlanner:
         use_ai = consent and ai_cfg["enabled"] and ai_cfg["provider"] == "gemini"
 
         raw_plan: Optional[LLMRemediationOutput] = None
+        fallback_reason = None
         if use_ai:
             try:
                 raw_plan = self._generate_with_gemini(report, snapshot, target_findings, ai_cfg, instructions)
             except Exception as err:
-                logger.warning(f"Gemini remediation planning failed ({type(err).__name__}: {err}). Falling back to deterministic planner.")
+                logger.warning("Gemini remediation planning failed (%s). Falling back to deterministic planner.", type(err).__name__)
+                missing = [".".join(map(str, item["loc"])) for item in err.errors()] if hasattr(err, "errors") else []
+                fallback_reason = f"AI proposal could not be used ({type(err).__name__})" + (f": invalid or missing fields {', '.join(missing[:10])}" if missing else "") + "; deterministic fallback used."
                 raw_plan = None
 
+        if raw_plan and not raw_plan.proposed_changes and not raw_plan.dependency_proposals:
+            fallback_reason = "AI proposal contained no actionable changes or dependency targets; deterministic fallback used."
+            raw_plan = None
         if not raw_plan:
             raw_plan = self._generate_deterministic_plan(report, snapshot, target_findings)
+            if fallback_reason:
+                raw_plan.limitations.append(fallback_reason)
 
+        raw_plan, construction_status, construction_reasons = self._canonicalize_dependencies(
+            snapshot, raw_plan, target_findings
+        )
         # 3. Validate and apply edits deterministically against the in-memory project snapshot
-        validated_plan = self._validate_and_build_plan(report, snapshot, raw_plan, target_finding_ids, target_findings)
+        validated_plan = self._validate_and_build_plan(
+            report, snapshot, raw_plan, target_finding_ids, target_findings,
+            registry_built_lock=construction_status == "VERIFIED" and any(ch.file_path == "package-lock.json" for ch in raw_plan.proposed_changes)
+        )
+        if construction_reasons:
+            validated_plan.validation_status = construction_status
+            validated_plan.validation_reasons = construction_reasons + validated_plan.validation_reasons
+            validated_plan.status = "proposed" if construction_status == "UNVERIFIED" else "rejected"
         return validated_plan
+
+    def _canonicalize_dependencies(self, snapshot, raw_plan, target_findings):
+        """Turn model intent into deterministic manifest + resolved graph edits."""
+        raw_plan = raw_plan.model_copy(deep=True)
+        try:
+            for change in raw_plan.proposed_changes:
+                change.file_path = validate_and_normalize_path(change.file_path)
+            protected = {"yarn.lock", "pnpm-lock.yaml", "poetry.lock", "Pipfile.lock", "npm-shrinkwrap.json"}
+            if any(change.file_path.rsplit("/", 1)[-1] in protected or
+                   (change.file_path.endswith("/package-lock.json")) for change in raw_plan.proposed_changes):
+                raise npm.NpmPlanError("Model-authored lockfile changes are forbidden; only deterministic root npm v2/v3 dependency construction is supported.")
+            original = snapshot.files.get("package.json")
+            if not original:
+                if raw_plan.dependency_proposals or any(ch.file_path == "package-lock.json" for ch in raw_plan.proposed_changes):
+                    raise npm.NpmPlanError("Dependency proposal is missing package.json context.")
+                return raw_plan, "VERIFIED", []
+            manifest = npm.object_json(original, "package.json")
+            proposed_content = original
+            manifest_changes = [ch for ch in raw_plan.proposed_changes if ch.file_path == "package.json"]
+            for change in manifest_changes:
+                if change.operation != "update":
+                    raise npm.NpmPlanError("Dependency remediation requires an existing package.json.")
+                for edit in change.edits:
+                    if not edit.old_text or proposed_content.count(edit.old_text) != 1:
+                        raise npm.NpmPlanError("package.json proposal has a missing or ambiguous exact replacement anchor.")
+                    proposed_content = proposed_content.replace(edit.old_text, edit.new_text, 1)
+            proposed = npm.object_json(proposed_content, "package.json")
+            seen = {}
+            for intent in raw_plan.dependency_proposals:
+                name = intent.package_name
+                if name in seen and seen[name] != intent.proposed_version:
+                    raise npm.NpmPlanError(f"Conflicting dependency proposals for {name}.")
+                seen[name] = intent.proposed_version
+                groups = [group for group in npm.GROUPS if name in manifest.get(group, {})]
+                if not groups:
+                    raise npm.NpmPlanError(f"{name} is transitive or absent from package.json; upgrade its declaring parent dependency instead.")
+                for group in groups:
+                    old = manifest[group][name]
+                    resolved = self._dependency_context(snapshot, name).get("resolved_locations", [])
+                    installed = next((node["resolved_version"] for node in resolved if node["path"] == f"node_modules/{name}"), None)
+                    if intent.original_version not in (old, exact_version(old), installed):
+                        raise npm.NpmPlanError(f"Stale proposal for {name}: original_version={intent.original_version!r}, package.json {group}={old!r}.")
+                    target = exact_version(intent.proposed_version)
+                    if not target:
+                        raise npm.NpmPlanError(f"Invalid target version {intent.proposed_version!r} for {name}; an exact published target is required.")
+                    existing = proposed.get(group, {}).get(name)
+                    if existing != old and exact_version(existing) != target:
+                        raise npm.NpmPlanError(f"Conflicting package.json edit and structured target for {name}: {existing!r} vs {target}.")
+                    prefix = "~" if old.startswith("~") else "^" if old.startswith("^") else ""
+                    proposed.setdefault(group, {})[name] = prefix + target
+            changes = extract_manifest_dependency_changes(original, json.dumps(proposed))
+            if not changes:
+                if any(ch.file_path == "package-lock.json" for ch in raw_plan.proposed_changes):
+                    raise npm.NpmPlanError("Model-authored lockfile changes are forbidden; provide a dependency proposal.")
+                return raw_plan, "VERIFIED", []
+            lock_content = snapshot.files.get("package-lock.json")
+            if not lock_content:
+                raise npm.NpmPlanError("package.json-only dependency change: package-lock.json is missing; regenerate it manually before remediation.")
+            targets = {}
+            for name, change in changes.items():
+                version = exact_version(change["prop_spec"])
+                if not version:
+                    raise npm.NpmPlanError(f"Invalid dependency target for {name}: {change['prop_spec']!r}; removals and complex target ranges require manual resolution.")
+                targets[name] = version
+            lock = npm.construct_lock(npm.object_json(lock_content, "package-lock.json"), proposed, targets, query_npm_registry)
+            # Replace all manifest entries with a single edit anchored in the original
+            # snapshot. Existing code/script edits in package.json are retained.
+            proposed_content = npm.serialize_like(original, proposed)
+            ids = sorted({f.id for f in target_findings if parse_package_specifier(f.package)[0] in targets})
+            raw_plan.proposed_changes = [ch for ch in raw_plan.proposed_changes if ch.file_path not in ("package.json", "package-lock.json")]
+            for path, before, after in (("package.json", original, proposed_content),
+                                        ("package-lock.json", lock_content, npm.serialize_like(lock_content, lock))):
+                raw_plan.proposed_changes.append(LLMProposedFileChange(
+                    file_path=path, edits=[LLMTextEdit(old_text=before, new_text=after)],
+                    rationale="Deterministically synchronize dependency declarations and the registry-backed npm resolution graph.",
+                    finding_ids=ids, expected_result="Published patched dependency with consistent manifest and lockfile."
+                ))
+            return raw_plan, "VERIFIED", []
+        except Exception as error:
+            status = error.status if isinstance(error, npm.NpmPlanError) else "REJECTED"
+            return raw_plan, status, [f"Dependency patch construction: {error}"]
 
     def _build_empty_plan(self, scan_id: str) -> RemediationPlan:
         return RemediationPlan(
@@ -823,10 +736,25 @@ class RemediationPlanner:
             recommended_verification=["Rescan when dependencies or source files are modified."],
             limitations=["Static analysis does not guarantee the absence of unknown vulnerabilities."],
             status="proposed",
-            validation_status="VERIFIED",
-            validation_reasons=[],
+            validation_status="UNVERIFIED",
+            validation_reasons=["No findings require an applicable remediation; there are no file changes to approve."],
             created_at=datetime.now(timezone.utc).isoformat()
         )
+
+    def _dependency_context(self, snapshot, package):
+        name, installed = parse_package_specifier(package)
+        try:
+            manifest = npm.object_json(snapshot.files.get("package.json", "{}"), "package.json")
+            lock = npm.object_json(snapshot.files.get("package-lock.json", "{}"), "package-lock.json")
+            packages = lock.get("packages", {})
+            locations = [{"path": path, "resolved_version": node.get("version"),
+                          "dependencies": node.get("dependencies", {}),
+                          "peerDependencies": node.get("peerDependencies", {})}
+                         for path, node in packages.items() if path and npm.package_name(path) == name and isinstance(node, dict)][:20]
+            return {"installed_version": installed, "manifest_constraints": {g: manifest.get(g, {}).get(name) for g in npm.GROUPS if name in manifest.get(g, {})},
+                    "lockfile_version": lock.get("lockfileVersion"), "resolved_locations": locations}
+        except ValueError:
+            return {"installed_version": installed, "context_unavailable": True}
 
     def _build_context(
         self,
@@ -865,6 +793,10 @@ class RemediationPlanner:
                 "recommendation": f.recommendation,
                 "package": f.package,
                 "associated_files": f_files,
+                "ecosystem": "npm" if f.rule == "OSV" else None,
+                "advisory_ids": [f.advisory.id] + f.advisory.aliases if f.advisory else [],
+                "affected_ranges": f.advisory.affected_ranges if f.advisory else [],
+                "dependency_context": self._dependency_context(snapshot, f.package),
                 "fixed_versions": f.advisory.fixed_versions if f.advisory else [],
                 "recommended_safe_version": rec_safe
             })
@@ -888,7 +820,7 @@ class RemediationPlanner:
                 "content": redact_text(content)
             })
 
-        return {
+        return redact_data({
             "project": {
                 "name": snapshot.name,
                 "framework": snapshot.metadata.framework,
@@ -899,7 +831,7 @@ class RemediationPlanner:
             },
             "findings": findings_context,
             "relevant_files": files_context
-        }
+        })
 
     def _generate_with_gemini(
         self,
@@ -909,6 +841,8 @@ class RemediationPlanner:
         ai_cfg: Dict[str, Any],
         instructions: Optional[str] = None
     ) -> LLMRemediationOutput:
+        if target_findings and all(f.rule == "OSV" for f in target_findings):
+            return self._generate_deterministic_plan(report, snapshot, target_findings)
         from google import genai
         from google.genai import types
 
@@ -942,7 +876,7 @@ class RemediationPlanner:
             f"</evidence>\n\n"
         )
         if instructions:
-            user_prompt += f"USER INSTRUCTIONS: {instructions}\n\n"
+            user_prompt += f"USER INSTRUCTIONS: {redact_text(instructions)}\n\n"
         user_prompt += (
             "Construct a complete, structured remediation plan addressing the targeted findings. "
             "Ensure every 'old_text' is an exact verbatim substring from the provided file content."
@@ -981,57 +915,6 @@ class RemediationPlanner:
         data = json.loads(cleaned)
         plan_output = LLMRemediationOutput.model_validate(data)
 
-        # Synchronize lockfile if Gemini modified package.json dependencies and project has package-lock.json
-        if "package-lock.json" in snapshot.files and not any(ch.file_path == "package-lock.json" for ch in plan_output.proposed_changes):
-            pkg_change = next((ch for ch in plan_output.proposed_changes if ch.file_path == "package.json"), None)
-            if pkg_change:
-                orig_pkg_str = snapshot.files.get("package.json", "")
-                prop_pkg_str = orig_pkg_str
-                for ed in pkg_change.edits:
-                    if ed.old_text in prop_pkg_str:
-                        prop_pkg_str = prop_pkg_str.replace(ed.old_text, ed.new_text, 1)
-
-                dep_changes = extract_manifest_dependency_changes(orig_pkg_str, prop_pkg_str)
-                lock_content = snapshot.files.get("package-lock.json", "")
-                synthesized_lock_edits: List[LLMTextEdit] = []
-
-                for pkg_name, info in dep_changes.items():
-                    prop_ver = info.get("prop_ver", "")
-                    prop_spec = info.get("prop_spec", "")
-                    if not prop_ver:
-                        continue
-                    reg_data, reg_status, _ = query_npm_registry(pkg_name, prop_ver)
-                    if reg_status == "ok" and reg_data:
-                        dist = reg_data.get("dist", {})
-                        tarball = dist.get("tarball", f"https://registry.npmjs.org/{pkg_name}/-/{pkg_name}-{prop_ver}.tgz")
-                        integrity = dist.get("integrity", "")
-                        if not integrity and dist.get("shasum"):
-                            shasum = dist["shasum"]
-                            if re.fullmatch(r"[0-9a-fA-F]{40}", shasum):
-                                integrity = "sha1-" + base64.b64encode(bytes.fromhex(shasum)).decode()
-
-                        l_edits = generate_lockfile_edits(
-                            lock_content=lock_content,
-                            pkg_name=pkg_name,
-                            new_spec=prop_spec,
-                            new_version=prop_ver,
-                            new_resolved=tarball,
-                            new_integrity=integrity
-                        )
-                        for le in l_edits:
-                            lock_content = lock_content.replace(le.old_text, le.new_text, 1)
-                            synthesized_lock_edits.append(LLMTextEdit(old_text=le.old_text, new_text=le.new_text))
-
-                if synthesized_lock_edits:
-                    plan_output.proposed_changes.append(LLMProposedFileChange(
-                        file_path="package-lock.json",
-                        operation="update",
-                        edits=synthesized_lock_edits,
-                        rationale="Synchronize package-lock.json dependency resolution and verified SRI integrity hashes with package.json manifest.",
-                        finding_ids=pkg_change.finding_ids,
-                        expected_result="Ensures lockfile resolution and integrity hashes match updated package.json dependencies."
-                    ))
-
         return plan_output
 
     def _generate_deterministic_plan(
@@ -1052,7 +935,9 @@ class RemediationPlanner:
         pkg_json_content = snapshot.files.get("package.json")
         lock_content = snapshot.files.get("package-lock.json")
 
+        dependency_proposals: List[DependencyChangeProposal] = []
         addressed_pkgs: Set[str] = set()
+        attempted_pkgs: Set[str] = set()
         for f in target_findings:
             # Case 1: OSV advisory with package.json
             if f.rule == "OSV" and f.advisory and pkg_json_content:
@@ -1062,66 +947,33 @@ class RemediationPlanner:
                 if pkg_name in addressed_pkgs:
                     findings_addressed.append(f.id)
                     continue
+                if pkg_name in attempted_pkgs:
+                    continue
+                attempted_pkgs.add(pkg_name)
                 pattern = rf'("{re.escape(pkg_name)}"\s*:\s*")([^"]+)(")'
                 match = re.search(pattern, pkg_json_content)
                 if match:
                     orig_spec = match.group(2)
                     if lock_content:
-                        target_version, dist_meta, _ = select_patched_dependency_version(
+                        target_version, dist_meta, resolution_error = select_patched_dependency_version(
                             pkg_name=pkg_name,
-                            orig_spec=orig_spec,
-                            advisory=f.advisory
+                            orig_spec=json.loads(lock_content).get("packages", {}).get(f"node_modules/{pkg_name}", {}).get("version", orig_spec),
+                            advisories=[finding.advisory for finding in report.findings if finding.advisory and parse_package_specifier(finding.package)[0] == pkg_name]
                         )
+                        if resolution_error:
+                            limitations.append(resolution_error)
                         if target_version and dist_meta:
                             addressed_pkgs.add(pkg_name)
-                            prefix = "^"
-                            if orig_spec.startswith("~"):
-                                prefix = "~"
-                            elif orig_spec.startswith(">="):
-                                prefix = ">="
-                            new_spec = f"{prefix}{target_version}"
-                            old_str = match.group(0)
-                            new_str = f'"{pkg_name}": "{new_spec}"'
-                            if old_str in pkg_json_content and pkg_json_content.count(old_str) == 1:
-                                proposed_changes.append(LLMProposedFileChange(
-                                    file_path="package.json",
-                                    operation="update",
-                                    edits=[LLMTextEdit(old_text=old_str, new_text=new_str)],
-                                    rationale=f"Upgrade {pkg_name} to verified patched version {new_spec} to resolve {f.advisory.id}.",
-                                    finding_ids=[f.id],
-                                    expected_result=f"Resolves {f.advisory.id} ({f.severity} severity vulnerability)."
-                                ))
-
-                                tarball = dist_meta.get("tarball", f"https://registry.npmjs.org/{pkg_name}/-/{pkg_name}-{target_version}.tgz")
-                                integrity = dist_meta.get("integrity", "")
-                                if not integrity and dist_meta.get("shasum"):
-                                    shasum = dist_meta["shasum"]
-                                    if re.fullmatch(r"[0-9a-fA-F]{40}", shasum):
-                                        integrity = "sha1-" + base64.b64encode(bytes.fromhex(shasum)).decode()
-
-                                lock_edits = generate_lockfile_edits(
-                                    lock_content=lock_content,
-                                    pkg_name=pkg_name,
-                                    new_spec=new_spec,
-                                    new_version=target_version,
-                                    new_resolved=tarball,
-                                    new_integrity=integrity
-                                )
-                                if lock_edits:
-                                    llm_lock_edits = [LLMTextEdit(old_text=e.old_text, new_text=e.new_text) for e in lock_edits]
-                                    proposed_changes.append(LLMProposedFileChange(
-                                        file_path="package-lock.json",
-                                        operation="update",
-                                        edits=llm_lock_edits,
-                                        rationale=f"Update package-lock.json dependency and resolved metadata for {pkg_name} to {new_spec}.",
-                                        finding_ids=[f.id],
-                                        expected_result=f"Aligns lockfile resolution with patched manifest version {target_version}."
-                                    ))
-                                findings_addressed.append(f.id)
-                                tradeoffs.append(f"Upgrading {pkg_name} may introduce upstream API deprecations or behavioral changes.")
-                                risks.append(f"Ensure dependency compatibility with dependent code before deploying {pkg_name} {new_spec}.")
-                                if "Run test suite (`npm test`) to ensure compatibility." not in manual_steps:
-                                    manual_steps.append("Run test suite (`npm test`) to ensure compatibility.")
+                            new_spec = ("~" if orig_spec.startswith("~") else "^" if orig_spec.startswith("^") else "") + target_version
+                            dependency_proposals.append(DependencyChangeProposal(
+                                package_name=pkg_name, original_version=orig_spec, proposed_version=new_spec,
+                                advisory_mitigation_reason=f"Resolve {f.advisory.id} using independently checked metadata."
+                            ))
+                            findings_addressed.append(f.id)
+                            tradeoffs.append(f"Upgrading {pkg_name} may introduce upstream API deprecations or behavioral changes.")
+                            risks.append(f"Ensure dependency compatibility with dependent code before deploying {pkg_name} {new_spec}.")
+                            if "Run test suite (`npm test`) to ensure compatibility." not in manual_steps:
+                                manual_steps.append("Run test suite (`npm test`) to ensure compatibility.")
                     else:
                         if f"Run `npm install` to generate a package-lock.json and upgrade {pkg_name} to a secure version." not in manual_steps:
                             manual_steps.append(f"Run `npm install` to generate a package-lock.json and upgrade {pkg_name} to a secure version.")
@@ -1136,7 +988,9 @@ class RemediationPlanner:
                         old_str = m.group(1)
                         # Propose removing or neutralizing the script
                         new_str = f'"{stage}": "echo \\"Guardian: {stage} script neutralized for security.\\""'
-                        if old_str in pkg_json_content and pkg_json_content.count(old_str) == 1:
+                        if old_str in pkg_json_content and pkg_json_content.count(old_str) == 1 and not any(
+                            edit.old_text == old_str for change in proposed_changes for edit in change.edits
+                        ):
                             proposed_changes.append(LLMProposedFileChange(
                                 file_path="package.json",
                                 operation="update",
@@ -1157,7 +1011,7 @@ class RemediationPlanner:
                 if p_name in addressed_pkgs and f.id not in findings_addressed:
                     findings_addressed.append(f.id)
 
-        if not proposed_changes:
+        if not proposed_changes and not dependency_proposals:
             # Generic guidance plan if no automatic edits could be generated
             return LLMRemediationOutput(
                 title="Security Remediation Recommendations",
@@ -1181,6 +1035,7 @@ class RemediationPlanner:
             expected_outcome="Remediates known vulnerabilities and lifecycle execution risks.",
             findings_addressed=findings_addressed,
             proposed_changes=proposed_changes,
+            dependency_proposals=dependency_proposals,
             tradeoffs=tradeoffs or ["Upgraded dependencies may require minor code adjustments."],
             potential_risks=risks or ["Run project tests to verify behavior."],
             assumptions=["Project uses standard npm package.json structure."],
@@ -1195,7 +1050,8 @@ class RemediationPlanner:
         snapshot: ProjectSnapshot,
         raw_plan: LLMRemediationOutput,
         target_finding_ids: List[str],
-        target_findings: Optional[List[Finding]] = None
+        target_findings: Optional[List[Finding]] = None,
+        registry_built_lock: bool = False
     ) -> RemediationPlan:
         """
         Validates all proposed edits strictly against the project snapshot:
@@ -1223,27 +1079,36 @@ class RemediationPlanner:
             target_findings = [f for f in report.findings if f.id in target_finding_ids]
 
         validated_changes: List[ProposedFileChange] = []
+        structural_errors: List[str] = []
         addressed_ids: Set[str] = set(raw_plan.findings_addressed)
 
         # Track modifications to snapshot files to support multi-edit on same file
         working_files = dict(snapshot.files)
 
         for change in raw_plan.proposed_changes:
-            path = change.file_path.strip().lstrip('/')
+            try:
+                path = validate_and_normalize_path(change.file_path)
+            except ValueError as error:
+                structural_errors.append(str(error))
+                continue
             op = change.operation.lower()
 
             # Security guards: forbid modifying secret files or .git
             if is_secret_file(path) or path.startswith(".git/"):
-                logger.warning(f"Rejected proposed change to forbidden path: {path}")
+                structural_errors.append(f"Forbidden remediation path: {path}")
                 continue
 
             if op == "update":
                 if path not in working_files:
-                    logger.warning(f"Proposed update to non-existent file '{path}' rejected.")
+                    structural_errors.append(f"Proposed update to missing file {path}.")
                     continue
 
                 orig_content = working_files[path]
-                orig_hash = snapshot.file_hashes.get(path, compute_sha256(orig_content))
+                original_snapshot = snapshot.files.get(path, "")
+                orig_hash = snapshot.file_hashes.get(path, compute_sha256(original_snapshot))
+                if orig_hash != compute_sha256(original_snapshot):
+                    structural_errors.append(f"Snapshot SHA-256 mismatch for {path}.")
+                    continue
 
                 # Validate edits
                 current_content = orig_content
@@ -1272,6 +1137,7 @@ class RemediationPlanner:
                     valid_edits.append(TextEdit(old_text=old_text, new_text=new_text))
 
                 if failed or not valid_edits:
+                    structural_errors.append(f"Invalid exact replacement anchor in {path}: empty, missing, or ambiguous edit.")
                     continue
 
                 proposed_hash = compute_sha256(current_content)
@@ -1280,6 +1146,7 @@ class RemediationPlanner:
 
                 validated_changes.append(ProposedFileChange(
                     file_path=path,
+                    edit_source="npm_registry" if path == "package-lock.json" and registry_built_lock else "proposal",
                     operation="update",
                     original_sha256=orig_hash,
                     proposed_sha256=proposed_hash,
@@ -1293,12 +1160,12 @@ class RemediationPlanner:
 
             elif op == "create":
                 if path in working_files:
-                    logger.warning(f"Proposed create for existing file '{path}' rejected.")
+                    structural_errors.append(f"Proposed create for existing file {path}.")
                     continue
 
                 created_text = change.created_content or ""
                 if not created_text or len(created_text.encode('utf-8')) > 100_000:
-                    logger.warning(f"Created file content for '{path}' is empty or exceeds 100 KB limit.")
+                    structural_errors.append(f"Created content for {path} is empty or exceeds 100 KB.")
                     continue
 
                 proposed_hash = compute_sha256(created_text)
@@ -1318,6 +1185,26 @@ class RemediationPlanner:
                     created_content=created_text
                 ))
                 addressed_ids.update(change.finding_ids)
+
+            else:
+                structural_errors.append(f"Unsupported operation {op!r} for {path}.")
+
+        # One file, one original hash, one final hash, one complete diff. Browser
+        # application and GitHub both replay the same ordered edit sequence.
+        grouped: Dict[str, ProposedFileChange] = {}
+        for change in validated_changes:
+            previous = grouped.get(change.file_path)
+            if previous:
+                previous.edits.extend(change.edits)
+                previous.proposed_sha256 = change.proposed_sha256
+                previous.finding_ids = sorted(set(previous.finding_ids + change.finding_ids))
+                if previous.operation == "create":
+                    previous.created_content = working_files[change.file_path]
+                    previous.edits = []
+                previous.diff = generate_unified_diff(change.file_path, snapshot.files.get(change.file_path, ""), working_files[change.file_path], previous.operation == "create")
+            else:
+                grouped[change.file_path] = change
+        validated_changes = list(grouped.values())
 
         plan = RemediationPlan(
             plan_id=uuid4().hex[:16],
@@ -1346,6 +1233,9 @@ class RemediationPlanner:
             report=report,
             target_findings=target_findings or []
         )
+        if structural_errors:
+            val_status = "REJECTED"
+            val_reasons = structural_errors + val_reasons
         plan.validation_status = val_status
         plan.validation_reasons = val_reasons
         if val_status in ("REJECTED", "VALIDATION_FAILED"):
@@ -1353,6 +1243,7 @@ class RemediationPlanner:
 
         return plan
 
+    @metadata_session
     def verify_plan(
         self,
         plan: RemediationPlan,
@@ -1372,7 +1263,9 @@ class RemediationPlanner:
         def finding_sig(f: Finding) -> str:
             first_file = f.evidence[0].file if f.evidence else ""
             adv_id = f.advisory.id if f.advisory else ""
-            return f"{f.rule}:{f.package or ''}:{first_file}:{adv_id}:{f.title}"
+            if f.advisory:
+                return f"{f.rule}:{parse_package_specifier(f.package)[0]}:{adv_id}"
+            return f"{f.rule}:{f.package or ''}:{first_file}:{f.title}"
 
         orig_lookup = {f.id: f for f in original_report.findings}
         orig_sigs = {finding_sig(f): f.id for f in original_report.findings}
@@ -1388,6 +1281,17 @@ class RemediationPlanner:
             sig = finding_sig(orig_f)
             if sig in rescanned_sigs:
                 persistent_findings.append(f"{orig_f.title} ({orig_f.rule}) - still detected")
+            elif orig_f.advisory and rescanned_report.intelligence != "checked":
+                name = parse_package_specifier(orig_f.package)[0]
+                versions = {d.version for d in rescanned_report.dependencies if d.name == name and SEMVER_REGEX.fullmatch(d.version)}
+                versions.update(n.version for n in rescanned_report.inspections if n.name == name and SEMVER_REGEX.fullmatch(n.version))
+                # A partial scan can include unresolved manifest constraints for
+                # other packages. Recheck this package's actual resolved copies.
+                results = [query_osv_vulnerability(name, version) for version in sorted(versions)] if rescanned_report.intelligence == "partial" else []
+                if results and all(status == "ok" and not vulns for vulns, status in results):
+                    resolved_findings.append(f"{orig_f.title} ({orig_f.rule}) - resolved (exact resolved versions rechecked)")
+                else:
+                    persistent_findings.append(f"{orig_f.title} ({orig_f.rule}) - resolution unverified: vulnerability intelligence is {rescanned_report.intelligence}")
             else:
                 resolved_findings.append(f"{orig_f.title} ({orig_f.rule}) - resolved")
 

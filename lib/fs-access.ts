@@ -423,6 +423,15 @@ export async function applyPlanToFileSystem(
   directoryHandle: FileSystemDirectoryHandle,
   plan: RemediationPlan,
 ): Promise<{ success: boolean; modifiedFiles: string[] }> {
+  if (plan.validation_status && plan.validation_status !== "VERIFIED") {
+    throw new Error(
+      `Cannot apply remediation plan: validation is ${plan.validation_status}. ${plan.validation_reasons?.join("; ") || ""}`,
+    );
+  }
+  const paths = plan.proposed_changes.map((change) => change.file_path);
+  if (new Set(paths).size !== paths.length) {
+    throw new Error("Duplicate file changes must be consolidated before application.");
+  }
   // 1. Request 'readwrite' permission explicitly
   const permissionStatus = await (directoryHandle as any).requestPermission({
     mode: "readwrite",
@@ -523,9 +532,9 @@ export async function applyPlanToFileSystem(
         // Apply edits sequentially
         let updatedText = originalText;
         for (const edit of change.edits) {
-          if (!updatedText.includes(edit.old_text)) {
+          if (!edit.old_text || updatedText.split(edit.old_text).length !== 2) {
             throw new Error(
-              `Anchor text not found during replacement in '${change.file_path}'.`,
+              `Anchor text missing or ambiguous during replacement in '${change.file_path}'.`,
             );
           }
           updatedText = updatedText.replace(edit.old_text, edit.new_text);

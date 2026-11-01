@@ -102,6 +102,35 @@ def recent() -> List[Report]:
         rows = db.execute('SELECT report FROM scans ORDER BY created_at DESC LIMIT 50').fetchall()
     return [Report.model_validate_json(row[0]) for row in rows]
 
+def delete_scan(scan_id: str) -> bool:
+    with connection() as db:
+        row = db.execute('SELECT 1 FROM scans WHERE id = ?', (scan_id,)).fetchone()
+        if not row:
+            return False
+        db.execute('DELETE FROM verification_results WHERE scan_id = ?', (scan_id,))
+        db.execute('DELETE FROM remediation_plans WHERE scan_id = ?', (scan_id,))
+        db.execute('DELETE FROM messages WHERE scan_id = ?', (scan_id,))
+        db.execute('DELETE FROM conversations WHERE scan_id = ?', (scan_id,))
+        db.execute('DELETE FROM scans WHERE id = ?', (scan_id,))
+        return True
+
+def delete_scans(scan_ids: List[str]) -> List[str]:
+    if not scan_ids:
+        return []
+    with connection() as db:
+        placeholders = ','.join('?' for _ in scan_ids)
+        rows = db.execute(f'SELECT id FROM scans WHERE id IN ({placeholders})', scan_ids).fetchall()
+        existing_ids = [r[0] for r in rows]
+        if not existing_ids:
+            return []
+        ex_placeholders = ','.join('?' for _ in existing_ids)
+        db.execute(f'DELETE FROM verification_results WHERE scan_id IN ({ex_placeholders})', existing_ids)
+        db.execute(f'DELETE FROM remediation_plans WHERE scan_id IN ({ex_placeholders})', existing_ids)
+        db.execute(f'DELETE FROM messages WHERE scan_id IN ({ex_placeholders})', existing_ids)
+        db.execute(f'DELETE FROM conversations WHERE scan_id IN ({ex_placeholders})', existing_ids)
+        db.execute(f'DELETE FROM scans WHERE id IN ({ex_placeholders})', existing_ids)
+        return existing_ids
+
 def get_or_create_conversation(scan_id: str, conversation_id: Optional[str] = None) -> ConversationSession:
     now = datetime.now(timezone.utc).isoformat()
     with connection() as db:
@@ -277,7 +306,7 @@ VALID_STATUS_TRANSITIONS: Dict[str, Set[str]] = {
     'applied': {'reverted', 'verified', 'failed', 'pr_closed'},
     'reverted': {'approved', 'applying', 'applied', 'failed', 'rejected'},
     'pr_closed': {'applied', 'approved', 'rejected'},
-    'verified': set(),
+    'verified': {'reverted', 'pr_closed'},
     'rejected': set(),
     'failed': {'approved', 'applying', 'applied', 'reverted'},
     'stale': set(),
@@ -294,6 +323,8 @@ def update_plan_status(plan_id: str, status: str) -> Optional[RemediationPlan]:
     plan = get_plan(plan_id)
     if not plan:
         return None
+    if status in {'approved', 'applying', 'applied', 'verified'} and plan.validation_status != 'VERIFIED':
+        raise ValueError(f"Cannot {status} remediation plan: validation is {plan.validation_status}. {'; '.join(plan.validation_reasons)}")
     validate_plan_transition(plan.status, status)
     plan.status = status
     save_plan(plan)

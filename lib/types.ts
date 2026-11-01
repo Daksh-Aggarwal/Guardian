@@ -270,6 +270,7 @@ export type TextEdit = {
 
 export type ProposedFileChange = {
   file_path: string;
+  edit_source?: "proposal" | "npm_registry";
   operation: "update" | "create";
   original_sha256: string;
   proposed_sha256: string;
