@@ -4665,6 +4665,11 @@ select {
   border-bottom: 1px solid var(--line);
   cursor: pointer;
   text-align: left;
+  user-select: none;
+}
+.package-group-header:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 .pkg-header-left {
   display: flex;
@@ -4739,6 +4744,11 @@ select {
   border: none;
   cursor: pointer;
   text-align: left;
+  user-select: none;
+}
+.finding-card-header:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 .finding-severity-icon {
   width: 32px;

@@ -1134,10 +1134,17 @@ function PackageFindingsGroup({
 
   return (
     <div className={`package-group-card ${collapsed ? "collapsed" : ""}`}>
-      <button
-        type="button"
+      <div
+        role="button"
+        tabIndex={0}
         className="package-group-header"
         onClick={() => setCollapsed((p) => !p)}
+        onKeyDown={(e) => {
+          if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) {
+            e.preventDefault();
+            setCollapsed((p) => !p);
+          }
+        }}
         aria-expanded={!collapsed}
       >
         <div className="pkg-header-left">
@@ -1172,7 +1179,7 @@ function PackageFindingsGroup({
             className={`pkg-chevron ${collapsed ? "rotate-up" : ""}`}
           />
         </div>
-      </button>
+      </div>
 
       {!collapsed && (
         <div className="package-group-findings-list">
@@ -1229,10 +1236,17 @@ function FindingItemCard({
       id={"finding-" + f.id}
       className={`finding-card ${isOpen ? "expanded" : ""} ${isGrouped ? "grouped-item" : ""}`}
     >
-      <button
-        type="button"
+      <div
+        role="button"
+        tabIndex={0}
         className="finding-card-header"
         onClick={onToggle}
+        onKeyDown={(e) => {
+          if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) {
+            e.preventDefault();
+            onToggle();
+          }
+        }}
         aria-expanded={isOpen}
       >
         <span className={`finding-severity-icon ${f.severity}`}>
@@ -1292,7 +1306,7 @@ function FindingItemCard({
             className={`finding-chevron ${isOpen ? "rotate" : ""}`}
           />
         </div>
-      </button>
+      </div>
 
       {isOpen && (
         <motion.div
