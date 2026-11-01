@@ -246,7 +246,8 @@ def resolve(specs, project, offline=False):
             actual, files, warnings = _manifest_files(result.raw, files=result.files, warnings=result.warnings)
             if actual.get('name') != name or actual.get('version') != version or _declarations(actual) != _declarations(meta):
                 raise IntegrityError('npm tarball identity or dependency metadata differs from the registry release.', operation='manifest verification', package=name + '@' + version)
-            artifact = Artifact('npm', name, version, name.rsplit('/', 1)[-1] + '-' + version + '.tgz', result.raw, files, hashlib.sha256(result.raw).hexdigest(), True, warnings=warnings, direct=direct, kind='tgz')
+            artifact = Artifact('npm', name, version, name.rsplit('/', 1)[-1] + '-' + version + '.tgz', result.raw, files, hashlib.sha256(result.raw).hexdigest(), True, warnings=warnings, direct=direct, kind='tgz',
+                                integrity=result.integrity, registry_integrity=result.registry_integrity)
             unique[key] = (artifact, actual)
             artifacts.append(artifact)
         artifact, actual = unique[key]

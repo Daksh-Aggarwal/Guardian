@@ -1,6 +1,7 @@
 """Acquisition boundary: immutable bytes and normalized metadata, never executable input."""
 from dataclasses import dataclass, field
-from typing import Dict, List
+from typing import Dict, List, Optional
+from .models import IntegrityResult
 
 
 class AcquisitionError(ValueError):
@@ -44,6 +45,8 @@ class Artifact:
     dependencies: List[str] = field(default_factory=list)
     direct: bool = True
     kind: str = ''
+    integrity: Optional[IntegrityResult] = None
+    registry_integrity: Optional[IntegrityResult] = None
 
     @property
     def identity(self):

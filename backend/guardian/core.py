@@ -31,6 +31,8 @@ def analyze_plan(plan, policy=None):
     plan_limitations = list(plan.limitations) + missing_edges
     coverage.extend(missing_edges)
     complete = complete and not missing_edges
+    graph_complete = complete
+    sources_complete = bool(plan.artifacts)
     for artifact in plan.artifacts:
         if artifact.ecosystem != plan.ecosystem:
             raise ValueError('Artifact ecosystem does not match acquisition plan.')
@@ -57,6 +59,7 @@ def analyze_plan(plan, policy=None):
         build = ['Source distributions require an untrusted build; installation is deferred.'] if artifact.kind == 'sdist' else []
         limitations = incomplete_notes + omitted + build
         source_complete = not limitations and inspected > 0
+        sources_complete = sources_complete and source_complete
         complete = complete and source_complete
         coverage.extend(f'{artifact.identity}: {n}' for n in artifact.warnings + notes + build)
         for f in observed:
@@ -75,8 +78,9 @@ def analyze_plan(plan, policy=None):
             name=artifact.name, version=artifact.version, ecosystem=artifact.ecosystem,
             artifact_sha256=artifact.sha256, location=artifact.identity, direct=artifact.direct,
             status='inspected' if source_complete else 'skipped', reason='; '.join(limitations),
-            integrity=IntegrityResult(status='verified' if artifact.verified else 'missing',
+            integrity=artifact.integrity or IntegrityResult(status='verified' if artifact.verified else 'missing',
                                       source='acquisition', computed=['sha256:' + artifact.sha256]),
+            registry_integrity=artifact.registry_integrity,
             dependencies=artifact.dependencies, finding_ids=[f.id for f in observed]))
     if not plan.artifacts:
         complete = False
@@ -92,6 +96,8 @@ def analyze_plan(plan, policy=None):
                                 skipped=sum(n.status == 'skipped' for n in inspections),
                                 packages_with_findings=sum(bool(n.finding_ids) for n in inspections), profile='cli')
     root = plan.artifacts[0] if len(plan.artifacts) == 1 else None
+    roots = [a for a in plan.artifacts if a.identity in plan.roots]
+    root_integrity = (roots[0].registry_integrity or roots[0].integrity) if len(roots) == 1 else None
     return Report(
         id=uuid4().hex, name=root.name if root else 'Dependency installation',
         version=root.version if root else 'resolved', created_at=datetime.now(timezone.utc).isoformat(),
@@ -100,10 +106,14 @@ def analyze_plan(plan, policy=None):
         files_analyzed=count, coverage=coverage + ['Vulnerability intelligence not checked; local static analysis is independent.'],
         intelligence='not checked', duration_ms=int((time.monotonic() - started) * 1000), engine_version='2',
         inspections=inspections, inspection_summary=summary,
-        assessments={'behavior': {'risk': risk, 'rationale': rationale, 'coverage_status': 'complete' if complete else 'incomplete', 'files_inspected': count},
+        root_integrity=root_integrity,
+        assessments={'acquisition': {'status': 'successful' if plan.artifacts else 'incomplete', 'artifacts': len(plan.artifacts)},
+                     'behavior': {'risk': risk, 'rationale': rationale, 'coverage_status': 'complete' if complete else 'incomplete', 'files_inspected': count},
                      'vulnerabilities': {'count': 0, 'status': 'not checked'},
                      'integrity': {'concerns': sum(not a.verified for a in plan.artifacts), 'root_status': 'verified' if verified else 'missing'},
-                     'inspection': {**summary.model_dump(), 'status': 'complete' if complete else 'incomplete'}},
+                     'inspection': {**summary.model_dump(), 'status': 'complete' if complete else 'incomplete',
+                                    'source_status': 'complete' if sources_complete else 'incomplete',
+                                    'dependency_resolution_status': 'complete' if graph_complete else 'incomplete'}},
         cli={'schema_version': '1.0', 'ecosystem': plan.ecosystem, 'roots': plan.roots,
              'installation_locations': plan.locations, 'unique_artifacts': len(plan.artifacts),
              'location_count': len(plan.locations), 'budgets': plan.budgets, 'acquisition': plan.acquisition,

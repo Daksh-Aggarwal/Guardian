@@ -101,6 +101,19 @@ def report_text(report,verbose=False,color='auto',width=None):
     status=cli.get('installation',{}).get('status','not attempted')
     counts=Counter(f.severity for f in report.findings)
     lines.extend(['',ui.heading('Summary'),ui.line('Decision: '+verdict,tone=verdict),ui.line('Findings: '+str(len(report.findings))+' total | '+' / '.join(f'{counts[s]} {s}' for s in ('critical','high','medium','low','info'))),ui.line('Source: '+str(report.files_analyzed)+' files analyzed'),ui.line('Vulnerability intelligence: '+report.intelligence)])
+    assessments=report.assessments or {}
+    if assessments.get('acquisition'):
+        lines.append(ui.line('Acquisition: '+assessments['acquisition']['status']))
+    if assessments.get('inspection'):
+        inspection=assessments['inspection']
+        lines.append(ui.line('Source inspection: '+inspection.get('source_status',inspection.get('status','unknown'))))
+        if inspection.get('dependency_resolution_status'):
+            lines.append(ui.line('Dependency resolution: '+inspection['dependency_resolution_status']))
+    if assessments.get('integrity'):
+        lines.append(ui.line('Artifact integrity: '+assessments['integrity']['root_status']))
+    lock_results=[n.integrity for n in report.inspections if n.integrity and n.integrity.source=='lockfile']
+    if lock_results:
+        lines.append(ui.line(f'Lockfile integrity: {sum(r.status=="verified" for r in lock_results)}/{len(lock_results)} artifacts verified'))
     if report.root_integrity:lines.append(ui.line('Root integrity: '+report.root_integrity.status))
     if report.inspection_summary:
         s=report.inspection_summary

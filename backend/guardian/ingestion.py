@@ -1,6 +1,7 @@
 """Bounded in-memory ingestion. No archive member is written to disk."""
 import io
 import json
+import posixpath
 import re
 import stat
 import time
@@ -20,6 +21,50 @@ MAX_FILE = 1024 * 1024
 MAX_FILES = 500
 EXTENSIONS = {'.js', '.cjs', '.mjs', '.jsx', '.ts', '.tsx', '.json', '.yaml', '.yml', '.lock', '.py', '.pyw', '.pth', '.start', '.toml', '.cfg', '.md', '.txt'}
 SUPPORTED_MANIFESTS = {'package.json', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock'}
+PACKAGE_METADATA = {'LICENSE', 'LICENCE', 'COPYING', 'NOTICE', 'AUTHORS', 'CONTRIBUTORS', 'PATENTS'}
+
+
+def member_classification(name, mode=0):
+    """Only conventional, non-executable text metadata is exempt from source coverage."""
+    path = PurePosixPath(name)
+    if any(p in {'.git', 'node_modules'} for p in path.parts):
+        return 'excluded'
+    basename = path.name.upper()
+    if path.suffix.lower() in {'.txt', '.md'}:
+        basename = basename.rsplit('.', 1)[0]
+    if basename in PACKAGE_METADATA:
+        return 'unsupported' if mode & 0o111 else 'metadata'
+    return 'source' if path.suffix in EXTENSIONS else 'unsupported'
+
+
+def metadata_code_references(files, metadata_names):
+    """A conventional filename cannot exempt a declared npm code entry point."""
+    referenced = set()
+    if not metadata_names:
+        return referenced
+    for path, text in files.items():
+        if PurePosixPath(path).name != 'package.json':
+            continue
+        try:
+            manifest = json.loads(text)
+        except (ValueError, RecursionError):
+            continue  # The analyzer reports invalid manifests separately.
+        if not isinstance(manifest, dict):
+            continue
+        pending = [manifest.get(key) for key in ('main', 'module', 'browser', 'exports', 'imports', 'bin', 'scripts')]
+        while pending:
+            value = pending.pop()
+            if isinstance(value, dict):
+                pending.extend(value.values())
+            elif isinstance(value, list):
+                pending.extend(value)
+            elif isinstance(value, str):
+                # Tokenize declarations/commands as data; never execute them.
+                for target in re.split(r'''[\s"';&|()<>]+''', value):
+                    candidate = posixpath.normpath(str(PurePosixPath(path).parent / target))
+                    if candidate in metadata_names:
+                        referenced.add(candidate)
+    return referenced
 
 def safe_name(name):
     if not name or not isinstance(name, str):
@@ -40,7 +85,7 @@ def archive(data, kind='zip', *, limits=None, stats=None, root=None):
     """Inspect bounded members in memory; count opaque bytes without executing them."""
     limits = limits or ArchiveLimits.from_env('upload')
     stats = stats if stats is not None else {}
-    stats.update(entries=0, expanded=0, sources=0)
+    stats.update(entries=0, expanded=0, sources=0, metadata=0)
     started = time.monotonic()
 
     def fail(message, category, budget=None, limit=None, encountered=None):
@@ -55,7 +100,7 @@ def archive(data, kind='zip', *, limits=None, stats=None, root=None):
     if len(data) > limits.compressed:
         fail('Archive exceeds the compressed-byte limit.', 'archive_compressed_limit',
              'compressed_bytes', limits.compressed, len(data))
-    files, warnings, seen_paths = {}, [], set()
+    files, warnings, seen_paths, metadata_names = {}, [], set(), set()
     declared_total = 0
     stream = io.BytesIO(data)
     try:
@@ -88,6 +133,7 @@ def archive(data, kind='zip', *, limits=None, stats=None, root=None):
                     if not (item.isfile() or item.isdir()):
                         fail('Archive links and special files are not supported.', 'unsupported_archive_entry')
                     directory, declared_size = item.isdir(), item.size
+                    mode = item.mode
                 if root and not (name.startswith(root + '/') or (name == root and directory)):
                     fail(f'Archive must use the canonical {root}/ root.', 'unsafe_archive_root')
                 if directory:
@@ -98,7 +144,8 @@ def archive(data, kind='zip', *, limits=None, stats=None, root=None):
                 if declared_total > limits.expanded:
                     fail('Archive exceeds the expanded-byte / expanded limit.', 'archive_expanded_limit',
                          'expanded_bytes', limits.expanded, declared_total)
-                supported = PurePosixPath(name).suffix in EXTENSIONS and not any(p in {'.git', 'node_modules'} for p in PurePosixPath(name).parts)
+                classification = member_classification(name, mode)
+                supported = classification == 'source'
                 if supported and stats['sources'] >= limits.sources:
                     fail('Archive exceeds the supported source-file count limit.', 'archive_source_limit',
                          'source_files', limits.sources, stats['sources'] + 1)
@@ -118,8 +165,23 @@ def archive(data, kind='zip', *, limits=None, stats=None, root=None):
                             fail('Expanded file exceeds the per-file size limit.', 'archive_file_limit', 'file_bytes', limits.file, file_bytes)
                         if stats['expanded'] > limits.expanded:
                             fail('Archive exceeds the expanded-byte / expanded limit.', 'archive_expanded_limit', 'expanded_bytes', limits.expanded, stats['expanded'])
-                        if supported:
+                        if supported or classification == 'metadata':
                             content.extend(block)
+                if file_bytes != declared_size:
+                    fail('Archive member is truncated.', 'invalid_archive')
+                if classification == 'metadata':
+                    try:
+                        metadata = content.decode('utf-8')
+                    except UnicodeDecodeError:
+                        warnings.append('Skipped non-UTF-8 metadata file: ' + name)
+                        continue
+                    if any(ord(c) < 32 and c not in '\t\r\n\f' for c in metadata) or metadata.lstrip('\ufeff').startswith('#!'):
+                        warnings.append('Skipped binary or executable metadata file: ' + name)
+                        continue
+                    stats['metadata'] += 1
+                    metadata_names.add(name)
+                    warnings.append('Recognized non-executable package metadata: ' + name)
+                    continue
                 if not supported:
                     warnings.append('Skipped unsupported or excluded file: ' + name)
                     continue
@@ -128,10 +190,29 @@ def archive(data, kind='zip', *, limits=None, stats=None, root=None):
                     files[name] = content.decode('utf-8')
                 except UnicodeDecodeError:
                     warnings.append('Skipped non-UTF-8 file: ' + name)
+            if kind != 'zip':
+                # tar iteration stops at its end marker, before gzip checks its
+                # CRC/length trailer. Finish that stream under the same deadline
+                # and a bounded padding allowance; never ignore hidden members.
+                padding = 0
+                while True:
+                    deadline()
+                    block = handle.fileobj.read(65536)
+                    if not block:
+                        break
+                    padding += len(block)
+                    if padding > max(tarfile.RECORDSIZE, limits.expanded) or any(block):
+                        fail('Archive contains excessive padding or uninspected trailing data.', 'invalid_archive')
     except (zipfile.BadZipFile, tarfile.TarError, OSError, EOFError, RuntimeError, zlib.error) as error:
         raise AcquisitionError('Archive extraction failed or member is damaged.', category='invalid_archive', operation='archive inspection') from error
     if not files:
         raise AcquisitionError('No supported source files or manifests found.', category='no_supported_source', operation='archive inspection')
+    referenced = metadata_code_references(files, metadata_names)
+    deadline()
+    for name in sorted(referenced):
+        warnings.remove('Recognized non-executable package metadata: ' + name)
+        warnings.append('Skipped metadata-named file referenced as package code: ' + name)
+        stats['metadata'] -= 1
     return files, warnings
 
 def uploaded(name, data):
