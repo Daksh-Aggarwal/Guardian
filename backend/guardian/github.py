@@ -43,14 +43,17 @@ logger = logging.getLogger("guardian.github")
 SUPPORTED_EXTENSIONS = {
     '.js', '.mjs', '.cjs', '.jsx',
     '.ts', '.mts', '.cts', '.tsx',
-    '.json', '.yaml', '.yml'
+    '.json', '.yaml', '.yml',
+    '.py', '.pyw', '.pth', '.start',
+    '.toml', '.cfg'
 }
 
 # Supported filenames without standard extensions
 SUPPORTED_FILENAMES = {
     'package.json', 'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml',
     'tsconfig.json', 'jsconfig.json', '.npmrc',
-    'pyproject.toml', 'poetry.lock', 'Pipfile', 'Pipfile.lock', 'requirements.txt'
+    'pyproject.toml', 'poetry.lock', 'Pipfile', 'Pipfile.lock', 'requirements.txt',
+    'uv.lock', 'pylock.toml', 'setup.cfg', 'setup.py', 'requirements.in'
 }
 
 # Protected files that must not be modified by automated remediation
@@ -510,6 +513,7 @@ def sync_installations(session_id: Optional[str] = None) -> Dict[str, Any]:
             "reason": "No installations found for this GitHub App on GitHub." if not active else None
         }
 
+    discovered = []
     # Store all discovered installations without overwriting active selection
     for inst in installations:
         account = inst.get("account", {})
@@ -523,6 +527,7 @@ def sync_installations(session_id: Optional[str] = None) -> Dict[str, Any]:
             "installed_at": inst.get("created_at", datetime.now(timezone.utc).isoformat())
         }
         storage.save_github_installation(inst_record, make_active=False)
+        discovered.append(inst_record)
 
     if session_id:
         existing_auth = storage.get_session_authorized_installation_ids(session_id)
@@ -532,7 +537,8 @@ def sync_installations(session_id: Optional[str] = None) -> Dict[str, Any]:
                 "connected": False,
                 "installation": None,
                 "installations": [],
-                "reason": "Connect GitHub through the browser authorization flow before synchronizing installations."
+                "available_installations": discovered,
+                "reason": "GitHub App installations detected. Select your account to connect." if discovered else "No installations found for this GitHub App on GitHub."
             }
 
         active = storage.get_session_selected_installation(session_id)
@@ -542,6 +548,7 @@ def sync_installations(session_id: Optional[str] = None) -> Dict[str, Any]:
             "connected": bool(active),
             "installation": active,
             "installations": all_insts,
+            "available_installations": discovered,
             "reason": None
         }
 
@@ -563,6 +570,7 @@ def sync_installations(session_id: Optional[str] = None) -> Dict[str, Any]:
         "connected": True,
         "installation": active,
         "installations": all_insts,
+        "available_installations": discovered,
         "reason": None
     }
 
@@ -605,6 +613,40 @@ def select_installation(installation_id: int, session_id: Optional[str] = None) 
     storage.set_active_github_installation(installation_id)
     inst["is_selected"] = True
     return inst
+
+def link_installation(installation_id: int, session_id: Optional[str] = None) -> Dict[str, Any]:
+    """Explicitly links/authorizes an existing GitHub App installation for this session."""
+    if not session_id:
+        raise ValueError("A valid session is required to link an installation.")
+
+    try:
+        inst_data = _call_app_api(f"/app/installations/{installation_id}")
+        account = inst_data.get("account", {})
+        inst_record = {
+            "id": inst_data.get("id"),
+            "account_id": account.get("id"),
+            "account_login": account.get("login"),
+            "account_type": account.get("type", "User"),
+            "avatar_url": account.get("avatar_url"),
+            "repository_selection": inst_data.get("repository_selection", "all"),
+            "installed_at": inst_data.get("created_at", datetime.now(timezone.utc).isoformat())
+        }
+        storage.save_github_installation(inst_record, make_active=False)
+    except Exception as err:
+        logger.warning(f"Could not verify installation with GitHub API: {err}")
+        inst_record = storage.get_github_installation(installation_id)
+        if not inst_record:
+            raise ValueError(f"GitHub App installation {installation_id} not found: {err}")
+
+    storage.authorize_installation_for_session(session_id, installation_id, make_selected=True)
+    if hasattr(session_manager, "authorize_installation"):
+        session_manager.authorize_installation(session_id, installation_id, make_selected=True)
+
+    inst_record["is_selected"] = True
+    return {
+        "status": "linked",
+        "installation": inst_record
+    }
 
 def disconnect_installation(
     installation_id: Optional[int] = None,
@@ -655,8 +697,14 @@ def get_connection_status(session_id: Optional[str] = None) -> Dict[str, Any]:
             "connected": False,
             "installation": None,
             "installations": [],
+            "available_installations": [],
             "reason": "GitHub App ID or private key is not configured in server environment."
         }
+
+    available_installations = [
+        inst for inst in storage.list_github_installations()
+        if inst.get("id")
+    ]
 
     if session_id:
         active = storage.get_session_selected_installation(session_id)
@@ -667,6 +715,7 @@ def get_connection_status(session_id: Optional[str] = None) -> Dict[str, Any]:
                 "connected": False,
                 "installation": None,
                 "installations": all_insts,
+                "available_installations": available_installations,
                 "reason": "No active GitHub App installation connected for this session."
             }
     else:
@@ -679,6 +728,7 @@ def get_connection_status(session_id: Optional[str] = None) -> Dict[str, Any]:
                 "connected": False,
                 "installation": None,
                 "installations": list_installations(None),
+                "available_installations": available_installations,
                 "reason": "No active GitHub App installation connected."
             }
         all_insts = list_installations(None)
@@ -702,6 +752,7 @@ def get_connection_status(session_id: Optional[str] = None) -> Dict[str, Any]:
             "connected": True,
             "installation": active_info,
             "installations": all_insts,
+            "available_installations": available_installations,
             "reason": None
         }
     except Exception as err:
@@ -718,6 +769,7 @@ def get_connection_status(session_id: Optional[str] = None) -> Dict[str, Any]:
                 "connected": False,
                 "installation": None,
                 "installations": list_installations(session_id),
+                "available_installations": [i for i in available_installations if i.get("id") != active["id"]],
                 "reason": "Connected GitHub installation was not found on GitHub."
             }
         active_info = dict(active)
@@ -727,6 +779,7 @@ def get_connection_status(session_id: Optional[str] = None) -> Dict[str, Any]:
             "connected": True,
             "installation": active_info,
             "installations": all_insts,
+            "available_installations": available_installations,
             "reason": None
         }
 
@@ -907,6 +960,8 @@ def is_eligible_code_file(path: str) -> bool:
     """Checks whether a relative path points to a supported text/code file."""
     basename = posixpath.basename(path)
     if basename in SUPPORTED_FILENAMES:
+        return True
+    if basename.startswith('requirements') and basename.endswith('.txt'):
         return True
     ext = posixpath.splitext(basename)[1].lower()
     return ext in SUPPORTED_EXTENSIONS

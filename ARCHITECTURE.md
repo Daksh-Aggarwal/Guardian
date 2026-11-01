@@ -8,6 +8,8 @@ npm installs an exact generated graph from a private verified cache using offlin
 
 See [the CLI security model, limits and scenario evidence](docs/CLI.md) for supported resolution semantics and unresolved connected-mode work.
 
+Registry artifacts use dedicated archive profiles while uploads retain their existing ceilings. The CLI counts unique acquired/analysed artifacts independently of exact installation locations and retains location-specific dependency edges. Both RegistrySession and the adapters share the bounded in-memory reader. See [acquisition budgets and diagnostics](docs/CLI-BUDGETS.md).
+
 ## Modules
 
 - `app/`: Next.js App Router page, metadata, typography, theme, and responsive styling.

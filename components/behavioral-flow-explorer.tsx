@@ -179,7 +179,9 @@ export default function BehavioralFlowExplorer({
       >
         {/* Left Col: Finding & Flow Selector */}
         <div
-          className="card"
+          className="card github-repo-list"
+          data-lenis-prevent="true"
+          onWheel={(e) => e.stopPropagation()}
           style={{
             padding: "16px",
             display: "flex",
@@ -187,6 +189,8 @@ export default function BehavioralFlowExplorer({
             gap: "12px",
             maxHeight: "680px",
             overflowY: "auto",
+            overscrollBehavior: "contain",
+            WebkitOverflowScrolling: "touch",
           }}
         >
           <Eyebrow>IDENTIFIED DATA FLOW FINDINGS</Eyebrow>

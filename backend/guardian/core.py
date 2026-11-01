@@ -6,6 +6,7 @@ from uuid import uuid4
 from . import engine
 from .models import Dependency, IntegrityResult, PackageInspection, InspectionSummary, Report
 from .policy import evaluate
+from .config import ArchiveLimits, NpmBudget, integer
 
 
 def analyze_sources(files, limits=None, timeout=20):
@@ -15,6 +16,13 @@ def analyze_sources(files, limits=None, timeout=20):
 
 def analyze_plan(plan, policy=None):
     started = time.monotonic()
+    plan.budgets.setdefault('analysis_seconds', NpmBudget.from_env().analysis_seconds if plan.ecosystem == 'npm'
+                            else integer('GUARDIAN_PYPI_ANALYSIS_SECONDS', 180, 600))
+    if plan.ecosystem == 'npm':
+        plan.budgets.setdefault('artifact_analysis_seconds', ArchiveLimits.from_env('npm').analysis_seconds)
+    else:
+        for kind in ('wheel', 'sdist'):
+            plan.budgets.setdefault(kind + '_analysis_seconds', ArchiveLimits.from_env(kind).analysis_seconds)
     findings, inspections, coverage, count = [], [], list(plan.limitations), 0
     package_decisions = []
     complete = plan.complete
@@ -29,14 +37,22 @@ def analyze_plan(plan, policy=None):
         if hashlib.sha256(artifact.raw).hexdigest() != artifact.sha256:
             from .supply_models import IntegrityError
             raise IntegrityError('Artifact changed between acquisition and analysis.')
-        _, _, observed, _, notes, inspected = analyze_sources(artifact.files)
+        remaining = plan.budgets['analysis_seconds'] - (time.monotonic() - started)
+        if remaining <= 0:
+            observed, notes, inspected = [], ['Static analysis budget exhausted; this artifact was not inspected.'], 0
+        else:
+            _, _, observed, _, notes, inspected = analyze_sources(
+                artifact.files, timeout=max(.01, min(plan.budgets.get(artifact.kind + '_analysis_seconds', plan.budgets.get('artifact_analysis_seconds', 20)), remaining)))
+            if time.monotonic() - started > plan.budgets['analysis_seconds']:
+                notes.append('Static analysis budget exhausted; coverage is incomplete.')
         # Ordinary static-analysis limitations remain disclosed; actual parser failures
         # and omitted files require review, independently of vulnerability intelligence.
         incomplete_notes = [n for n in notes
                             if not n.startswith(('Static analysis only:', 'Only module initialization', 'Python AST static analysis only:'))
                             and any(marker in n.lower() for marker in
                             ('could not parse', 'unavailable', 'manifest-only', 'truncated', 'limit reached',
-                             'evidence capped', 'deadline', 'unsupported', 'uninspected', 'not modeled', 'unresolved'))]
+                             'evidence capped', 'deadline', 'unsupported', 'uninspected', 'not modeled', 'unresolved',
+                             'budget exhausted', 'budget exceeded', 'budget reached'))]
         omitted = [n for n in artifact.warnings if n.lower().startswith('skipped')]
         build = ['Source distributions require an untrusted build; installation is deferred.'] if artifact.kind == 'sdist' else []
         limitations = incomplete_notes + omitted + build
@@ -89,5 +105,7 @@ def analyze_plan(plan, policy=None):
                      'integrity': {'concerns': sum(not a.verified for a in plan.artifacts), 'root_status': 'verified' if verified else 'missing'},
                      'inspection': {**summary.model_dump(), 'status': 'complete' if complete else 'incomplete'}},
         cli={'schema_version': '1.0', 'ecosystem': plan.ecosystem, 'roots': plan.roots,
+             'installation_locations': plan.locations, 'unique_artifacts': len(plan.artifacts),
+             'location_count': len(plan.locations), 'budgets': plan.budgets, 'acquisition': plan.acquisition,
              'packages': package_decisions, 'decision': decision, 'installation': {'status': 'not attempted'},
              'overrides': [], 'sync': 'disabled', 'lifecycle_scripts': 'disabled'})

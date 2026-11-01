@@ -3,10 +3,11 @@ import base64
 import json
 import re
 import time
+from dataclasses import replace
 from urllib.parse import quote, urlparse
 import httpx
 
-from .config import Budget
+from .config import Budget, ArchiveLimits
 from .integrity import verify
 from .models import IntegrityResult
 from .dependencies import Retrieved, BudgetExceeded
@@ -56,13 +57,13 @@ class PyPISession:
     def remaining(self):
         return self.budget.seconds - (time.monotonic() - self.started)
 
-    def fetch(self, url):
+    def fetch(self, url, limit=MAX_UPLOAD):
         if self.remaining() <= 0 or self.requests >= self.budget.requests or self.bytes >= self.budget.bytes:
             raise BudgetExceeded('PyPI time, request, or aggregate download budget reached.')
         self.requests += 1
         data = download_pypi_url(
             url,
-            min(MAX_UPLOAD, self.budget.bytes - self.bytes),
+            min(limit, self.budget.bytes - self.bytes),
             timeout=min(8.0, max(0.1, self.remaining()))
         )
         self.bytes += len(data)
@@ -120,7 +121,7 @@ class PyPISession:
                 raise ValueError('No downloadable distribution URL found.')
 
             if key not in self.packages:
-                self.packages[key] = (chosen, self.fetch(pkg_url))
+                self.packages[key] = (chosen, self.fetch(pkg_url, ArchiveLimits.from_env('wheel' if chosen.get('filename', '').endswith('.whl') else 'sdist').compressed))
             target_entry, data = self.packages[key]
 
             # Verify integrity
@@ -150,8 +151,15 @@ class PyPISession:
             kind = 'zip' if filename.endswith('.whl') or filename.endswith('.zip') else 'tar'
 
             if key not in self.contents:
-                self.contents[key] = ingestion.archive(data, kind)
-                self.expanded += sum(len(c.encode('utf-8')) for c in self.contents[key][0].values())
+                stats = {}
+                limits = ArchiveLimits.from_env('wheel' if filename.endswith('.whl') else 'sdist')
+                remaining = self.budget.expanded - self.expanded
+                if remaining <= 0:
+                    raise BudgetExceeded('Aggregate expanded-byte budget reached.')
+                try:
+                    self.contents[key] = ingestion.archive(data, kind, limits=replace(limits, expanded=min(limits.expanded, remaining)), stats=stats)
+                finally:
+                    self.expanded += stats.get('expanded', 0)
 
             result.files, cached_warnings = self.contents[key]
             result.warnings = list(cached_warnings)

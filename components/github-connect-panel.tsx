@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   Globe,
   Loader2,
@@ -56,6 +56,18 @@ export default function GitHubConnectPanel({
   const [selectedBranch, setSelectedBranch] = useState<string>("");
   const [activeCommitSha, setActiveCommitSha] = useState<string | null>(null);
   const [startingScan, setStartingScan] = useState(false);
+  const [linkingId, setLinkingId] = useState<number | null>(null);
+  const repoListRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = repoListRef.current;
+    if (!el) return;
+    const handleWheel = (e: WheelEvent) => {
+      e.stopPropagation();
+    };
+    el.addEventListener("wheel", handleWheel, { passive: true });
+    return () => el.removeEventListener("wheel", handleWheel);
+  }, [repos, loadingRepos]);
 
   // Fetch connection status
   const fetchStatus = async () => {
@@ -74,6 +86,24 @@ export default function GitHubConnectPanel({
     }
   };
 
+  const handleLinkInstallation = async (instId: number) => {
+    setLinkingId(instId);
+    setError(null);
+    try {
+      await api(`/github/installations/${instId}/link`, { method: "POST" });
+      setSelectedRepo(null);
+      setRepos([]);
+      setBranches([]);
+      setSelectedBranch("");
+      setActiveCommitSha(null);
+      await fetchStatus();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLinkingId(null);
+    }
+  };
+
   const handleSync = async () => {
     setSyncing(true);
     setError(null);
@@ -82,7 +112,7 @@ export default function GitHubConnectPanel({
       setStatus(res);
       if (res.connected) {
         fetchRepos();
-      } else {
+      } else if (!res.available_installations || res.available_installations.length === 0) {
         setError(res.reason || "No GitHub App installation found on your GitHub account. Ensure the app is installed at GitHub.");
       }
     } catch (err) {
@@ -337,6 +367,107 @@ export default function GitHubConnectPanel({
           </div>
         )}
 
+        {status.available_installations && status.available_installations.length > 0 && (
+          <div
+            style={{
+              width: "100%",
+              maxWidth: "480px",
+              background: "var(--surface)",
+              border: "1px solid var(--line)",
+              borderRadius: "8px",
+              padding: "16px",
+              textAlign: "left",
+              display: "flex",
+              flexDirection: "column",
+              gap: "10px",
+              marginTop: "4px",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <CheckCircle2 size={16} style={{ color: "var(--accent)" }} />
+              <span style={{ fontSize: "13px", fontWeight: 600, color: "var(--text)" }}>
+                Detected GitHub App Installations
+              </span>
+            </div>
+            <p style={{ margin: 0, fontSize: "12px", color: "var(--muted)", lineHeight: 1.4 }}>
+              The Guardian GitHub App is already installed on the following account(s). Choose your account to connect this session:
+            </p>
+            <div
+              data-lenis-prevent="true"
+              className="github-repo-list"
+              onWheel={(e) => e.stopPropagation()}
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: "8px",
+                marginTop: "4px",
+                maxHeight: "240px",
+                overflowY: "auto",
+                overscrollBehavior: "contain",
+                WebkitOverflowScrolling: "touch",
+              }}
+            >
+              {status.available_installations.map((inst) => (
+                <div
+                  key={inst.id}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    padding: "10px 12px",
+                    background: "var(--surface-muted)",
+                    borderRadius: "6px",
+                    border: "1px solid var(--line)",
+                    gap: "12px",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 0 }}>
+                    {inst.avatar_url ? (
+                      <img
+                        src={inst.avatar_url}
+                        alt={inst.account_login}
+                        style={{ width: "24px", height: "24px", borderRadius: "50%", flexShrink: 0 }}
+                      />
+                    ) : (
+                      <GitBranch size={16} style={{ color: "var(--accent)", flexShrink: 0 }} />
+                    )}
+                    <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
+                      <div style={{ fontSize: "13px", fontWeight: 600, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {inst.account_login}
+                      </div>
+                      <div style={{ fontSize: "11px", color: "var(--muted)" }}>
+                        {inst.account_type} &bull; #{inst.id}
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleLinkInstallation(inst.id)}
+                    disabled={linkingId === inst.id}
+                    className="button primary"
+                    style={{
+                      fontSize: "12px",
+                      padding: "6px 14px",
+                      flexShrink: 0,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "6px",
+                    }}
+                  >
+                    {linkingId === inst.id ? (
+                      <>
+                        <Loader2 size={12} className="animate-spin" />
+                        <span>Connecting...</span>
+                      </>
+                    ) : (
+                      <span>Connect as {inst.account_login}</span>
+                    )}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", justifyContent: "center", marginTop: "4px" }}>
           <button
             onClick={handleConnect}
@@ -515,9 +646,15 @@ export default function GitHubConnectPanel({
 
         {/* Repositories Scrollable List */}
         <div
+          ref={repoListRef}
+          data-lenis-prevent="true"
+          className="github-repo-list"
+          onWheel={(e) => e.stopPropagation()}
           style={{
-            maxHeight: "180px",
+            maxHeight: "220px",
             overflowY: "auto",
+            overscrollBehavior: "contain",
+            WebkitOverflowScrolling: "touch",
             display: "flex",
             flexDirection: "column",
             gap: "4px",

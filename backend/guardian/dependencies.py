@@ -4,19 +4,21 @@ import json
 import re
 import time
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import PurePosixPath
 from urllib.parse import quote
 import yaml
+import httpx
 from . import ingestion
-from .config import Budget
+from .config import Budget, ArchiveLimits
+from .supply_models import AcquisitionError
 from .integrity import verify
 from .models import IntegrityResult, PackageInspection, InspectionSummary, Evidence
 
 EXACT = re.compile(r'^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$')
 MAX_DISCOVERED = 2000
 
-class BudgetExceeded(ValueError):
+class BudgetExceeded(AcquisitionError):
     pass
 
 @dataclass
@@ -29,71 +31,118 @@ class Retrieved:
     raw: bytes = b''
 
 class RegistrySession:
-    """Serial HTTP is intentional: one request per scan, two scans globally."""
-    def __init__(self, budget=None):
-        self.budget=budget or Budget.from_env()
-        self.started=time.monotonic()
-        self.requests=0
-        self.bytes=0
-        self.expanded=0
-        self.metadata={}
-        self.tarballs={}
-        self.errors={}
-        self.contents={}
+    """Bounded registry traffic and verified, in-memory artifact caches."""
+    def __init__(self, budget=None, archive_limits=None):
+        self.budget = budget or Budget.from_env()
+        self.archive_limits = archive_limits or ArchiveLimits.from_env('npm')
+        self.started = time.monotonic()
+        self.requests = self.bytes = self.expanded = 0
+        self.metadata, self.tarballs, self.errors, self.contents = {}, {}, {}, {}
+        self.archive_stats = {}
 
     def remaining(self):
-        return self.budget.seconds-(time.monotonic()-self.started)
+        return self.budget.seconds - (time.monotonic() - self.started)
 
-    def fetch(self,url):
-        if self.remaining()<=0 or self.requests>=self.budget.requests or self.bytes>=self.budget.bytes:
-            raise BudgetExceeded('Registry time, request, or aggregate download budget reached.')
-        self.requests+=1
-        data=ingestion.download(url, min(ingestion.MAX_UPLOAD,self.budget.bytes-self.bytes), timeout=min(8,self.remaining()))
-        self.bytes+=len(data)
+    def check_time(self):
+        if self.remaining() <= 0:
+            raise BudgetExceeded('npm resolution/acquisition elapsed-time budget reached.',
+                                 category='acquisition_time_limit', operation='dependency acquisition',
+                                 budget='elapsed_seconds', limit=self.budget.seconds,
+                                 encountered=round(time.monotonic() - self.started, 3))
+
+    def fetch(self, url, operation='registry metadata', package=None):
+        self.check_time()
+        if self.requests >= self.budget.requests:
+            raise BudgetExceeded('Registry request budget reached.', category='registry_request_limit',
+                                 operation=operation, package=package, budget='registry_requests',
+                                 limit=self.budget.requests, encountered=self.requests + 1)
+        remaining = self.budget.bytes - self.bytes
+        if remaining <= 0:
+            raise BudgetExceeded('Aggregate download-byte budget reached.', category='download_budget_limit',
+                                 operation=operation, package=package, budget='downloaded_bytes',
+                                 limit=self.budget.bytes, encountered=self.bytes)
+        limit = min(self.archive_limits.compressed if operation == 'tarball download' else ingestion.MAX_UPLOAD, remaining)
+        self.requests += 1
+        try:
+            data = ingestion.download(url, limit, timeout=min(15, max(.1, self.remaining())))
+        except AcquisitionError as error:
+            self.bytes += error.bytes_received
+            error.operation, error.package = operation, package
+            if operation == 'tarball download':
+                if error.category == 'registry_response_limit':
+                    error.category = 'tarball_download_limit'
+                elif error.category == 'registry_timeout':
+                    error.category = 'tarball_timeout'
+            raise
+        except httpx.TimeoutException as error:
+            raise AcquisitionError('Registry request timed out.', category='tarball_timeout' if operation == 'tarball download' else 'registry_timeout', operation=operation, package=package) from error
+        except httpx.HTTPStatusError as error:
+            raise AcquisitionError('Registry returned an HTTP error.', category='registry_http_error', operation=operation, package=package, detail=f'HTTP status {error.response.status_code}.') from error
+        except httpx.RequestError as error:
+            raise AcquisitionError('Registry metadata or artifact is unavailable.', category='registry_unavailable', operation=operation, package=package) from error
+        self.bytes += len(data)
+        # Enforce the boundary even with alternate/test download transports.
+        if len(data) > limit:
+            raise AcquisitionError('Registry response exceeds the download limit.', category='tarball_download_limit' if operation == 'tarball download' else 'registry_response_limit', operation=operation, package=package, budget='download_bytes', limit=limit, encountered=len(data))
+        self.check_time()
         return data
 
-    def retrieve(self,name,version,expected=None,strict=True):
-        ingestion.validate_package(name,version)
-        key=(name,version)
+    def retrieve(self, name, version, expected=None, strict=True):
+        ingestion.validate_package(name, version)
+        key = (name, version)
+        identity = name + '@' + version
         if key in self.errors:
-            raise ValueError(self.errors[key])
+            raise self.errors[key]
+        self.check_time()
         try:
             if key not in self.metadata:
-                url='https://registry.npmjs.org/'+quote(name,safe='')+'/'+quote(version,safe='')
-                metadata=json.loads(self.fetch(url))
-                if not isinstance(metadata,dict):raise ValueError('Registry metadata must be an object.')
-                if strict and (metadata.get('name')!=name or (EXACT.fullmatch(version) and metadata.get('version')!=version)):
-                    raise ValueError('Registry package identity does not match the requested name/version.')
-                self.metadata[key]=metadata
-            metadata=self.metadata[key]
-            dist=metadata.get('dist',{})
-            if not isinstance(dist,dict) or not dist.get('tarball'):raise ValueError('No registry tarball is available.')
-            if key not in self.tarballs:self.tarballs[key]=self.fetch(dist['tarball'])
-            data=self.tarballs[key]
-            registry_expected=dist.get('integrity')
-            if not registry_expected and isinstance(dist.get('shasum'),str):
-                if re.fullmatch(r'[0-9a-fA-F]{40}',dist['shasum']):registry_expected='sha1-'+base64.b64encode(bytes.fromhex(dist['shasum'])).decode()
-                else:registry_expected='invalid-shasum'
-            result=Retrieved(metadata=metadata,raw=data,integrity=verify(data,expected,'lockfile'),registry_integrity=verify(data,registry_expected,'registry'))
-            checks=[result.integrity,result.registry_integrity]
-            if any(c.status not in {'missing','verified'} for c in checks):
+                url = 'https://registry.npmjs.org/' + quote(name, safe='') + '/' + quote(version, safe='')
+                try:
+                    metadata = json.loads(self.fetch(url, package=identity))
+                except (json.JSONDecodeError, UnicodeDecodeError) as error:
+                    raise AcquisitionError('Registry metadata must be valid JSON.', category='invalid_package_metadata', operation='registry metadata', package=identity) from error
+                self.metadata[key] = metadata
+            metadata = self.metadata[key]
+            if not isinstance(metadata, dict) or (strict and (metadata.get('name') != name or (EXACT.fullmatch(version) and metadata.get('version') != version))):
+                raise AcquisitionError('Registry package identity does not match the requested name/version.', category='invalid_package_metadata', operation='registry metadata', package=identity)
+            dist = metadata.get('dist', {})
+            if not isinstance(dist, dict) or not isinstance(dist.get('tarball'), str):
+                raise AcquisitionError('No valid registry tarball is available.', category='invalid_package_metadata', operation='registry metadata', package=identity)
+            if key not in self.tarballs:
+                self.tarballs[key] = self.fetch(dist['tarball'], 'tarball download', identity)
+            data = self.tarballs[key]
+            registry_expected = dist.get('integrity')
+            if not registry_expected and isinstance(dist.get('shasum'), str):
+                registry_expected = 'sha1-' + base64.b64encode(bytes.fromhex(dist['shasum'])).decode() if re.fullmatch(r'[0-9a-fA-F]{40}', dist['shasum']) else 'invalid-shasum'
+            result = Retrieved(metadata=metadata, raw=data, integrity=verify(data, expected, 'lockfile'), registry_integrity=verify(data, registry_expected, 'registry'))
+            if any(c.status not in {'missing', 'verified'} for c in (result.integrity, result.registry_integrity)):
                 result.warnings.append('Integrity verification failed or is unsupported. Tarball was not extracted or analyzed.')
                 return result
-            if self.remaining()<=0:raise BudgetExceeded('Dependency time budget reached before extraction.')
+            self.check_time()
             if key not in self.contents:
-                self.contents[key]=ingestion.archive(data,'tar')
-                self.expanded+=sum(len(c.encode('utf-8')) for c in self.contents[key][0].values())
-            result.files,cached_warnings=self.contents[key]
-            result.warnings=list(cached_warnings)
-            if self.expanded>self.budget.expanded:raise BudgetExceeded('Aggregate extracted source budget reached.')
-            if result.integrity.status=='missing':result.warnings.append('Lockfile integrity is missing; no lockfile digest was verified.')
-            if result.registry_integrity.status=='missing':result.warnings.append('Registry integrity is missing; published bytes could not be verified.')
+                remaining = self.budget.expanded - self.expanded
+                if remaining <= 0:
+                    raise BudgetExceeded('Aggregate expanded-byte budget reached.', category='expanded_budget_limit', operation='archive inspection', package=identity, budget='expanded_bytes', limit=self.budget.expanded, encountered=self.expanded)
+                stats = {}
+                limits = replace(self.archive_limits, expanded=min(self.archive_limits.expanded, remaining))
+                try:
+                    self.contents[key] = ingestion.archive(data, 'tar', limits=limits, stats=stats, root='package')
+                finally:
+                    # Failed inspections also consumed decompression work.
+                    self.expanded += stats.get('expanded', 0)
+                self.archive_stats[key] = stats
+            result.files, cached_warnings = self.contents[key]
+            result.warnings = list(cached_warnings)
+            self.check_time()
+            if result.integrity.status == 'missing':
+                result.warnings.append('Lockfile integrity is missing; no lockfile digest was verified.')
+            if result.registry_integrity.status == 'missing':
+                result.warnings.append('Registry integrity is missing; published bytes could not be verified.')
             return result
-        except BudgetExceeded:
+        except AcquisitionError as error:
+            error.package = error.package or identity
+            self.errors[key] = error
             raise
-        except Exception as error:
-            self.errors[key]=str(error) if isinstance(error,ValueError) else 'Registry download unavailable or timed out.'
-            raise ValueError(self.errors[key]) from error
 
 
 def declarations(value):

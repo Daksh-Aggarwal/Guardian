@@ -27,6 +27,13 @@ class CliOverride(TypedDict, total=False):
     acknowledged: bool
     timestamp: str
 
+class CliLocation(TypedDict):
+    location: str
+    identity: str
+    sha256: str
+    direct: bool
+    dependencies: List[str]
+
 class CliMetadata(TypedDict, total=False):
     schema_version: str
     ecosystem: Literal['npm', 'pypi']
@@ -39,6 +46,11 @@ class CliMetadata(TypedDict, total=False):
     lifecycle_scripts: str
     imported: bool
     imported_scan_id: str
+    installation_locations: List[CliLocation]
+    unique_artifacts: int
+    location_count: int
+    budgets: Dict[str, int]
+    acquisition: Dict[str, int]
 
 Severity = Literal['info', 'low', 'medium', 'high', 'critical']
 class Evidence(BaseModel):

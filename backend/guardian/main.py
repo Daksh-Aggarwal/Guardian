@@ -269,6 +269,23 @@ def session_status(request: Request):
         return {"valid": True}
     return {"valid": False}
 
+@app.post('/api/session/adopt')
+def session_adopt(body: dict):
+    session_token = body.get("session_token")
+    if not session_token or not storage.get_session(session_token):
+        raise HTTPException(400, "Invalid or expired session token")
+    storage.touch_session(session_token)
+    response = JSONResponse(content={"status": "ok", "session_id": session_token})
+    response.set_cookie(
+        key="guardian_session",
+        value=session_token,
+        max_age=86400 * 30,
+        httponly=True,
+        samesite="lax",
+        path="/"
+    )
+    return response
+
 @app.get('/api/scans')
 def scans(request: Request):
     accessible = []
@@ -524,7 +541,8 @@ async def protect_github_resources(request: Request, call_next):
     parts = request.url.path.strip('/').split('/')
     try:
         if len(parts) >= 3 and parts[:2] == ['api', 'github']:
-            if parts[2] not in {'status', 'installations', 'connect', 'callback'} or len(parts) > 3:
+            is_link = (len(parts) == 5 and parts[2] == 'installations' and parts[4] == 'link')
+            if not is_link and (parts[2] not in {'status', 'installations', 'connect', 'callback'} or len(parts) > 3):
                 _require_github_session(request)
         if parts[:3] == ['api', 'scans', 'github']:
             _require_github_session(request)
@@ -810,6 +828,25 @@ def select_github_installation(installation_id: int, request: Request):
     except ValueError as err:
         raise HTTPException(404, str(err))
 
+@app.post('/api/github/installations/{installation_id}/link')
+def link_github_installation(installation_id: int, request: Request):
+    session_id = _get_session_id(request) or storage.create_session(ttl_days=30)
+    try:
+        res = github.link_installation(installation_id, session_id=session_id)
+        response = JSONResponse(content=res)
+        response.set_cookie(
+            key="guardian_session",
+            value=session_id,
+            max_age=86400 * 30,
+            httponly=True,
+            samesite="lax",
+            path="/"
+        )
+        return response
+    except Exception as err:
+        logger.error(f"Failed to link installation {installation_id}: {err}")
+        raise HTTPException(400, f"Failed to link installation: {err}")
+
 @app.post('/api/github/installations/{installation_id}/disconnect')
 def disconnect_github_installation_endpoint(installation_id: int, request: Request):
     session_id = _get_session_id(request)
@@ -843,7 +880,8 @@ def github_callback(
         github.handle_installation_callback(installation_id=installation_id, state=state, session_id=session_id)
         host = request.headers.get("host", "")
         if ":8000" in host:
-            redirect_url = os.getenv("GUARDIAN_FRONTEND_URL", "http://localhost:3000").rstrip('/') + "/?github=connected"
+            session_token_param = f"&session_token={session_id}"
+            redirect_url = os.getenv("GUARDIAN_FRONTEND_URL", "http://localhost:3000").rstrip('/') + f"/?github=connected{session_token_param}"
         else:
             redirect_url = "/?github=connected"
         response = RedirectResponse(url=redirect_url, status_code=302)
@@ -861,9 +899,19 @@ def github_callback(
 
 @app.post('/api/github/sync')
 def github_sync(request: Request):
-    session_id = _get_session_id(request)
+    session_id = _require_github_session(request)
     try:
-        return github.sync_installations(session_id=session_id)
+        res = github.sync_installations(session_id=session_id)
+        response = JSONResponse(content=res)
+        response.set_cookie(
+            key="guardian_session",
+            value=session_id,
+            max_age=86400 * 30,
+            httponly=True,
+            samesite="lax",
+            path="/"
+        )
+        return response
     except Exception as err:
         raise HTTPException(400, f"GitHub synchronization failed: {err}")
 

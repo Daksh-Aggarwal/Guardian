@@ -4,6 +4,8 @@
 
 Guardian 0.2 adds a pre-installation CLI with shared static analysis, exact verified npm/wheel installation, private local reports, and explicit report import into the independent website. npm scripts remain disabled; Python source builds are refused. Guardian account login/cloud sync are unavailable. See the [CLI guide, security boundaries and demonstrated scenarios](docs/CLI.md).
 
+The [npm acquisition regression guide](docs/CLI-BUDGETS.md) documents separate upload/package archive limits, unique-artifact versus installation-location budgets, structured diagnostics, and actual Lodash/Express smoke results.
+
 ## What works
 
 - **Guardian Handoff 1.0.1 — AI-Agnostic Remediation & Agent Instruction Export (Hardened)**:

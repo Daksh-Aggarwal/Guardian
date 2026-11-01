@@ -1001,7 +1001,7 @@ def test_teammate_session_isolation_and_no_preloaded_account(github_env, test_cl
 
 def test_adding_account_immediately_active_and_selected(github_env, test_client):
     """Adding a new account via callback immediately activates and selects it in the session."""
-    sess_user = "sess_user_active_test"
+    sess_user = storage.create_session(session_id="sess_user_active_test")
 
     # Suppose Daksh's account was already in SQLite
     storage.save_github_installation({
@@ -1065,5 +1065,109 @@ def test_global_disconnect_removes_installation_from_selection(github_env, test_
     # Attempting to select account-one should fail
     with pytest.raises(ValueError):
         github.select_installation(5551)
+
+def test_link_installation_endpoint_success(github_env, test_client):
+    """POST /api/github/installations/{id}/link authorizes and selects the installation for session."""
+    sess_id = storage.create_session()
+    mock_inst = {
+        "id": 777888,
+        "account": {"id": 202, "login": "test-teammate", "type": "User", "avatar_url": "https://avatars.example/202"},
+        "repository_selection": "all",
+        "created_at": "2026-11-01T00:00:00Z"
+    }
+    with patch("backend.guardian.github._call_app_api", return_value=mock_inst):
+        resp = test_client.post(
+            "/api/github/installations/777888/link",
+            cookies={"guardian_session": sess_id}
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "linked"
+        assert data["installation"]["id"] == 777888
+        assert data["installation"]["account_login"] == "test-teammate"
+        assert data["installation"]["is_selected"] is True
+
+    # Verification: session is now connected with this installation
+    status_resp = test_client.get("/api/github/status", cookies={"guardian_session": sess_id})
+    assert status_resp.status_code == 200
+    st = status_resp.json()
+    assert st["connected"] is True
+    assert st["installation"]["id"] == 777888
+    assert len(st["installations"]) == 1
+
+def test_adopt_session_endpoint(test_client):
+    """POST /api/session/adopt sets cookie for an existing session token."""
+    sid = storage.create_session()
+    resp = test_client.post("/api/session/adopt", json={"session_token": sid})
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "ok"
+    assert "guardian_session" in resp.cookies
+    assert resp.cookies["guardian_session"] == sid
+
+    # Invalid session token returns 400
+    bad_resp = test_client.post("/api/session/adopt", json={"session_token": "nonexistent_token"})
+    assert bad_resp.status_code == 400
+
+def test_sync_installations_returns_available_options_for_multiple_accounts(github_env, test_client):
+    """When multiple accounts are installed on the GitHub App, sync returns available_installations."""
+    sess_id = storage.create_session()
+    mock_insts = [
+        {"id": 111, "account": {"id": 1, "login": "user-one", "type": "User"}, "created_at": "2026-01-01T00:00:00Z"},
+        {"id": 222, "account": {"id": 2, "login": "user-two", "type": "User"}, "created_at": "2026-01-02T00:00:00Z"}
+    ]
+    with patch("backend.guardian.github._call_app_api", return_value=mock_insts):
+        resp = test_client.post("/api/github/sync", cookies={"guardian_session": sess_id})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["connected"] is False
+        assert len(data["available_installations"]) == 2
+        logins = [i["account_login"] for i in data["available_installations"]]
+        assert "user-one" in logins
+        assert "user-two" in logins
+
+def test_sync_installations_does_not_auto_link_single_account(github_env, test_client):
+    """When an account is installed on the GitHub App, sync discovers it but requires explicit link."""
+    sess_id = storage.create_session()
+    mock_insts = [
+        {"id": 333, "account": {"id": 3, "login": "solo-user", "type": "User"}, "created_at": "2026-01-01T00:00:00Z"}
+    ]
+    with patch("backend.guardian.github._call_app_api", return_value=mock_insts):
+        resp = test_client.post("/api/github/sync", cookies={"guardian_session": sess_id})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["connected"] is False
+        assert len(data["available_installations"]) == 1
+        assert data["available_installations"][0]["id"] == 333
+
+        # Explicit linking activates it
+        link_resp = test_client.post("/api/github/installations/333/link", cookies={"guardian_session": sess_id})
+        assert link_resp.status_code == 200
+        assert link_resp.json()["status"] == "linked"
+
+        # Now status shows connected
+        st_resp = test_client.get("/api/github/status", cookies={"guardian_session": sess_id})
+        assert st_resp.json()["connected"] is True
+        assert st_resp.json()["installation"]["id"] == 333
+
+def test_python_and_manifest_files_eligible():
+    """Verify Python code files, manifests, and JS/TS files are eligible for repository ingestion."""
+    assert github.is_eligible_code_file("main.py") is True
+    assert github.is_eligible_code_file("src/app.py") is True
+    assert github.is_eligible_code_file("service.pyw") is True
+    assert github.is_eligible_code_file("requirements.txt") is True
+    assert github.is_eligible_code_file("requirements-dev.txt") is True
+    assert github.is_eligible_code_file("setup.py") is True
+    assert github.is_eligible_code_file("setup.cfg") is True
+    assert github.is_eligible_code_file("pyproject.toml") is True
+    assert github.is_eligible_code_file("poetry.lock") is True
+    assert github.is_eligible_code_file("package.json") is True
+    assert github.is_eligible_code_file("index.ts") is True
+
+    # Ineligible files
+    assert github.is_eligible_code_file("image.png") is False
+    assert github.is_eligible_code_file("binary.exe") is False
+    assert github.is_eligible_code_file("data.csv") is False
+
+
 
 

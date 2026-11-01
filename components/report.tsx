@@ -556,9 +556,9 @@ export default function ReportView({
             }
             description={
               report.files_analyzed === 0
-                ? "Manifest-only scan: no JavaScript/TypeScript syntax trees analyzed."
+                ? "Manifest-only scan: no source code syntax trees analyzed."
                 : advanced
-                  ? `Analyzed ${report.files_analyzed} files under Babel AST for process execution, network sinks, and credential reads.`
+                  ? `Analyzed ${report.files_analyzed} files under AST analysis for process execution, network sinks, and credential reads.`
                   : elevatedBehavioral.length > 0
                     ? "Suspicious runtime patterns like sensitive data access or shell commands detected."
                     : "Direct AST inspection found no credential exfiltration, shell spawning, or dynamic code execution."
