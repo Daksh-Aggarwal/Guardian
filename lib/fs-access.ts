@@ -121,21 +121,12 @@ function hasBinaryExtension(name: string): boolean {
 }
 
 /**
- * Traverses a local project directory using window.showDirectoryPicker in 'read' mode.
- * Must be triggered by direct user interaction.
+ * Reads all project files from an already-obtained FileSystemDirectoryHandle.
+ * Does not prompt the user with showDirectoryPicker dialog.
  */
-export async function openProjectDirectory(): Promise<ProjectDirectoryResult> {
-  if (!isFileSystemAccessSupported()) {
-    throw new Error(
-      "The File System Access API is not supported in this browser. Please use Google Chrome, Microsoft Edge, or a Chromium-based browser, or use archive inspection.",
-    );
-  }
-
-  // Request directory picker in READ mode only!
-  const directoryHandle = await (window as any).showDirectoryPicker({
-    mode: "read",
-  });
-
+export async function readProjectDirectory(
+  directoryHandle: FileSystemDirectoryHandle,
+): Promise<ProjectDirectoryResult> {
   const projectName = directoryHandle.name || "local-project";
   const files: Record<string, string> = {};
   const fileHandles = new Map<string, FileSystemFileHandle>();
@@ -237,6 +228,51 @@ export async function openProjectDirectory(): Promise<ProjectDirectoryResult> {
       projectName,
     },
   };
+}
+
+/**
+ * Traverses a local project directory using window.showDirectoryPicker in 'read' mode.
+ * Must be triggered by direct user interaction.
+ */
+export async function openProjectDirectory(): Promise<ProjectDirectoryResult> {
+  if (!isFileSystemAccessSupported()) {
+    throw new Error(
+      "The File System Access API is not supported in this browser. Please use Google Chrome, Microsoft Edge, or a Chromium-based browser, or use archive inspection.",
+    );
+  }
+
+  // Request directory picker in READ mode only!
+  const directoryHandle = await (window as any).showDirectoryPicker({
+    mode: "read",
+  });
+
+  return readProjectDirectory(directoryHandle);
+}
+
+/**
+ * Reloads an existing local project directory handle without opening the OS picker dialog.
+ * Verifies read permission before re-traversing.
+ */
+export async function reloadProjectDirectory(
+  directoryHandle: FileSystemDirectoryHandle,
+): Promise<ProjectDirectoryResult> {
+  if (!isFileSystemAccessSupported()) {
+    throw new Error(
+      "The File System Access API is not supported in this browser.",
+    );
+  }
+
+  if ((directoryHandle as any).queryPermission) {
+    const status = await (directoryHandle as any).queryPermission({ mode: "read" });
+    if (status !== "granted") {
+      const requested = await (directoryHandle as any).requestPermission({ mode: "read" });
+      if (requested !== "granted") {
+        throw new Error("Permission to read project directory was not granted.");
+      }
+    }
+  }
+
+  return readProjectDirectory(directoryHandle);
 }
 
 /**

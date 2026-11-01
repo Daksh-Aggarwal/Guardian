@@ -1068,4 +1068,594 @@ def test_reapplication_failure_safely_reverts_approved_plan():
     assert res_apply.json()["status"] == "applied"
 
 
+# -------------------------------------------------------------------------
+# Mandatory Validation Gate Regression Tests (Autopilot Validation Fix)
+# -------------------------------------------------------------------------
+
+AXIOS_PKG_JSON = json.dumps({
+    "name": "autopilot-val-app",
+    "version": "1.0.0",
+    "dependencies": {
+        "axios": "^1.7.9"
+    }
+}, indent=2)
+
+AXIOS_LOCK_JSON = json.dumps({
+    "name": "autopilot-val-app",
+    "version": "1.0.0",
+    "lockfileVersion": 3,
+    "requires": True,
+    "packages": {
+        "": {
+            "name": "autopilot-val-app",
+            "version": "1.0.0",
+            "dependencies": {
+                "axios": "^1.7.9"
+            }
+        },
+        "node_modules/axios": {
+            "version": "1.7.9",
+            "resolved": "https://registry.npmjs.org/axios/-/axios-1.7.9.tgz",
+            "integrity": "sha512-old_sha512_hash_179=="
+        }
+    }
+}, indent=2)
+
+AXIOS_ADVISORY = Advisory(
+    id="GHSA-4w2v-q235-gw99",
+    summary="Axios SSRF Vulnerability",
+    affected_ranges=[
+        {
+            "type": "SEMVER",
+            "events": [
+                {"introduced": "0"},
+                {"fixed": "1.8.2"}
+            ]
+        }
+    ],
+    fixed_versions=["1.8.2"]
+)
+
+AXIOS_FINDING = Finding(
+    id="f_axios_ssrf",
+    rule="OSV",
+    title="Axios SSRF in 1.7.9",
+    category="Vulnerability",
+    severity="high",
+    confidence="high",
+    observed="axios@1.7.9 is vulnerable to SSRF",
+    explanation="SSRF vulnerability",
+    implication="Remote server-side request forgery",
+    recommendation="Upgrade to ^1.8.2",
+    evidence=[Evidence(file="package.json", line=4, column=1, snippet='"axios": "^1.7.9"', detail="manifest dependency")],
+    package="axios@1.7.9",
+    advisory=AXIOS_ADVISORY
+)
+
+def make_val_report(scan_id="scan_val_gate"):
+    return Report(
+        id=scan_id,
+        name="autopilot-val-app",
+        version="1.0.0",
+        created_at="2026-11-01T00:00:00Z",
+        source="local project",
+        risk="High concern",
+        rationale="Vulnerability detected",
+        findings=[AXIOS_FINDING],
+        dependencies=[],
+        files_analyzed=2,
+        coverage=[],
+        intelligence="checked",
+        duration_ms=20
+    )
+
+
+def test_1_invalid_package_version_is_rejected():
+    """1. Invalid/nonexistent package version is rejected."""
+    scan_id = "test_val_invalid_ver"
+    report = make_val_report(scan_id)
+    storage.save(report)
+    snapshot = project_manager.save_snapshot(scan_id, "autopilot-val-app", {
+        "package.json": AXIOS_PKG_JSON,
+        "package-lock.json": AXIOS_LOCK_JSON
+    })
+
+    raw_plan = LLMRemediationOutput(
+        title="Invalid version upgrade",
+        summary="Attempts upgrade to nonexistent version",
+        findings_addressed=["f_axios_ssrf"],
+        proposed_changes=[
+            LLMProposedFileChange(
+                file_path="package.json",
+                operation="update",
+                edits=[LLMTextEdit(old_text='"axios": "^1.7.9"', new_text='"axios": "^99.99.99"')],
+                rationale="Try fake version",
+                finding_ids=["f_axios_ssrf"],
+                expected_result="Fixed"
+            ),
+            LLMProposedFileChange(
+                file_path="package-lock.json",
+                operation="update",
+                edits=[
+                    LLMTextEdit(old_text='"axios": "^1.7.9"', new_text='"axios": "^99.99.99"'),
+                    LLMTextEdit(old_text='"version": "1.7.9"', new_text='"version": "99.99.99"')
+                ],
+                rationale="Update lockfile",
+                finding_ids=["f_axios_ssrf"],
+                expected_result="Fixed"
+            )
+        ]
+    )
+
+    with patch("backend.guardian.remediation.query_npm_registry") as mock_npm:
+        mock_npm.return_value = (None, "not_found", "Package or version not found (HTTP 404)")
+        plan = remediation_planner._validate_and_build_plan(report, snapshot, raw_plan, ["f_axios_ssrf"])
+        assert plan.validation_status == "REJECTED"
+        assert plan.status == "rejected"
+        assert any("does not exist in npm registry" in r or "not exist" in r.lower() for r in plan.validation_reasons)
+
+
+def test_2_vulnerable_target_version_is_rejected():
+    """2. Vulnerable target version is rejected."""
+    scan_id = "test_val_vuln_target"
+    report = make_val_report(scan_id)
+    storage.save(report)
+    snapshot = project_manager.save_snapshot(scan_id, "autopilot-val-app", {
+        "package.json": AXIOS_PKG_JSON,
+        "package-lock.json": AXIOS_LOCK_JSON
+    })
+
+    # Propose 1.8.0, which is still < 1.8.2 and within affected range of AXIOS_ADVISORY
+    raw_plan = LLMRemediationOutput(
+        title="Vulnerable version upgrade",
+        summary="Attempts upgrade to a version that remains vulnerable",
+        findings_addressed=["f_axios_ssrf"],
+        proposed_changes=[
+            LLMProposedFileChange(
+                file_path="package.json",
+                operation="update",
+                edits=[LLMTextEdit(old_text='"axios": "^1.7.9"', new_text='"axios": "^1.8.0"')],
+                rationale="Upgrade to 1.8.0",
+                finding_ids=["f_axios_ssrf"],
+                expected_result="Fixed"
+            ),
+            LLMProposedFileChange(
+                file_path="package-lock.json",
+                operation="update",
+                edits=[
+                    LLMTextEdit(old_text='"axios": "^1.7.9"', new_text='"axios": "^1.8.0"'),
+                    LLMTextEdit(old_text='"version": "1.7.9"', new_text='"version": "1.8.0"'),
+                    LLMTextEdit(old_text='"resolved": "https://registry.npmjs.org/axios/-/axios-1.7.9.tgz"', new_text='"resolved": "https://registry.npmjs.org/axios/-/axios-1.8.0.tgz"'),
+                    LLMTextEdit(old_text='"integrity": "sha512-old_sha512_hash_179=="', new_text='"integrity": "sha512-hash_180=="')
+                ],
+                rationale="Update lockfile",
+                finding_ids=["f_axios_ssrf"],
+                expected_result="Fixed"
+            )
+        ]
+    )
+
+    with patch("backend.guardian.remediation.query_npm_registry") as mock_npm:
+        mock_npm.return_value = ({
+            "name": "axios", "version": "1.8.0",
+            "dist": {"tarball": "https://registry.npmjs.org/axios/-/axios-1.8.0.tgz", "integrity": "sha512-hash_180=="}
+        }, "ok", None)
+
+        plan = remediation_planner._validate_and_build_plan(report, snapshot, raw_plan, ["f_axios_ssrf"])
+        assert plan.validation_status == "REJECTED"
+        assert plan.status == "rejected"
+        assert any("vulnerable" in r.lower() or "affected version range" in r.lower() for r in plan.validation_reasons)
+
+
+def test_3_unexplained_major_version_downgrade_is_rejected():
+    """3. Unexplained major-version downgrade is rejected (the exact axios 1.7.9 -> 0.31.1 issue)."""
+    scan_id = "test_val_downgrade"
+    report = make_val_report(scan_id)
+    storage.save(report)
+    snapshot = project_manager.save_snapshot(scan_id, "autopilot-val-app", {
+        "package.json": AXIOS_PKG_JSON,
+        "package-lock.json": AXIOS_LOCK_JSON
+    })
+
+    # Exact issue from prompt: - "axios": "^1.7.9", + "axios": "^0.31.1"
+    raw_plan = LLMRemediationOutput(
+        title="Downgrade Axios",
+        summary="Downgrades axios across major version to 0.31.1",
+        findings_addressed=["f_axios_ssrf"],
+        proposed_changes=[
+            LLMProposedFileChange(
+                file_path="package.json",
+                operation="update",
+                edits=[LLMTextEdit(old_text='"axios": "^1.7.9"', new_text='"axios": "^0.31.1"')],
+                rationale="Downgrade to 0.31.1",
+                finding_ids=["f_axios_ssrf"],
+                expected_result="Fixed"
+            ),
+            LLMProposedFileChange(
+                file_path="package-lock.json",
+                operation="update",
+                edits=[
+                    LLMTextEdit(old_text='"axios": "^1.7.9"', new_text='"axios": "^0.31.1"'),
+                    LLMTextEdit(old_text='"version": "1.7.9"', new_text='"version": "0.31.1"'),
+                    LLMTextEdit(old_text='"resolved": "https://registry.npmjs.org/axios/-/axios-1.7.9.tgz"', new_text='"resolved": "https://registry.npmjs.org/axios/-/axios-0.31.1.tgz"'),
+                    LLMTextEdit(old_text='"integrity": "sha512-old_sha512_hash_179=="', new_text='"integrity": "sha512-hash_0311=="')
+                ],
+                rationale="Update lockfile",
+                finding_ids=["f_axios_ssrf"],
+                expected_result="Fixed"
+            )
+        ]
+    )
+
+    with patch("backend.guardian.remediation.query_npm_registry") as mock_npm:
+        mock_npm.return_value = ({
+            "name": "axios", "version": "0.31.1",
+            "dist": {"tarball": "https://registry.npmjs.org/axios/-/axios-0.31.1.tgz", "integrity": "sha512-hash_0311=="}
+        }, "ok", None)
+
+        plan = remediation_planner._validate_and_build_plan(report, snapshot, raw_plan, ["f_axios_ssrf"])
+        assert plan.validation_status == "REJECTED"
+        assert plan.status == "rejected"
+        assert any("major-version downgrade is rejected" in r.lower() for r in plan.validation_reasons)
+
+
+def test_4_package_json_only_dependency_change_is_rejected():
+    """4. package.json-only dependency change is rejected when lockfile exists."""
+    scan_id = "test_val_manifest_only"
+    report = make_val_report(scan_id)
+    storage.save(report)
+    snapshot = project_manager.save_snapshot(scan_id, "autopilot-val-app", {
+        "package.json": AXIOS_PKG_JSON,
+        "package-lock.json": AXIOS_LOCK_JSON
+    })
+
+    # Proposal only updates package.json without updating package-lock.json
+    raw_plan = LLMRemediationOutput(
+        title="Package.json only upgrade",
+        summary="Modifies package.json without touching package-lock.json",
+        findings_addressed=["f_axios_ssrf"],
+        proposed_changes=[
+            LLMProposedFileChange(
+                file_path="package.json",
+                operation="update",
+                edits=[LLMTextEdit(old_text='"axios": "^1.7.9"', new_text='"axios": "^1.8.2"')],
+                rationale="Upgrade axios in manifest only",
+                finding_ids=["f_axios_ssrf"],
+                expected_result="Fixed"
+            )
+        ]
+    )
+
+    with patch("backend.guardian.remediation.query_npm_registry") as mock_npm:
+        mock_npm.return_value = ({
+            "name": "axios", "version": "1.8.2",
+            "dist": {"tarball": "https://registry.npmjs.org/axios/-/axios-1.8.2.tgz", "integrity": "sha512-verified_hash_182=="}
+        }, "ok", None)
+
+        plan = remediation_planner._validate_and_build_plan(report, snapshot, raw_plan, ["f_axios_ssrf"])
+        assert plan.validation_status == "REJECTED"
+        assert plan.status == "rejected"
+        assert any("package.json-only dependency change is rejected" in r for r in plan.validation_reasons)
+
+
+def test_5_inconsistent_lockfile_is_rejected():
+    """5. Inconsistent lockfile is rejected."""
+    scan_id = "test_val_inconsistent_lock"
+    report = make_val_report(scan_id)
+    storage.save(report)
+    snapshot = project_manager.save_snapshot(scan_id, "autopilot-val-app", {
+        "package.json": AXIOS_PKG_JSON,
+        "package-lock.json": AXIOS_LOCK_JSON
+    })
+
+    # Proposed package.json has ^1.8.2, but lockfile is updated with inconsistent version 1.7.0
+    raw_plan = LLMRemediationOutput(
+        title="Inconsistent lockfile",
+        summary="Updates lockfile with mismatched version",
+        findings_addressed=["f_axios_ssrf"],
+        proposed_changes=[
+            LLMProposedFileChange(
+                file_path="package.json",
+                operation="update",
+                edits=[LLMTextEdit(old_text='"axios": "^1.7.9"', new_text='"axios": "^1.8.2"')],
+                rationale="Upgrade axios",
+                finding_ids=["f_axios_ssrf"],
+                expected_result="Fixed"
+            ),
+            LLMProposedFileChange(
+                file_path="package-lock.json",
+                operation="update",
+                edits=[
+                    LLMTextEdit(old_text='"axios": "^1.7.9"', new_text='"axios": "^1.7.0"'), # Mismatched root decl!
+                    LLMTextEdit(old_text='"version": "1.7.9"', new_text='"version": "1.7.0"')
+                ],
+                rationale="Update lockfile inconsistently",
+                finding_ids=["f_axios_ssrf"],
+                expected_result="Fixed"
+            )
+        ]
+    )
+
+    with patch("backend.guardian.remediation.query_npm_registry") as mock_npm, \
+         patch("backend.guardian.remediation.query_osv_vulnerability", return_value=([], "ok")):
+        mock_npm.return_value = ({
+            "name": "axios", "version": "1.8.2",
+            "dist": {"tarball": "https://registry.npmjs.org/axios/-/axios-1.8.2.tgz", "integrity": "sha512-verified_hash_182=="}
+        }, "ok", None)
+
+        plan = remediation_planner._validate_and_build_plan(report, snapshot, raw_plan, ["f_axios_ssrf"])
+        assert plan.validation_status == "REJECTED"
+        assert plan.status == "rejected"
+        assert any("does not match package.json" in r or "does not match intended" in r for r in plan.validation_reasons)
+
+
+def test_6_incorrect_integrity_metadata_is_rejected():
+    """6. Incorrect integrity metadata is rejected."""
+    scan_id = "test_val_bad_integrity"
+    report = make_val_report(scan_id)
+    storage.save(report)
+    snapshot = project_manager.save_snapshot(scan_id, "autopilot-val-app", {
+        "package.json": AXIOS_PKG_JSON,
+        "package-lock.json": AXIOS_LOCK_JSON
+    })
+
+    # Propose 1.8.2, but lockfile uses fabricated/tampered integrity hash
+    raw_plan = LLMRemediationOutput(
+        title="Tampered integrity hash",
+        summary="Uses fake integrity hash in lockfile",
+        findings_addressed=["f_axios_ssrf"],
+        proposed_changes=[
+            LLMProposedFileChange(
+                file_path="package.json",
+                operation="update",
+                edits=[LLMTextEdit(old_text='"axios": "^1.7.9"', new_text='"axios": "^1.8.2"')],
+                rationale="Upgrade axios",
+                finding_ids=["f_axios_ssrf"],
+                expected_result="Fixed"
+            ),
+            LLMProposedFileChange(
+                file_path="package-lock.json",
+                operation="update",
+                edits=[
+                    LLMTextEdit(old_text='"axios": "^1.7.9"', new_text='"axios": "^1.8.2"'),
+                    LLMTextEdit(old_text='"version": "1.7.9"', new_text='"version": "1.8.2"'),
+                    LLMTextEdit(old_text='"resolved": "https://registry.npmjs.org/axios/-/axios-1.7.9.tgz"', new_text='"resolved": "https://registry.npmjs.org/axios/-/axios-1.8.2.tgz"'),
+                    LLMTextEdit(old_text='"integrity": "sha512-old_sha512_hash_179=="', new_text='"integrity": "sha512-completely_fake_fabricated_integrity_hash=="')
+                ],
+                rationale="Update lockfile with wrong integrity",
+                finding_ids=["f_axios_ssrf"],
+                expected_result="Fixed"
+            )
+        ]
+    )
+
+    with patch("backend.guardian.remediation.query_npm_registry") as mock_npm, \
+         patch("backend.guardian.remediation.query_osv_vulnerability", return_value=([], "ok")):
+        mock_npm.return_value = ({
+            "name": "axios", "version": "1.8.2",
+            "dist": {
+                "tarball": "https://registry.npmjs.org/axios/-/axios-1.8.2.tgz",
+                "integrity": "sha512-real_published_registry_integrity_hash_182=="
+            }
+        }, "ok", None)
+
+        plan = remediation_planner._validate_and_build_plan(report, snapshot, raw_plan, ["f_axios_ssrf"])
+        assert plan.validation_status == "REJECTED"
+        assert plan.status == "rejected"
+        assert any("integrity metadata" in r.lower() or "integrity" in r.lower() for r in plan.validation_reasons)
+
+
+def test_7_valid_patched_dependency_upgrade_with_consistent_lockfile_passes():
+    """7. Valid patched dependency upgrade with consistent lockfile passes."""
+    scan_id = "test_val_pass"
+    report = make_val_report(scan_id)
+    storage.save(report)
+    snapshot = project_manager.save_snapshot(scan_id, "autopilot-val-app", {
+        "package.json": AXIOS_PKG_JSON,
+        "package-lock.json": AXIOS_LOCK_JSON
+    })
+
+    real_integrity = "sha512-real_published_registry_integrity_hash_182=="
+    real_tarball = "https://registry.npmjs.org/axios/-/axios-1.8.2.tgz"
+
+    raw_plan = LLMRemediationOutput(
+        title="Valid Axios Upgrade",
+        summary="Upgrades axios to verified patched 1.8.2 with consistent lockfile",
+        findings_addressed=["f_axios_ssrf"],
+        proposed_changes=[
+            LLMProposedFileChange(
+                file_path="package.json",
+                operation="update",
+                edits=[LLMTextEdit(old_text='"axios": "^1.7.9"', new_text='"axios": "^1.8.2"')],
+                rationale="Upgrade axios to 1.8.2",
+                finding_ids=["f_axios_ssrf"],
+                expected_result="Fixed"
+            ),
+            LLMProposedFileChange(
+                file_path="package-lock.json",
+                operation="update",
+                edits=[
+                    LLMTextEdit(old_text='"axios": "^1.7.9"', new_text='"axios": "^1.8.2"'),
+                    LLMTextEdit(old_text='"version": "1.7.9"', new_text='"version": "1.8.2"'),
+                    LLMTextEdit(old_text='"resolved": "https://registry.npmjs.org/axios/-/axios-1.7.9.tgz"', new_text=f'"resolved": "{real_tarball}"'),
+                    LLMTextEdit(old_text='"integrity": "sha512-old_sha512_hash_179=="', new_text=f'"integrity": "{real_integrity}"')
+                ],
+                rationale="Update lockfile consistently",
+                finding_ids=["f_axios_ssrf"],
+                expected_result="Fixed"
+            )
+        ]
+    )
+
+    with patch("backend.guardian.remediation.query_npm_registry") as mock_npm, \
+         patch("backend.guardian.remediation.query_osv_vulnerability", return_value=([], "ok")):
+        mock_npm.return_value = ({
+            "name": "axios", "version": "1.8.2",
+            "dist": {
+                "tarball": real_tarball,
+                "integrity": real_integrity
+            }
+        }, "ok", None)
+
+        plan = remediation_planner._validate_and_build_plan(report, snapshot, raw_plan, ["f_axios_ssrf"])
+        assert plan.validation_status == "VERIFIED"
+        assert plan.status == "proposed"
+        assert len(plan.validation_reasons) == 0
+        assert len(plan.proposed_changes) == 2
+
+
+def test_8_registry_unavailable_results_in_unverified():
+    """8. Registry unavailable results in UNVERIFIED, never VERIFIED."""
+    scan_id = "test_val_unavail"
+    report = make_val_report(scan_id)
+    storage.save(report)
+    snapshot = project_manager.save_snapshot(scan_id, "autopilot-val-app", {
+        "package.json": AXIOS_PKG_JSON,
+        "package-lock.json": AXIOS_LOCK_JSON
+    })
+
+    raw_plan = LLMRemediationOutput(
+        title="Registry outage upgrade",
+        summary="Attempt upgrade while registry is unreachable",
+        findings_addressed=["f_axios_ssrf"],
+        proposed_changes=[
+            LLMProposedFileChange(
+                file_path="package.json",
+                operation="update",
+                edits=[LLMTextEdit(old_text='"axios": "^1.7.9"', new_text='"axios": "^1.8.2"')],
+                rationale="Upgrade axios",
+                finding_ids=["f_axios_ssrf"],
+                expected_result="Fixed"
+            ),
+            LLMProposedFileChange(
+                file_path="package-lock.json",
+                operation="update",
+                edits=[
+                    LLMTextEdit(old_text='"axios": "^1.7.9"', new_text='"axios": "^1.8.2"'),
+                    LLMTextEdit(old_text='"version": "1.7.9"', new_text='"version": "1.8.2"'),
+                    LLMTextEdit(old_text='"resolved": "https://registry.npmjs.org/axios/-/axios-1.7.9.tgz"', new_text='"resolved": "https://registry.npmjs.org/axios/-/axios-1.8.2.tgz"'),
+                    LLMTextEdit(old_text='"integrity": "sha512-old_sha512_hash_179=="', new_text='"integrity": "sha512-some_hash=="')
+                ],
+                rationale="Update lockfile",
+                finding_ids=["f_axios_ssrf"],
+                expected_result="Fixed"
+            )
+        ]
+    )
+
+    with patch("backend.guardian.remediation.query_npm_registry") as mock_npm, \
+         patch("backend.guardian.remediation.query_osv_vulnerability", return_value=([], "ok")):
+        mock_npm.return_value = (None, "unavailable", "ConnectTimeout: Connection timed out")
+
+        plan = remediation_planner._validate_and_build_plan(report, snapshot, raw_plan, ["f_axios_ssrf"])
+        assert plan.validation_status == "UNVERIFIED"
+        assert plan.validation_status != "VERIFIED"
+        assert any("unavailable" in r.lower() for r in plan.validation_reasons)
+
+
+def test_9_failed_validation_cannot_reach_approval_or_application():
+    """9. Failed validation cannot reach the approval/application stage."""
+    scan_id = "test_val_blocked_appr"
+    report = make_val_report(scan_id)
+    storage.save(report)
+
+    # 1. Plan with REJECTED validation status cannot be approved
+    plan_rejected = RemediationPlan(
+        plan_id="plan_rejected_123",
+        scan_id=scan_id,
+        title="Rejected Plan",
+        summary="Should not be approved",
+        expected_outcome="Reject",
+        status="rejected",
+        validation_status="REJECTED",
+        validation_reasons=["package.json-only dependency change is rejected."],
+        created_at="2026-11-01T00:00:00Z"
+    )
+    storage.save_plan(plan_rejected)
+
+    res_appr1 = client.post(f"/api/remediation/plans/{plan_rejected.plan_id}/approve")
+    assert res_appr1.status_code == 400
+    assert "Cannot approve remediation plan" in res_appr1.json()["detail"]
+
+    # 2. Plan with UNVERIFIED validation status cannot be approved
+    plan_unverified = RemediationPlan(
+        plan_id="plan_unverified_456",
+        scan_id=scan_id,
+        title="Unverified Plan",
+        summary="Registry offline during planning",
+        expected_outcome="Unverified",
+        status="proposed",
+        validation_status="UNVERIFIED",
+        validation_reasons=["npm registry verification is unavailable."],
+        created_at="2026-11-01T00:00:00Z"
+    )
+    storage.save_plan(plan_unverified)
+
+    res_appr2 = client.post(f"/api/remediation/plans/{plan_unverified.plan_id}/approve")
+    assert res_appr2.status_code == 400
+    assert "Cannot approve remediation plan" in res_appr2.json()["detail"]
+
+    # 3. Unapproved/unverified plan cannot reach applied
+    res_app1 = client.post(f"/api/remediation/plans/{plan_rejected.plan_id}/applied", json={
+        "applied_at": "now", "modified_files": ["package.json"], "success": True
+    })
+    assert res_app1.status_code == 400
+
+
+def test_10_deterministic_fallback_axios_remediation_selects_verified_patched_version():
+    """Deterministic fallback queries metadata and generates verified package.json + package-lock.json."""
+    scan_id = "test_det_axios_fix"
+    report = make_val_report(scan_id)
+    storage.save(report)
+    snapshot = project_manager.save_snapshot(scan_id, "autopilot-val-app", {
+        "package.json": AXIOS_PKG_JSON,
+        "package-lock.json": AXIOS_LOCK_JSON
+    })
+
+    mock_packument = {
+        "name": "axios",
+        "versions": {
+            "1.7.9": {"dist": {"tarball": "https://registry.npmjs.org/axios/-/axios-1.7.9.tgz", "integrity": "sha512-old=="}},
+            "1.8.0": {"dist": {"tarball": "https://registry.npmjs.org/axios/-/axios-1.8.0.tgz", "integrity": "sha512-180=="}},
+            "1.8.1": {"dist": {"tarball": "https://registry.npmjs.org/axios/-/axios-1.8.1.tgz", "integrity": "sha512-181=="}},
+            "1.8.2": {"dist": {"tarball": "https://registry.npmjs.org/axios/-/axios-1.8.2.tgz", "integrity": "sha512-verified182=="}},
+            "1.9.0": {"dist": {"tarball": "https://registry.npmjs.org/axios/-/axios-1.9.0.tgz", "integrity": "sha512-190=="}},
+            "2.0.0": {"dist": {"tarball": "https://registry.npmjs.org/axios/-/axios-2.0.0.tgz", "integrity": "sha512-200=="}}
+        }
+    }
+
+    def mock_npm_query(pkg, ver=None):
+        if ver:
+            if ver in mock_packument["versions"]:
+                return {"name": "axios", "version": ver, "dist": mock_packument["versions"][ver]["dist"]}, "ok", None
+            return None, "not_found", "404"
+        return mock_packument, "ok", None
+
+    with patch("backend.guardian.remediation.query_npm_registry", side_effect=mock_npm_query), \
+         patch("backend.guardian.remediation.query_osv_vulnerability", return_value=([], "ok")):
+
+        plan = remediation_planner.generate_plan(
+            report=report,
+            snapshot=snapshot,
+            finding_ids=["f_axios_ssrf"],
+            consent=False # deterministic planner
+        )
+
+        assert plan.validation_status == "VERIFIED"
+        assert plan.status == "proposed"
+        assert "f_axios_ssrf" in plan.findings_addressed
+        assert len(plan.proposed_changes) == 2
+
+        # Check package.json change
+        ch_pkg = next(c for c in plan.proposed_changes if c.file_path == "package.json")
+        assert '"axios": "^1.8.2"' in ch_pkg.diff
+
+        # Check package-lock.json change
+        ch_lock = next(c for c in plan.proposed_changes if c.file_path == "package-lock.json")
+        assert '"axios": "^1.8.2"' in ch_lock.diff
+        assert '"version": "1.8.2"' in ch_lock.diff
+        assert '"integrity": "sha512-verified182=="' in ch_lock.diff
+
+
+
 

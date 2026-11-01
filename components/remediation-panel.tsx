@@ -7,6 +7,7 @@ import {
   XCircle,
   Loader2,
   FileCode,
+  ShieldAlert,
 } from "lucide-react";
 import {
   Wrench,
@@ -55,7 +56,7 @@ export default function RemediationPanel({
   targetFindingId?: string | null;
   onClose: () => void;
   onFindingClick?: (findingId: string) => void;
-  onRescanRequested?: () => Promise<Report | void>;
+  onRescanRequested?: (profile?: "fast" | "deep") => Promise<Report | void>;
   onDirectoryHandleChange?: (handle: FileSystemDirectoryHandle | null) => void;
 }) {
   const [directoryHandle, setDirectoryHandle] =
@@ -65,6 +66,7 @@ export default function RemediationPanel({
   const [plan, setPlan] = useState<RemediationPlan | null>(null);
   const [loading, setLoading] = useState(false);
   const [stage, setStage] = useState("");
+  const [rescanProfile, setRescanProfile] = useState<"fast" | "deep">("fast");
   const [error, setError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
   const [selectedFindingIds, setSelectedFindingIds] = useState<string[]>(
@@ -224,6 +226,14 @@ export default function RemediationPanel({
   // Approve and Apply changes through browser File System Access API
   async function applyPlan() {
     if (!plan) return;
+
+    if (plan.validation_status && plan.validation_status !== "VERIFIED") {
+      setError(
+        `Cannot apply remediation plan: validation status is '${plan.validation_status}'. ` +
+        (plan.validation_reasons?.join("; ") || "")
+      );
+      return;
+    }
 
     let handle = directoryHandle;
 
@@ -431,6 +441,15 @@ export default function RemediationPanel({
 
   async function applyGitHubPR() {
     if (!plan) return;
+
+    if (plan.validation_status && plan.validation_status !== "VERIFIED") {
+      setError(
+        `Cannot apply remediation plan on GitHub: validation status is '${plan.validation_status}'. ` +
+        (plan.validation_reasons?.join("; ") || "")
+      );
+      return;
+    }
+
     setLoading(true);
     setError(null);
     setActionSuccess(null);
@@ -517,10 +536,10 @@ export default function RemediationPanel({
     setLoading(true);
     setError(null);
     setActionSuccess(null);
-    setStage("Rescanning modified project...");
+    setStage(`Rescanning modified project (${rescanProfile} profile)...`);
 
     try {
-      const rescannedReport = await onRescanRequested();
+      const rescannedReport = await onRescanRequested(rescanProfile);
       if (!rescannedReport) {
         throw new Error("Rescan did not return a valid report.");
       }
@@ -541,8 +560,13 @@ export default function RemediationPanel({
 
       setVerification(result);
       setActionSuccess(
-        "Verification complete. Results compared against baseline scan.",
+        `Verification complete: ${result.resolved_findings.length} findings resolved, ${result.persistent_findings.length} persistent (${rescanProfile} profile).`,
       );
+      setTimeout(() => {
+        document
+          .getElementById("remediation-verification-outcome")
+          ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }, 100);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -1220,6 +1244,7 @@ export default function RemediationPanel({
               {/* Verification Results Banner if verified */}
               {verification && (
                 <div
+                  id="remediation-verification-outcome"
                   className="card"
                   style={{
                     padding: "16px",
@@ -1446,7 +1471,7 @@ export default function RemediationPanel({
                   >
                     <button
                       onClick={isGitHubTarget ? applyGitHubPR : applyPlan}
-                      disabled={loading}
+                      disabled={loading || (plan.validation_status && plan.validation_status !== "VERIFIED")}
                       className="button primary compact"
                       style={{
                         background: isGitHubTarget
@@ -1455,6 +1480,8 @@ export default function RemediationPanel({
                         borderColor: isGitHubTarget
                           ? "var(--accent, #6366f1)"
                           : "var(--accent-green, #10b981)",
+                        opacity: plan.validation_status && plan.validation_status !== "VERIFIED" ? 0.6 : 1,
+                        cursor: plan.validation_status && plan.validation_status !== "VERIFIED" ? "not-allowed" : "pointer",
                       }}
                     >
                       {isGitHubTarget
@@ -1545,15 +1572,29 @@ export default function RemediationPanel({
             {plan && plan.status === "proposed" && !confirmApply && (
               <button
                 onClick={() => setConfirmApply(true)}
-                disabled={loading}
+                disabled={loading || (plan.validation_status && plan.validation_status !== "VERIFIED")}
                 className="button primary"
                 style={{
                   display: "inline-flex",
                   alignItems: "center",
                   gap: "6px",
+                  opacity: plan.validation_status && plan.validation_status !== "VERIFIED" ? 0.6 : 1,
+                  cursor: plan.validation_status && plan.validation_status !== "VERIFIED" ? "not-allowed" : "pointer",
                 }}
+                title={
+                  plan.validation_status && plan.validation_status !== "VERIFIED"
+                    ? `Approval blocked: Plan validation is ${plan.validation_status}`
+                    : undefined
+                }
               >
-                {isGitHubTarget ? (
+                {plan.validation_status && plan.validation_status !== "VERIFIED" ? (
+                  <>
+                    <ShieldAlert size={16} />
+                    {plan.validation_status === "UNVERIFIED"
+                      ? "Unverified (Application Blocked)"
+                      : "Validation Failed (Blocked)"}
+                  </>
+                ) : isGitHubTarget ? (
                   <>
                     <GitPullRequest size={16} />
                     Approve and Create Pull Request
@@ -1601,25 +1642,130 @@ export default function RemediationPanel({
               </button>
             )}
 
+            {verification && !loading && (
+              <span
+                style={{
+                  fontSize: "12px",
+                  color: "var(--accent-green, #10b981)",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "4px",
+                  fontWeight: 500,
+                  marginRight: "4px",
+                }}
+              >
+                <CheckCircle2 size={14} />
+                Verified: {verification.resolved_findings.length} resolved
+              </span>
+            )}
+
             {plan &&
               (plan.status === "applied" || plan.status === "verified") &&
               onRescanRequested && (
-                <button
-                  onClick={rescanAndVerify}
-                  disabled={loading}
-                  className="button primary"
+                <div
                   style={{
                     display: "inline-flex",
                     alignItems: "center",
-                    gap: "6px",
+                    gap: "8px",
                   }}
                 >
-                  <RefreshCw
-                    size={16}
-                    className={loading ? "animate-spin" : ""}
-                  />
-                  Rescan & verify outcome
-                </button>
+                  {/* Rescan Profile Selector (Fast vs Deep) */}
+                  <div
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      background: "var(--surface-2, rgba(255, 255, 255, 0.05))",
+                      border: "1px solid var(--border, rgba(255, 255, 255, 0.12))",
+                      borderRadius: "6px",
+                      padding: "2px",
+                      gap: "2px",
+                    }}
+                    title={
+                      rescanProfile === "fast"
+                        ? "Fast Profile: Direct dependencies and top-level packages (faster budget)"
+                        : "Deep Profile: Up to 20 packages and 4 levels deep (thorough inspection)"
+                    }
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setRescanProfile("fast")}
+                      disabled={loading}
+                      aria-label="Set fast rescan profile"
+                      style={{
+                        padding: "3px 8px",
+                        fontSize: "11px",
+                        fontWeight: rescanProfile === "fast" ? 600 : 400,
+                        borderRadius: "4px",
+                        border: "none",
+                        cursor: loading ? "not-allowed" : "pointer",
+                        background:
+                          rescanProfile === "fast"
+                            ? "var(--accent, #c5f467)"
+                            : "transparent",
+                        color:
+                          rescanProfile === "fast"
+                            ? "var(--on-accent, #111c08)"
+                            : "var(--muted, #94a3b8)",
+                        transition: "all 0.15s ease",
+                      }}
+                    >
+                      Fast
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRescanProfile("deep")}
+                      disabled={loading}
+                      aria-label="Set deep rescan profile"
+                      style={{
+                        padding: "3px 8px",
+                        fontSize: "11px",
+                        fontWeight: rescanProfile === "deep" ? 600 : 400,
+                        borderRadius: "4px",
+                        border: "none",
+                        cursor: loading ? "not-allowed" : "pointer",
+                        background:
+                          rescanProfile === "deep"
+                            ? "var(--accent, #c5f467)"
+                            : "transparent",
+                        color:
+                          rescanProfile === "deep"
+                            ? "var(--on-accent, #111c08)"
+                            : "var(--muted, #94a3b8)",
+                        transition: "all 0.15s ease",
+                      }}
+                    >
+                      Deep
+                    </button>
+                  </div>
+
+                  <button
+                    onClick={rescanAndVerify}
+                    disabled={loading}
+                    className="button primary"
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "6px",
+                    }}
+                  >
+                    {loading ? (
+                      <>
+                        <RefreshCw size={16} className="animate-spin" />
+                        <span>Rescanning...</span>
+                      </>
+                    ) : verification ? (
+                      <>
+                        <CheckCircle2 size={16} />
+                        <span>Rescan & re-verify</span>
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw size={16} />
+                        <span>Rescan & verify outcome</span>
+                      </>
+                    )}
+                  </button>
+                </div>
               )}
 
             <button onClick={onClose} className="button secondary">

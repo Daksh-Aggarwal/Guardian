@@ -84,6 +84,36 @@ export default function RemediationPlanView({
     },
   };
 
+  const validationBadges: Record<
+    string,
+    { label: string; bg: string; color: string; border: string }
+  > = {
+    VERIFIED: {
+      label: "Gate: Verified",
+      bg: "rgba(16, 185, 129, 0.15)",
+      color: "#10b981",
+      border: "rgba(16, 185, 129, 0.3)",
+    },
+    UNVERIFIED: {
+      label: "Gate: Unverified",
+      bg: "rgba(234, 179, 8, 0.15)",
+      color: "#eab308",
+      border: "rgba(234, 179, 8, 0.3)",
+    },
+    REJECTED: {
+      label: "Gate: Rejected",
+      bg: "rgba(239, 68, 68, 0.15)",
+      color: "#ef4444",
+      border: "rgba(239, 68, 68, 0.3)",
+    },
+    VALIDATION_FAILED: {
+      label: "Gate: Validation Failed",
+      bg: "rgba(239, 68, 68, 0.15)",
+      color: "#ef4444",
+      border: "rgba(239, 68, 68, 0.3)",
+    },
+  };
+
   const currentStatus = statusBadges[plan.status] || statusBadges.proposed;
 
   return (
@@ -125,6 +155,23 @@ export default function RemediationPlanView({
               >
                 {currentStatus.label}
               </span>
+              {plan.validation_status && validationBadges[plan.validation_status] && (
+                <span
+                  style={{
+                    fontSize: "10px",
+                    fontWeight: 600,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.06em",
+                    padding: "2px 8px",
+                    borderRadius: "4px",
+                    background: validationBadges[plan.validation_status].bg,
+                    color: validationBadges[plan.validation_status].color,
+                    border: `1px solid ${validationBadges[plan.validation_status].border}`,
+                  }}
+                >
+                  {validationBadges[plan.validation_status].label}
+                </span>
+              )}
               <span
                 style={{
                   fontSize: "10px",
@@ -232,6 +279,99 @@ export default function RemediationPlanView({
           </div>
         )}
       </div>
+
+      {/* Validation Gate Alert Box */}
+      {plan.validation_status !== "VERIFIED" && (
+        <div
+          style={{
+            padding: "16px 18px",
+            borderRadius: "8px",
+            background:
+              plan.validation_status === "UNVERIFIED"
+                ? "rgba(234, 179, 8, 0.08)"
+                : "rgba(239, 68, 68, 0.08)",
+            border: `1px solid ${
+              plan.validation_status === "UNVERIFIED"
+                ? "rgba(234, 179, 8, 0.3)"
+                : "rgba(239, 68, 68, 0.3)"
+            }`,
+            display: "flex",
+            flexDirection: "column",
+            gap: "10px",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <ShieldAlert
+              size={18}
+              color={
+                plan.validation_status === "UNVERIFIED"
+                  ? "var(--accent-yellow, #eab308)"
+                  : "var(--accent-red, #ef4444)"
+              }
+            />
+            <h4
+              style={{
+                margin: 0,
+                fontSize: "14px",
+                fontWeight: 600,
+                color:
+                  plan.validation_status === "UNVERIFIED"
+                    ? "var(--accent-yellow, #eab308)"
+                    : "var(--accent-red, #ef4444)",
+              }}
+            >
+              {plan.validation_status === "UNVERIFIED"
+                ? "Deterministic Validation Gate: UNVERIFIED — Application Blocked"
+                : "Deterministic Validation Gate: REJECTED — Application Blocked"}
+            </h4>
+          </div>
+          <p
+            style={{
+              margin: 0,
+              fontSize: "12px",
+              color: "var(--foreground)",
+              opacity: 0.9,
+              lineHeight: 1.5,
+            }}
+          >
+            {plan.validation_status === "UNVERIFIED"
+              ? "External package registry or vulnerability intelligence is currently unavailable. Guardian strictly forbids applying unverified dependency modifications."
+              : "Proposed dependency modifications violated Guardian's mandatory security validation rules. Incomplete, vulnerable, inconsistent, or fabricated dependency changes cannot be approved or applied."}
+          </p>
+          {plan.validation_reasons && plan.validation_reasons.length > 0 && (
+            <div style={{ marginTop: "4px" }}>
+              <div
+                style={{
+                  fontSize: "11px",
+                  fontWeight: 600,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.05em",
+                  color: "var(--muted)",
+                  marginBottom: "6px",
+                }}
+              >
+                Validation failure reasons:
+              </div>
+              <ul
+                style={{
+                  margin: "0 0 0 16px",
+                  padding: 0,
+                  fontSize: "12px",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "4px",
+                }}
+              >
+                {plan.validation_reasons.map((reason, idx) => (
+                  <li key={idx} style={{ color: "var(--foreground)" }}>
+                    {reason}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Proposed File Changes & Diff Viewer */}
       <div>

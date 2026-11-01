@@ -713,6 +713,9 @@ def approve_remediation_plan(plan_id: str, req: Request):
     rep = storage.get(plan.scan_id)
     if rep:
         _verify_scan_access(rep, req)
+    if getattr(plan, "validation_status", "VERIFIED") != "VERIFIED":
+        reasons = "; ".join(getattr(plan, "validation_reasons", [])) or f"Plan validation status is '{plan.validation_status}'."
+        raise HTTPException(400, f"Cannot approve remediation plan: {reasons}")
     try:
         plan = storage.update_plan_status(plan_id, 'approved')
     except ValueError as err:
@@ -1031,6 +1034,9 @@ def apply_remediation_github(plan_id: str, request: Request):
         _verify_scan_access(rep, request)
     if not plan.repository_id:
         raise HTTPException(400, 'Remediation plan is not associated with a GitHub repository.')
+    if getattr(plan, "validation_status", "VERIFIED") != "VERIFIED":
+        reasons = "; ".join(getattr(plan, "validation_reasons", [])) or f"Plan validation status is '{plan.validation_status}'."
+        raise HTTPException(400, f"Cannot apply remediation plan: {reasons}")
 
     try:
         res = github.apply_remediation_pull_request(plan, session_id=session_id)

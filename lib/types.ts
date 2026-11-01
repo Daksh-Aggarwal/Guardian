@@ -278,6 +278,12 @@ export type ProposedFileChange = {
   created_content?: string | null;
 };
 
+export type ValidationStatus =
+  | "VERIFIED"
+  | "UNVERIFIED"
+  | "REJECTED"
+  | "VALIDATION_FAILED";
+
 export type RemediationPlan = {
   plan_id: string;
   scan_id: string;
@@ -304,6 +310,8 @@ export type RemediationPlan = {
     | "failed"
     | "stale"
     | "pr_closed";
+  validation_status: ValidationStatus;
+  validation_reasons: string[];
   created_at: string;
   repository_id?: number | null;
   branch?: string | null;

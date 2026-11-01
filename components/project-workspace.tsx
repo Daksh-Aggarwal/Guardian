@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Code2,
@@ -54,6 +54,7 @@ import IntelligencePanel from "./intelligence-panel";
 import HandoffModal from "./handoff-modal";
 import {
   openProjectDirectory,
+  reloadProjectDirectory,
   isFileSystemAccessSupported,
   ProjectDirectoryResult,
   ExcludedFileEntry,
@@ -166,10 +167,35 @@ export default function ProjectWorkspace({
   const [job, setJob] = useState<ScanJob | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [rescanSuccess, setRescanSuccess] = useState<string | null>(null);
   const [showExclusions, setShowExclusions] = useState(false);
   const [remediationOpen, setRemediationOpen] = useState(false);
   const [targetFindingId, setTargetFindingId] = useState<string | null>(null);
   const [profile, setProfile] = useState<"fast" | "deep">("fast");
+
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const rescanTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+      }
+      if (rescanTimerRef.current) {
+        clearTimeout(rescanTimerRef.current);
+      }
+    };
+  }, []);
+
+  function notifyRescanSuccess(msg: string) {
+    setRescanSuccess(msg);
+    if (rescanTimerRef.current) {
+      clearTimeout(rescanTimerRef.current);
+    }
+    rescanTimerRef.current = setTimeout(() => {
+      setRescanSuccess(null);
+    }, 8000);
+  }
 
   // Guardian Intelligence drawer state
   const [intelligenceOpen, setIntelligenceOpen] = useState(false);
@@ -251,10 +277,55 @@ export default function ProjectWorkspace({
     setError(null);
   }
 
+  // Polling helper that waits for job completion, updates state, and resolves Report
+  async function pollScanJob(jobId: string): Promise<Report> {
+    return new Promise<Report>((resolve, reject) => {
+      const interval = setInterval(async () => {
+        try {
+          const state = await api<ScanJob>(`/jobs/${jobId}`);
+          setJob(state);
+
+          if (state.status === "complete") {
+            clearInterval(interval);
+            pollIntervalRef.current = null;
+            const rep = await api<Report>(`/scans/${jobId}`);
+            setSelectedProjectId(rep.project_id || rep.name);
+            setActiveReportId(rep.id);
+            if (onReportGenerated) onReportGenerated(rep);
+            setLoading(false);
+            setJob(null);
+            resolve(rep);
+          } else if (
+            state.status === "failed" ||
+            state.status === "cancelled"
+          ) {
+            clearInterval(interval);
+            pollIntervalRef.current = null;
+            setLoading(false);
+            setJob(null);
+            const errMsg = state.error || "Scan failed.";
+            setError(errMsg);
+            reject(new Error(errMsg));
+          }
+        } catch (e) {
+          clearInterval(interval);
+          pollIntervalRef.current = null;
+          setLoading(false);
+          setJob(null);
+          setError((e as Error).message);
+          reject(e);
+        }
+      }, 650);
+      pollIntervalRef.current = interval;
+    });
+  }
+
   // Trigger project scan
-  async function runProjectScan(): Promise<Report | void> {
+  async function runProjectScan(scanProfile?: "fast" | "deep"): Promise<Report | void> {
     if (!projectData) return;
+    const activeProfile = scanProfile || profile;
     setError(null);
+    setRescanSuccess(null);
     setLoading(true);
 
     try {
@@ -274,7 +345,7 @@ export default function ProjectWorkspace({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: projectData.projectName,
-          profile: profile,
+          profile: activeProfile,
           files: projectData.files,
           project_id: stableId,
         }),
@@ -282,70 +353,153 @@ export default function ProjectWorkspace({
 
       const jobId = res.id;
       setJob({ id: jobId, status: "queued", stage: "Queued" });
-
-      return new Promise<Report>((resolve, reject) => {
-        const interval = setInterval(async () => {
-          try {
-            const state = await api<ScanJob>(`/jobs/${jobId}`);
-            setJob(state);
-
-            if (state.status === "complete") {
-              clearInterval(interval);
-              const rep = await api<Report>(`/scans/${jobId}`);
-              setSelectedProjectId(rep.project_id || rep.name);
-              setActiveReportId(rep.id);
-              if (onReportGenerated) onReportGenerated(rep);
-              setLoading(false);
-              resolve(rep);
-            } else if (
-              state.status === "failed" ||
-              state.status === "cancelled"
-            ) {
-              clearInterval(interval);
-              setLoading(false);
-              const errMsg = state.error || "Scan failed.";
-              setError(errMsg);
-              reject(new Error(errMsg));
-            }
-          } catch (e) {
-            clearInterval(interval);
-            setLoading(false);
-            setError((e as Error).message);
-            reject(e);
-          }
-        }, 650);
-      });
+      const rep = await pollScanJob(jobId);
+      const b = getFindingBreakdown(rep.findings);
+      notifyRescanSuccess(
+        `Project rescanned (${rep.findings.length} findings: ${b.critical + b.high} high/crit, ${b.medium} med) under ${activeProfile} profile.`
+      );
+      return rep;
     } catch (err) {
       setError((err as Error).message);
       setLoading(false);
+      setJob(null);
     }
   }
 
-  async function handleRescan(): Promise<Report | void> {
-    if (activeReport?.source_metadata?.source_type === "github") {
-      setLoading(true);
-      setError(null);
-      try {
+  async function handleRescan(targetProfile?: "fast" | "deep"): Promise<Report | void> {
+    const scanProfile = targetProfile || profile;
+    if (targetProfile && targetProfile !== profile) {
+      setProfile(targetProfile);
+    }
+    setError(null);
+    setRescanSuccess(null);
+    setLoading(true);
+
+    try {
+      // 1. GitHub rescan
+      if (activeReport?.source_metadata?.source_type === "github") {
         const res = await api<{ id: string }>("/scans/github", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             repository_id: activeReport.source_metadata.repository_id,
             branch: activeReport.source_metadata.branch,
-            profile,
+            profile: scanProfile,
           }),
         });
         setJob({ id: res.id, status: "queued", stage: "Queued" });
-      } catch (err) {
-        setError((err as Error).message);
-        setLoading(false);
+        const rep = await pollScanJob(res.id);
+        const b = getFindingBreakdown(rep.findings);
+        notifyRescanSuccess(
+          `Repository rescanned (${rep.findings.length} findings: ${b.critical + b.high} high/crit, ${b.medium} med) under ${scanProfile} profile.`
+        );
+        return rep;
       }
-      return;
+
+      // 2. Connected local directory
+      if (projectData?.directoryHandle) {
+        let currentProjectData = projectData;
+        try {
+          currentProjectData = await reloadProjectDirectory(
+            projectData.directoryHandle,
+          );
+          setProjectData(currentProjectData);
+        } catch {
+          // If permission lost or handle stale, fallback to open picker
+          currentProjectData = await openProjectDirectory();
+          setProjectData(currentProjectData);
+        }
+
+        const stableId =
+          activeReport?.project_id ||
+          localFolderProjectId ||
+          (await resolveProjectDirectoryId(
+            currentProjectData.directoryHandle,
+            currentProjectData.projectName,
+          ));
+        if (!localFolderProjectId) {
+          setLocalFolderProjectId(stableId);
+        }
+
+        const res = await api<{ id: string }>("/scans/project", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: currentProjectData.projectName,
+            profile: scanProfile,
+            files: currentProjectData.files,
+            project_id: stableId,
+          }),
+        });
+
+        setJob({ id: res.id, status: "queued", stage: "Queued" });
+        const rep = await pollScanJob(res.id);
+        const b = getFindingBreakdown(rep.findings);
+        notifyRescanSuccess(
+          `Project rescanned (${rep.findings.length} findings: ${b.critical + b.high} high/crit, ${b.medium} med) under ${scanProfile} profile.`
+        );
+        return rep;
+      }
+
+      // 3. Demo / synthetic fixture rescan
+      if (
+        activeReport?.project_id?.startsWith("demo:") ||
+        activeReport?.source === "synthetic fixture"
+      ) {
+        const exampleId =
+          activeReport?.project_id?.replace("demo:", "") ||
+          activeReport?.name ||
+          "benign";
+        const res = await api<{ id: string }>(
+          `/scans/example/${encodeURIComponent(exampleId)}`,
+          { method: "POST" },
+        );
+        setJob({ id: res.id, status: "queued", stage: "Queued" });
+        const rep = await pollScanJob(res.id);
+        const b = getFindingBreakdown(rep.findings);
+        notifyRescanSuccess(
+          `Demo fixture rescanned (${rep.findings.length} findings) under ${scanProfile} profile.`
+        );
+        return rep;
+      }
+
+      // 4. Fallback if no directory or GitHub context: prompt to connect local folder
+      const result = await openProjectDirectory();
+      setProjectData(result);
+      const stableId = await resolveProjectDirectoryId(
+        result.directoryHandle,
+        result.projectName,
+      );
+      setSelectedProjectId(stableId);
+      setLocalFolderProjectId(stableId);
+      if (onDirectoryHandleChange) {
+        onDirectoryHandleChange(result.directoryHandle);
+      }
+
+      const res = await api<{ id: string }>("/scans/project", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: result.projectName,
+          profile: scanProfile,
+          files: result.files,
+          project_id: stableId,
+        }),
+      });
+      setJob({ id: res.id, status: "queued", stage: "Queued" });
+      const rep = await pollScanJob(res.id);
+      const b = getFindingBreakdown(rep.findings);
+      notifyRescanSuccess(
+        `Project connected & scanned (${rep.findings.length} findings) under ${scanProfile} profile.`
+      );
+      return rep;
+    } catch (err) {
+      if ((err as Error).name !== "AbortError") {
+        setError((err as Error).message);
+      }
+      setLoading(false);
+      setJob(null);
     }
-    if (!projectData) return;
-    const reloaded = await openProjectDirectory();
-    setProjectData(reloaded);
-    return await runProjectScan();
   }
 
   function openRemediationForFinding(findingId?: string) {
@@ -490,10 +644,75 @@ export default function ProjectWorkspace({
               flexWrap: "wrap",
             }}
           >
-            {/* GitHub Rescan or Local folder connect/disconnect */}
+            {/* Rescan Profile Selector (Fast vs Deep) */}
+            <div
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                background: "var(--surface-2, rgba(255, 255, 255, 0.05))",
+                border: "1px solid var(--border, rgba(255, 255, 255, 0.12))",
+                borderRadius: "6px",
+                padding: "2px",
+                gap: "2px",
+              }}
+              title={
+                profile === "fast"
+                  ? "Fast Profile: Direct dependencies and top-level packages (faster budget)"
+                  : "Deep Profile: Up to 20 packages and 4 levels deep (thorough inspection)"
+              }
+            >
+              <button
+                type="button"
+                onClick={() => setProfile("fast")}
+                disabled={loading}
+                aria-label="Set fast rescan profile"
+                style={{
+                  padding: "3px 8px",
+                  fontSize: "11px",
+                  fontWeight: profile === "fast" ? 600 : 400,
+                  borderRadius: "4px",
+                  border: "none",
+                  cursor: loading ? "not-allowed" : "pointer",
+                  background:
+                    profile === "fast" ? "var(--accent, #c5f467)" : "transparent",
+                  color:
+                    profile === "fast"
+                      ? "var(--on-accent, #111c08)"
+                      : "var(--muted, #94a3b8)",
+                  transition: "all 0.15s ease",
+                }}
+              >
+                Fast
+              </button>
+              <button
+                type="button"
+                onClick={() => setProfile("deep")}
+                disabled={loading}
+                aria-label="Set deep rescan profile"
+                style={{
+                  padding: "3px 8px",
+                  fontSize: "11px",
+                  fontWeight: profile === "deep" ? 600 : 400,
+                  borderRadius: "4px",
+                  border: "none",
+                  cursor: loading ? "not-allowed" : "pointer",
+                  background:
+                    profile === "deep" ? "var(--accent, #c5f467)" : "transparent",
+                  color:
+                    profile === "deep"
+                      ? "var(--on-accent, #111c08)"
+                      : "var(--muted, #94a3b8)",
+                  transition: "all 0.15s ease",
+                }}
+              >
+                Deep
+              </button>
+            </div>
+
+            {/* GitHub Rescan or Local folder rescan/connect/disconnect */}
             {activeReport?.source_metadata?.source_type === "github" ? (
               <button
-                onClick={handleRescan}
+                onClick={() => handleRescan()}
                 disabled={loading}
                 className="button secondary compact"
                 style={{
@@ -503,20 +722,96 @@ export default function ProjectWorkspace({
                   gap: "6px",
                 }}
               >
-                <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
-                <span>Rescan Repository</span>
+                {loading ? (
+                  <>
+                    <RefreshCw size={14} className="animate-spin" />
+                    <span>{job?.stage || "Rescanning..."}</span>
+                  </>
+                ) : rescanSuccess ? (
+                  <>
+                    <CheckCircle2 size={14} color="#10b981" />
+                    <span>Rescan Complete</span>
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw size={14} />
+                    <span>Rescan Repository</span>
+                  </>
+                )}
               </button>
             ) : projectData ? (
+              <>
+                <button
+                  onClick={() => handleRescan()}
+                  disabled={loading}
+                  className="button secondary compact"
+                  style={{
+                    fontSize: "12px",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                  }}
+                >
+                  {loading ? (
+                    <>
+                      <RefreshCw size={14} className="animate-spin" />
+                      <span>{job?.stage || "Rescanning..."}</span>
+                    </>
+                  ) : rescanSuccess ? (
+                    <>
+                      <CheckCircle2 size={14} color="#10b981" />
+                      <span>Rescan Complete</span>
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw size={14} />
+                      <span>Rescan Project</span>
+                    </>
+                  )}
+                </button>
+                <button
+                  onClick={handleDisconnect}
+                  disabled={loading}
+                  className="button secondary compact"
+                  style={{ fontSize: "12px" }}
+                >
+                  Disconnect Folder
+                </button>
+              </>
+            ) : activeReport?.project_id?.startsWith("demo:") ||
+              activeReport?.source === "synthetic fixture" ? (
               <button
-                onClick={handleDisconnect}
+                onClick={() => handleRescan()}
+                disabled={loading}
                 className="button secondary compact"
-                style={{ fontSize: "12px" }}
+                style={{
+                  fontSize: "12px",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                }}
               >
-                Disconnect Folder
+                {loading ? (
+                  <>
+                    <RefreshCw size={14} className="animate-spin" />
+                    <span>{job?.stage || "Rescanning..."}</span>
+                  </>
+                ) : rescanSuccess ? (
+                  <>
+                    <CheckCircle2 size={14} color="#10b981" />
+                    <span>Rescan Complete</span>
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw size={14} />
+                    <span>Rescan Example</span>
+                  </>
+                )}
               </button>
             ) : (
               <button
                 onClick={handleConnectProject}
+                disabled={loading}
                 className="button secondary compact"
                 style={{
                   fontSize: "12px",
@@ -716,6 +1011,39 @@ export default function ProjectWorkspace({
           </div>
         </div>
       </div>
+
+      {/* Rescan Success notification */}
+      {rescanSuccess && (
+        <div
+          style={{
+            padding: "12px 16px",
+            borderRadius: "8px",
+            background: "rgba(16, 185, 129, 0.12)",
+            border: "1px solid rgba(16, 185, 129, 0.3)",
+            color: "var(--foreground, #10b981)",
+            fontSize: "13px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <CheckCircle2 size={16} color="#10b981" />
+            <span>{rescanSuccess}</span>
+          </div>
+          <button
+            onClick={() => setRescanSuccess(null)}
+            style={{
+              background: "none",
+              border: "none",
+              color: "var(--muted)",
+              cursor: "pointer",
+            }}
+          >
+            <X size={15} />
+          </button>
+        </div>
+      )}
 
       {/* Error alert */}
       {error && (

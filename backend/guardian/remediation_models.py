@@ -15,6 +15,12 @@ PlanStatus = Literal[
     'stale',
     'pr_closed'
 ]
+ValidationStatus = Literal[
+    'VERIFIED',
+    'UNVERIFIED',
+    'REJECTED',
+    'VALIDATION_FAILED'
+]
 OperationType = Literal['update', 'create']
 
 class TextEdit(BaseModel):
@@ -49,6 +55,8 @@ class RemediationPlan(BaseModel):
     recommended_verification: List[str] = Field(default_factory=list)
     limitations: List[str] = Field(default_factory=list)
     status: PlanStatus = 'proposed'
+    validation_status: ValidationStatus = 'VERIFIED'
+    validation_reasons: List[str] = Field(default_factory=list)
     created_at: str
     repository_id: Optional[int] = None
     branch: Optional[str] = None

@@ -15,6 +15,10 @@ export type DependencyAccounting = {
 
 export type FindingBreakdown = {
   total: number;
+  critical: number;
+  high: number;
+  medium: number;
+  low: number;
   actionable: number;
   informational: number;
   advisories: number;
@@ -67,6 +71,10 @@ export function getDependencyAccounting(report: Report): DependencyAccounting {
 }
 
 export function getFindingBreakdown(findings: Finding[]): FindingBreakdown {
+  const critical = findings.filter((f) => f.severity === "critical").length;
+  const high = findings.filter((f) => f.severity === "high").length;
+  const medium = findings.filter((f) => f.severity === "medium").length;
+  const low = findings.filter((f) => f.severity === "low").length;
   const actionable = findings.filter((f) => f.severity !== "info");
   const informational = findings.filter((f) => f.severity === "info");
   const advisories = findings.filter(
@@ -92,6 +100,10 @@ export function getFindingBreakdown(findings: Finding[]): FindingBreakdown {
 
   return {
     total: findings.length,
+    critical,
+    high,
+    medium,
+    low,
     actionable: actionable.length,
     informational: informational.length,
     advisories: advisories.length,
