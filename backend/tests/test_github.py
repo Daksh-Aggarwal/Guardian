@@ -1001,7 +1001,7 @@ def test_teammate_session_isolation_and_no_preloaded_account(github_env, test_cl
 
 def test_adding_account_immediately_active_and_selected(github_env, test_client):
     """Adding a new account via callback immediately activates and selects it in the session."""
-    sess_user = "sess_user_active_test"
+    sess_user = storage.create_session(session_id="sess_user_active_test")
 
     # Suppose Daksh's account was already in SQLite
     storage.save_github_installation({
@@ -1148,6 +1148,26 @@ def test_sync_installations_does_not_auto_link_single_account(github_env, test_c
         st_resp = test_client.get("/api/github/status", cookies={"guardian_session": sess_id})
         assert st_resp.json()["connected"] is True
         assert st_resp.json()["installation"]["id"] == 333
+
+def test_python_and_manifest_files_eligible():
+    """Verify Python code files, manifests, and JS/TS files are eligible for repository ingestion."""
+    assert github.is_eligible_code_file("main.py") is True
+    assert github.is_eligible_code_file("src/app.py") is True
+    assert github.is_eligible_code_file("service.pyw") is True
+    assert github.is_eligible_code_file("requirements.txt") is True
+    assert github.is_eligible_code_file("requirements-dev.txt") is True
+    assert github.is_eligible_code_file("setup.py") is True
+    assert github.is_eligible_code_file("setup.cfg") is True
+    assert github.is_eligible_code_file("pyproject.toml") is True
+    assert github.is_eligible_code_file("poetry.lock") is True
+    assert github.is_eligible_code_file("package.json") is True
+    assert github.is_eligible_code_file("index.ts") is True
+
+    # Ineligible files
+    assert github.is_eligible_code_file("image.png") is False
+    assert github.is_eligible_code_file("binary.exe") is False
+    assert github.is_eligible_code_file("data.csv") is False
+
 
 
 

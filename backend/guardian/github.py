@@ -43,14 +43,17 @@ logger = logging.getLogger("guardian.github")
 SUPPORTED_EXTENSIONS = {
     '.js', '.mjs', '.cjs', '.jsx',
     '.ts', '.mts', '.cts', '.tsx',
-    '.json', '.yaml', '.yml'
+    '.json', '.yaml', '.yml',
+    '.py', '.pyw', '.pth', '.start',
+    '.toml', '.cfg'
 }
 
 # Supported filenames without standard extensions
 SUPPORTED_FILENAMES = {
     'package.json', 'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml',
     'tsconfig.json', 'jsconfig.json', '.npmrc',
-    'pyproject.toml', 'poetry.lock', 'Pipfile', 'Pipfile.lock', 'requirements.txt'
+    'pyproject.toml', 'poetry.lock', 'Pipfile', 'Pipfile.lock', 'requirements.txt',
+    'uv.lock', 'pylock.toml', 'setup.cfg', 'setup.py', 'requirements.in'
 }
 
 # Protected files that must not be modified by automated remediation
@@ -957,6 +960,8 @@ def is_eligible_code_file(path: str) -> bool:
     """Checks whether a relative path points to a supported text/code file."""
     basename = posixpath.basename(path)
     if basename in SUPPORTED_FILENAMES:
+        return True
+    if basename.startswith('requirements') and basename.endswith('.txt'):
         return True
     ext = posixpath.splitext(basename)[1].lower()
     return ext in SUPPORTED_EXTENSIONS

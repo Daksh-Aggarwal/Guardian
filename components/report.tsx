@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowDownToLine,
@@ -84,6 +84,25 @@ export default function ReportView({
   handoffRequest?: typeof api;
 }) {
   const [advanced, setAdvanced] = useState(false);
+  const tabsRef = useRef<HTMLDivElement>(null);
+
+  const navigateToTab = (
+    targetTab: "Findings" | "Dependencies" | "Coverage" | "Evidence",
+    options?: { domain?: string; severity?: string },
+  ) => {
+    setTab(targetTab);
+    if (options?.domain !== undefined) {
+      setFilterDomain(options.domain);
+    }
+    if (options?.severity !== undefined) {
+      setFilterSeverity(options.severity);
+    }
+    setTimeout(() => {
+      if (tabsRef.current) {
+        tabsRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }, 60);
+  };
   const [tab, setTab] = useState<
     "Findings" | "Dependencies" | "Coverage" | "Evidence"
   >("Findings");
@@ -584,14 +603,177 @@ export default function ReportView({
               {report.findings.length} recorded {report.findings.length === 1 ? "finding" : "findings"} · Review diffs before writing
             </span>
           </div>
-        </section>
+      </section>
       )}
+
+      {/* 4 Independent Assessment Dimension Cards */}
+      <section className="dimensions-section">
+        <div className="dimension-grid">
+          {/* 1. Behavioral Assessment */}
+          <SecurityDimensionCard
+            title="Behavioral Assessment"
+            domain="CODE BEHAVIOR"
+            status={
+              elevatedBehavioral.length > 0
+                ? "Signals detected"
+                : report.files_analyzed === 0
+                  ? "Unavailable"
+                  : "Clean"
+            }
+            statusTone={
+              elevatedBehavioral.some((f) =>
+                ["critical", "high"].includes(f.severity),
+              )
+                ? "danger"
+                : elevatedBehavioral.length > 0
+                  ? "warning"
+                  : report.files_analyzed === 0
+                    ? "purple"
+                    : "success"
+            }
+            headline={
+              elevatedBehavioral.length > 0
+                ? `${elevatedBehavioral.length} behavioral ${elevatedBehavioral.length === 1 ? "signal" : "signals"}`
+                : report.files_analyzed === 0
+                  ? "Source code uninspected"
+                  : "No suspicious behaviors"
+            }
+            description={
+              report.files_analyzed === 0
+                ? "Manifest-only scan: no source code syntax trees analyzed."
+                : advanced
+                  ? `Analyzed ${report.files_analyzed} files under AST analysis for process execution, network sinks, and credential reads.`
+                  : elevatedBehavioral.length > 0
+                    ? "Suspicious runtime patterns like sensitive data access or shell commands detected."
+                    : "Direct AST inspection found no credential exfiltration, shell spawning, or dynamic code execution."
+            }
+            metric={elevatedBehavioral.length}
+            metricLabel="behavioral findings"
+            icon={<FileCode2 size={18} />}
+            onClick={() => {
+              navigateToTab("Findings", { domain: "behavioral" });
+            }}
+          />
+
+          {/* 2. Known Vulnerabilities (OSV) */}
+          <SecurityDimensionCard
+            title="Known Vulnerabilities"
+            domain="OSV DATABASE"
+            status={
+              osvFindings.length > 0
+                ? "Advisories present"
+                : report.intelligence === "checked"
+                  ? "Checked"
+                  : report.intelligence
+            }
+            statusTone={
+              osvFindings.some((f) => ["critical", "high"].includes(f.severity))
+                ? "danger"
+                : osvFindings.length > 0
+                  ? "warning"
+                  : "success"
+            }
+            headline={
+              osvFindings.length > 0
+                ? `${osvFindings.length} advisory ${osvFindings.length === 1 ? "match" : "matches"}`
+                : "No known vulnerabilities"
+            }
+            description={
+              osvFindings.length > 0
+                ? `${osvFindings.filter((f) => f.severity === "critical").length} critical, ${osvFindings.filter((f) => f.severity === "high").length} high priority vulnerabilities found in resolved dependency versions.`
+                : `Queried the OSV advisory database against ${deps.totalResolved} resolved dependency ${deps.totalResolved === 1 ? "version" : "versions"}.`
+            }
+            metric={osvFindings.length}
+            metricLabel="upstream advisories"
+            icon={<Network size={18} />}
+            onClick={() => {
+              navigateToTab("Findings", { domain: "vulnerabilities" });
+            }}
+          />
+
+          {/* 3. Package Integrity */}
+          <SecurityDimensionCard
+            title="Package Integrity"
+            domain="CHECKSUM VERIFICATION"
+            status={
+              integrityFindings.length > 0
+                ? "Integrity concern"
+                : report.root_integrity?.status === "verified"
+                  ? "Verified"
+                  : report.root_integrity?.status || "Not applicable"
+            }
+            statusTone={
+              integrityFindings.length > 0
+                ? "danger"
+                : report.root_integrity?.status === "verified"
+                  ? "success"
+                  : "neutral"
+            }
+            headline={
+              integrityFindings.length > 0
+                ? `${integrityFindings.length} checksum mismatches`
+                : report.root_integrity?.status === "verified"
+                  ? "Registry checksum verified"
+                  : "Integrity verified or local"
+            }
+            description={
+              report.root_integrity
+                ? `Published SHA-512 / SHA-256 digest matches registry metadata. (Notice: Checksums establish byte consistency, never software safety.)`
+                : "No remote npm tarballs downloaded; project files evaluated in bounded local memory."
+            }
+            metric={report.root_integrity?.status || "Local"}
+            metricLabel="registry digest status"
+            icon={<ShieldCheck size={18} />}
+            onClick={() => navigateToTab("Dependencies")}
+          />
+
+          {/* 4. Source Inspection Coverage */}
+          <SecurityDimensionCard
+            title="Inspection Coverage"
+            domain="ANALYSIS BOUNDARIES"
+            status={
+              report.assessments?.inspection?.status ||
+              (report.files_analyzed > 0 ? "Complete" : "Manifest only")
+            }
+            statusTone={
+              report.assessments?.inspection?.status === "incomplete" ||
+              report.coverage.some((c) => c.includes("skipped"))
+                ? "warning"
+                : report.files_analyzed === 0
+                  ? "purple"
+                  : "success"
+            }
+            headline={
+              report.inspection_summary
+                ? `${deps.inspected} / ${deps.totalResolved} dependencies inspected`
+                : `${report.files_analyzed} source files inspected`
+            }
+            description={
+              report.inspection_summary
+                ? `${deps.skipped} skipped by budget profile, ${deps.unavailable + deps.unresolved} unavailable or unretrieved.`
+                : "Deep syntax analysis executed under bounded recursion without executing untrusted code."
+            }
+            metric={
+              report.inspection_summary
+                ? `${deps.inspected}/${deps.totalResolved}`
+                : `${report.files_analyzed}`
+            }
+            metricLabel={
+              report.inspection_summary
+                ? "inspected dependencies"
+                : "files analyzed"
+            }
+            icon={<Package size={18} />}
+            onClick={() => navigateToTab("Coverage")}
+          />
+        </div>
+      </section>
 
       {/* Main Content Area: Tabs + Aside */}
       <div className="report-body-layout">
         <div className="report-main-col">
           {/* Navigation Tabs */}
-          <div className="report-tab-nav" role="tablist">
+          <div ref={tabsRef} className="report-tab-nav" role="tablist" id="report-tabs">
             <button
               type="button"
               role="tab"

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   Globe,
   Loader2,
@@ -57,6 +57,17 @@ export default function GitHubConnectPanel({
   const [activeCommitSha, setActiveCommitSha] = useState<string | null>(null);
   const [startingScan, setStartingScan] = useState(false);
   const [linkingId, setLinkingId] = useState<number | null>(null);
+  const repoListRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = repoListRef.current;
+    if (!el) return;
+    const handleWheel = (e: WheelEvent) => {
+      e.stopPropagation();
+    };
+    el.addEventListener("wheel", handleWheel, { passive: true });
+    return () => el.removeEventListener("wheel", handleWheel);
+  }, [repos, loadingRepos]);
 
   // Fetch connection status
   const fetchStatus = async () => {
@@ -381,7 +392,21 @@ export default function GitHubConnectPanel({
             <p style={{ margin: 0, fontSize: "12px", color: "var(--muted)", lineHeight: 1.4 }}>
               The Guardian GitHub App is already installed on the following account(s). Choose your account to connect this session:
             </p>
-            <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginTop: "4px" }}>
+            <div
+              data-lenis-prevent="true"
+              className="github-repo-list"
+              onWheel={(e) => e.stopPropagation()}
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: "8px",
+                marginTop: "4px",
+                maxHeight: "240px",
+                overflowY: "auto",
+                overscrollBehavior: "contain",
+                WebkitOverflowScrolling: "touch",
+              }}
+            >
               {status.available_installations.map((inst) => (
                 <div
                   key={inst.id}
@@ -612,9 +637,15 @@ export default function GitHubConnectPanel({
 
         {/* Repositories Scrollable List */}
         <div
+          ref={repoListRef}
+          data-lenis-prevent="true"
+          className="github-repo-list"
+          onWheel={(e) => e.stopPropagation()}
           style={{
-            maxHeight: "180px",
+            maxHeight: "220px",
             overflowY: "auto",
+            overscrollBehavior: "contain",
+            WebkitOverflowScrolling: "touch",
             display: "flex",
             flexDirection: "column",
             gap: "4px",

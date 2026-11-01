@@ -123,6 +123,29 @@ export default function HandoffModal({
   const [copied, setCopied] = useState(false);
   const requestIdRef = React.useRef(0);
 
+  // Lock background scroll and pause Lenis when modal is open
+  useEffect(() => {
+    if (isOpen) {
+      const prevBodyOverflow = document.body.style.overflow;
+      const prevHtmlOverflow = document.documentElement.style.overflow;
+      document.body.style.overflow = "hidden";
+      document.documentElement.style.overflow = "hidden";
+
+      const lenis = (window as any).__lenis;
+      if (lenis && typeof lenis.stop === "function") {
+        lenis.stop();
+      }
+
+      return () => {
+        document.body.style.overflow = prevBodyOverflow;
+        document.documentElement.style.overflow = prevHtmlOverflow;
+        if (lenis && typeof lenis.start === "function") {
+          lenis.start();
+        }
+      };
+    }
+  }, [isOpen]);
+
   // Compute active finding IDs based on scopeType
   const activeFindingIds = useMemo(() => {
     if (scopeType === "single" && initialFindingId) {
@@ -232,6 +255,8 @@ export default function HandoffModal({
   return (
     <AnimatePresence>
       <div
+        data-lenis-prevent="true"
+        onWheel={(e) => e.stopPropagation()}
         style={{
           position: "fixed",
           inset: 0,
@@ -454,7 +479,7 @@ export default function HandoffModal({
                           ? "var(--accent)"
                           : "transparent",
                       color:
-                        mode === "focused_fix" ? "#fff" : "var(--muted)",
+                        mode === "focused_fix" ? "var(--on-accent)" : "var(--muted)",
                     }}
                   >
                     Focused Fix
@@ -473,7 +498,7 @@ export default function HandoffModal({
                           ? "var(--accent)"
                           : "transparent",
                       color:
-                        mode === "deep_remediation" ? "#fff" : "var(--muted)",
+                        mode === "deep_remediation" ? "var(--on-accent)" : "var(--muted)",
                     }}
                   >
                     Deep Security Remediation
@@ -518,7 +543,7 @@ export default function HandoffModal({
                             ? "var(--accent)"
                             : "transparent",
                         color:
-                          scopeType === "single" ? "#fff" : "var(--muted)",
+                          scopeType === "single" ? "var(--on-accent)" : "var(--muted)",
                       }}
                     >
                       Finding ({initialFindingId})
@@ -539,7 +564,7 @@ export default function HandoffModal({
                             ? "var(--accent)"
                             : "transparent",
                         color:
-                          scopeType === "selected" ? "#fff" : "var(--muted)",
+                          scopeType === "selected" ? "var(--on-accent)" : "var(--muted)",
                       }}
                     >
                       {initialFindingIds.length} Selected Findings
@@ -556,7 +581,7 @@ export default function HandoffModal({
                       cursor: "pointer",
                       background:
                         scopeType === "all" ? "var(--accent)" : "transparent",
-                      color: scopeType === "all" ? "#fff" : "var(--muted)",
+                      color: scopeType === "all" ? "var(--on-accent)" : "var(--muted)",
                     }}
                   >
                     Entire Scan ({report.findings?.length || 0})
