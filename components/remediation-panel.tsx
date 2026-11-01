@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   AlertTriangle,
@@ -70,6 +70,14 @@ export default function RemediationPanel({
   const [selectedFindingIds, setSelectedFindingIds] = useState<string[]>(
     targetFindingId ? [targetFindingId] : [],
   );
+
+  useEffect(() => {
+    if (targetFindingId) {
+      setSelectedFindingIds((prev) =>
+        prev.includes(targetFindingId) ? prev : [...prev, targetFindingId],
+      );
+    }
+  }, [targetFindingId]);
   const [verification, setVerification] = useState<VerificationResult | null>(
     null,
   );
@@ -550,6 +558,49 @@ export default function RemediationPanel({
       f.rule.startsWith("INSTALL_"),
   );
 
+  const selectAllRef = useRef<HTMLInputElement>(null);
+
+  const allEligibleSelected =
+    eligibleFindings.length > 0 &&
+    eligibleFindings.every((f) => selectedFindingIds.includes(f.id));
+
+  const selectedEligibleCount = eligibleFindings.filter((f) =>
+    selectedFindingIds.includes(f.id),
+  ).length;
+
+  const someEligibleSelected =
+    selectedEligibleCount > 0 && !allEligibleSelected;
+
+  useEffect(() => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate = someEligibleSelected;
+    }
+  }, [someEligibleSelected]);
+
+  const handleToggleSelectAll = () => {
+    if (allEligibleSelected) {
+      const eligibleIds = new Set(eligibleFindings.map((f) => f.id));
+      setSelectedFindingIds((prev) => prev.filter((id) => !eligibleIds.has(id)));
+    } else {
+      const eligibleIds = eligibleFindings.map((f) => f.id);
+      setSelectedFindingIds((prev) =>
+        Array.from(new Set([...prev, ...eligibleIds])),
+      );
+    }
+  };
+
+  const handleSelectAll = () => {
+    const eligibleIds = eligibleFindings.map((f) => f.id);
+    setSelectedFindingIds((prev) =>
+      Array.from(new Set([...prev, ...eligibleIds])),
+    );
+  };
+
+  const handleClearAll = () => {
+    const eligibleIds = new Set(eligibleFindings.map((f) => f.id));
+    setSelectedFindingIds((prev) => prev.filter((id) => !eligibleIds.has(id)));
+  };
+
   return (
     <div
       className="remediation-panel-overlay"
@@ -873,7 +924,32 @@ export default function RemediationPanel({
               style={{ display: "flex", flexDirection: "column", gap: "14px" }}
             >
               <div>
-                <Eyebrow>SELECT FINDINGS TO ADDRESS</Eyebrow>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    flexWrap: "wrap",
+                    gap: "8px",
+                  }}
+                >
+                  <Eyebrow>SELECT FINDINGS TO ADDRESS</Eyebrow>
+                  {eligibleFindings.length > 0 && (
+                    <span
+                      style={{
+                        fontSize: "11px",
+                        color:
+                          selectedEligibleCount > 0
+                            ? "var(--accent-blue, #3b82f6)"
+                            : "var(--muted)",
+                        fontWeight: selectedEligibleCount > 0 ? 600 : 400,
+                      }}
+                    >
+                      {selectedEligibleCount} of {eligibleFindings.length} selected
+                    </span>
+                  )}
+                </div>
+
                 <p
                   style={{
                     fontSize: "12px",
@@ -884,6 +960,90 @@ export default function RemediationPanel({
                   Select one or more findings for Guardian to formulate a
                   targeted remediation patch:
                 </p>
+
+                {eligibleFindings.length > 0 && (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      padding: "8px 12px",
+                      background: "rgba(255, 255, 255, 0.02)",
+                      border: "1px solid var(--border)",
+                      borderRadius: "6px",
+                      marginBottom: "10px",
+                      gap: "10px",
+                    }}
+                  >
+                    <label
+                      htmlFor="autopilot-select-all-issues"
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "8px",
+                        cursor: "pointer",
+                        fontSize: "12px",
+                        fontWeight: 500,
+                        userSelect: "none",
+                      }}
+                    >
+                      <input
+                        id="autopilot-select-all-issues"
+                        ref={selectAllRef}
+                        type="checkbox"
+                        checked={allEligibleSelected}
+                        onChange={handleToggleSelectAll}
+                        style={{
+                          cursor: "pointer",
+                          accentColor: "var(--accent-blue, #3b82f6)",
+                          width: "15px",
+                          height: "15px",
+                        }}
+                        aria-label="Select all issues"
+                      />
+                      <span>Select all issues ({eligibleFindings.length})</span>
+                    </label>
+
+                    <div
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "6px",
+                      }}
+                    >
+                      {!allEligibleSelected ? (
+                        <button
+                          type="button"
+                          onClick={handleSelectAll}
+                          className="button secondary compact"
+                          style={{
+                            fontSize: "11px",
+                            padding: "3px 8px",
+                            height: "24px",
+                            lineHeight: "20px",
+                          }}
+                        >
+                          Select all
+                        </button>
+                      ) : null}
+                      {selectedEligibleCount > 0 && (
+                        <button
+                          type="button"
+                          onClick={handleClearAll}
+                          className="button secondary compact"
+                          style={{
+                            fontSize: "11px",
+                            padding: "3px 8px",
+                            height: "24px",
+                            lineHeight: "20px",
+                          }}
+                        >
+                          Deselect all
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 <div
                   style={{
@@ -929,6 +1089,7 @@ export default function RemediationPanel({
                             justifyContent: "space-between",
                             cursor: "pointer",
                             gap: "10px",
+                            transition: "background 0.15s ease, border-color 0.15s ease",
                           }}
                         >
                           <div
@@ -941,8 +1102,21 @@ export default function RemediationPanel({
                             <input
                               type="checkbox"
                               checked={isSelected}
-                              onChange={() => {}}
-                              style={{ cursor: "pointer" }}
+                              onClick={(e) => e.stopPropagation()}
+                              onChange={() => {
+                                setSelectedFindingIds((prev) =>
+                                  prev.includes(f.id)
+                                    ? prev.filter((id) => id !== f.id)
+                                    : [...prev, f.id],
+                                );
+                              }}
+                              style={{
+                                cursor: "pointer",
+                                accentColor: "var(--accent-blue, #3b82f6)",
+                                width: "15px",
+                                height: "15px",
+                              }}
+                              aria-label={`Select issue ${f.title}`}
                             />
                             <div>
                               <strong style={{ fontSize: "13px" }}>
@@ -987,7 +1161,7 @@ export default function RemediationPanel({
               >
                 <button
                   onClick={generatePlan}
-                  disabled={loading}
+                  disabled={loading || eligibleFindings.length === 0}
                   className="button primary"
                   style={{
                     display: "inline-flex",
@@ -1000,7 +1174,11 @@ export default function RemediationPanel({
                   ) : (
                     <Wrench size={16} />
                   )}
-                  {loading ? "Generating plan..." : "Generate remediation plan"}
+                  {loading
+                    ? "Generating plan..."
+                    : selectedEligibleCount > 0
+                      ? `Generate remediation plan (${selectedEligibleCount} ${selectedEligibleCount === 1 ? "issue" : "issues"})`
+                      : "Generate remediation plan (all actionable)"}
                 </button>
               </div>
             </div>

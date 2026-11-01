@@ -127,6 +127,30 @@ export default function VulnerabilitiesExplorer({
     });
   }, [packageGroups, search, severityFilter]);
 
+  const allFilteredFindings = useMemo(() => {
+    return filteredGroups.flatMap((g) => g.findings);
+  }, [filteredGroups]);
+
+  const allFilteredSelected =
+    allFilteredFindings.length > 0 &&
+    allFilteredFindings.every((f) => selectedFindingIds.has(f.id));
+
+  const toggleSelectAll = () => {
+    if (allFilteredSelected) {
+      setSelectedFindingIds((prev) => {
+        const next = new Set(prev);
+        allFilteredFindings.forEach((f) => next.delete(f.id));
+        return next;
+      });
+    } else {
+      setSelectedFindingIds((prev) => {
+        const next = new Set(prev);
+        allFilteredFindings.forEach((f) => next.add(f.id));
+        return next;
+      });
+    }
+  };
+
   return (
     <div
       style={{
@@ -217,6 +241,29 @@ export default function VulnerabilitiesExplorer({
             <option value="medium">Medium</option>
             <option value="low">Low</option>
           </select>
+
+          {/* Select All Action */}
+          {allFilteredFindings.length > 0 && (
+            <button
+              onClick={toggleSelectAll}
+              className="button secondary compact"
+              style={{
+                fontSize: "12px",
+                padding: "6px 12px",
+              }}
+              title={
+                allFilteredSelected
+                  ? "Deselect all filtered vulnerabilities"
+                  : "Select all filtered vulnerabilities"
+              }
+            >
+              <span>
+                {allFilteredSelected
+                  ? "Deselect All"
+                  : `Select All (${allFilteredFindings.length})`}
+              </span>
+            </button>
+          )}
 
           {/* Guardian Handoff Action */}
           {(onHandoffSelected || onHandoffScan) && (
