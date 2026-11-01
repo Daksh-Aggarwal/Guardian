@@ -251,53 +251,6 @@ A state-of-the-art interactive workspace engineered with **`@xyflow/react`** and
 
 ---
 
-### 8. ⚖️ Decoupled 4-Dimension Security Assessment
-Guardian strictly enforces independent security domains. A clean vulnerability scan never conceals uninspected code, and external API outages never break local static analysis:
-
-```
-┌───────────────────────────┬───────────────────────────┐
-│  ⚡ BEHAVIORAL SIGNALS    │  🛡️ KNOWN VULNERABILITIES │
-│  - Static AST Data Flow   │  - OSV Querybatch Data    │
-│  - Install Scripts        │  - CVSS v2 / v3 / v4      │
-│  - Network & Filesystem   │  - Fixed Version Callouts │
-├───────────────────────────┼───────────────────────────┤
-│  🔐 PACKAGE INTEGRITY     │  📊 INSPECTION COVERAGE   │
-│  - Subresource Integrity  │  - Inspected vs Skipped   │
-│  - Lockfile vs Registry   │  - Strict Reconciliation  │
-│  - Tamper Detection (SRI) │  - Scope Accounting       │
-└───────────────────────────┴───────────────────────────┘
-```
-
----
-
-## 🎬 The 5-Minute Live Demo Script
-
-Impressing an audience or presentation panel? Run this proven walkthrough:
-
-```
- 1. Everyday Package    ──>  2. Sensitive Data Leak  ──>  3. Suspicious Installer
-    (Baseline sanity)            (AST source-to-sink)         (AI Advisor drawer)
-           │                             │                            │
-           ▼                             ▼                            ▼
- 4. Terminal CLI        ──>  5. In-Browser Autopilot ──>  6. Multi-Agent Handoff
-    (Pre-install block)          (Safe fix & rescan)          (Claude Code / Cursor)
-```
-
-1. **Step 1: The Baseline Sanity Check**  
-   Click **Everyday package** on the dashboard launchpad. Notice how normal HTTP requests and environment access are cataloged as neutral **Observations**, not alarming vulnerabilities. Zero alert fatigue!
-2. **Step 2: Uncovering AST Data-Flow Leaks**  
-   Click **Sensitive data flow**. Switch to **Advanced mode** on the sensitive transmission finding. Show how Guardian tracks `process.env.NPM_TOKEN` through variables and parameters straight into an `https.request()` network call!
-3. **Step 3: Correlated Behavioral Risks & AI Advisor**  
-   Click **Suspicious installer**. See `INSTALL_REMOTE` and `EXEC_DYNAMIC` flagged. Open the **Guardian Intelligence** drawer and ask: *"What should I do next?"* Watch the AI cite findings with clickable links that scroll to the exact code snippet.
-4. **Step 4: Terminal Pre-Installation Enforcement & Sync**  
-   Switch to the terminal: run `guardian check npm:postinstall-demo`. Show the immediate `BLOCK` verdict before installation. Run `guardian sync` and switch to the browser to reveal the scan instantly appearing in the web dashboard!
-5. **Step 5: In-Browser Autopilot Remediation & Rollback**  
-   Select `fixtures/remediation-demo`. Click **Prepare a fix with Guardian**. Review the interactive diff removing the dangerous install hook. Click **Approve and apply** (backed by IndexedDB). Click **Rescan & verify** to watch the finding flip to **Resolved**! Then click **Undo latest changes** to prove instantaneous safe rollback.
-6. **Step 6: Multi-Agent Handoff**  
-   Click **Export Handoff Instructions**. Choose **Claude Code** or **Cursor**, toggle **Deep Remediation**, and show the prompt-injection defenses and the machine-readable JSON Evidence Appendix.
-
----
-
 ## 🚀 Quick Local Setup
 
 Want to run the full stack locally? It takes less than 2 minutes.
