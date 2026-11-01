@@ -11,6 +11,7 @@ import {
   Filter,
   ShieldAlert,
   Share2,
+  ChevronUp,
 } from "lucide-react";
 import {
   ArrowLeft,
@@ -32,6 +33,7 @@ import {
   ExternalLink,
   SlidersHorizontal,
   FolderOpen,
+  Terminal,
 } from "@/components/icons";
 import {
   Report,
@@ -119,6 +121,7 @@ export default function ReportView({
   const [copilotFindingId, setCopilotFindingId] = useState<string | null>(null);
   const [handoffOpen, setHandoffOpen] = useState(false);
   const [handoffFindingId, setHandoffFindingId] = useState<string | null>(null);
+  const [cliDetailsOpen, setCliDetailsOpen] = useState(false);
 
   const handleOpenHandoff = (fid?: string) => {
     setHandoffFindingId(fid || null);
@@ -279,35 +282,6 @@ export default function ReportView({
       transition={{ duration: 0.25 }}
       className="report-view-container"
     >
-      {report.cli && (
-        <section
-          className="card"
-          style={{ padding: "1.25rem", marginBottom: "1rem" }}
-          aria-label="CLI installation decision"
-        >
-          <strong>
-            Guardian CLI · {report.cli.ecosystem} ·{" "}
-            {report.cli.decision?.decision || "Decision unavailable"}
-          </strong>
-          <p>
-            Installation: {report.cli.installation?.status || "not attempted"}.
-            Lifecycle scripts: {report.cli.lifecycle_scripts || "disabled"}.
-          </p>
-          {report.cli.imported && (
-            <p>
-              Imported local evidence. Findings, artifact hashes and
-              installation claims were not reverified by this website.
-            </p>
-          )}
-          {!!report.cli.decision?.reasons?.length && (
-            <ul>
-              {report.cli.decision.reasons.map((reason, index) => (
-                <li key={index}>{reason}</li>
-              ))}
-            </ul>
-          )}
-        </section>
-      )}
       {/* Top action bar */}
       <div className="report-action-bar">
         <div className="report-action-left">
@@ -405,6 +379,148 @@ export default function ReportView({
           </div>
         </div>
       </div>
+
+      {/* CLI Installation & Decision Review (Minimized by default to reduce scrolling) */}
+      {report.cli && (() => {
+        const reasons = report.cli.decision?.reasons || [];
+        const decision = report.cli.decision?.decision || "Decision unavailable";
+        const decisionLower = decision.toLowerCase();
+        const decisionClass =
+          decisionLower === "block"
+            ? "block"
+            : decisionLower === "allow"
+              ? "allow"
+              : "review";
+
+        return (
+          <section
+            className="cli-decision-card"
+            aria-label="CLI installation decision"
+          >
+            <div
+              className="cli-decision-header-row"
+              onClick={() => setCliDetailsOpen((prev) => !prev)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setCliDetailsOpen((prev) => !prev);
+                }
+              }}
+              aria-expanded={cliDetailsOpen}
+            >
+              <div className="cli-decision-left">
+                <div className="cli-decision-icon" aria-hidden="true">
+                  <Terminal size={15} />
+                </div>
+                <strong className="cli-decision-title">
+                  Guardian CLI · {report.cli.ecosystem} · {decision}
+                </strong>
+                <span className={`cli-decision-tag ${decisionClass}`}>
+                  {decision}
+                </span>
+                <span className="cli-meta-summary-text">
+                  <span>Installation: {report.cli.installation?.status || "not attempted"}.</span>
+                  <span>Lifecycle scripts: {report.cli.lifecycle_scripts || "disabled"}.</span>
+                  {reasons.length > 0 && (
+                    <span>({reasons.length} {reasons.length === 1 ? "review reason" : "review reasons"})</span>
+                  )}
+                </span>
+                {report.cli.imported && (
+                  <span className="cli-imported-badge">
+                    Imported local evidence (unreverified)
+                  </span>
+                )}
+              </div>
+              <button
+                type="button"
+                className="btn-cli-toggle"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setCliDetailsOpen((prev) => !prev);
+                }}
+                aria-label={cliDetailsOpen ? "Minimize CLI review" : "Expand CLI review"}
+              >
+                <span>{cliDetailsOpen ? "Minimize details" : `Show CLI details (${reasons.length})`}</span>
+                {cliDetailsOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+              </button>
+            </div>
+
+            <AnimatePresence>
+              {cliDetailsOpen && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className="cli-decision-body"
+                >
+                  {report.cli.imported && (
+                    <div className="cli-import-notice">
+                      <Info size={14} style={{ flexShrink: 0, marginTop: 2 }} />
+                      <p style={{ margin: 0 }}>
+                        Imported local evidence. Findings, artifact hashes and
+                        installation claims were not reverified by this website.
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="cli-status-grid">
+                    <div className="cli-status-item">
+                      <strong>Decision Verdict</strong>
+                      <span className={`cli-decision-tag ${decisionClass}`}>{decision}</span>
+                    </div>
+                    <div className="cli-status-item">
+                      <strong>Installation Status</strong>
+                      <span>{report.cli.installation?.status || "not attempted"}</span>
+                    </div>
+                    <div className="cli-status-item">
+                      <strong>Lifecycle Scripts</strong>
+                      <span>{report.cli.lifecycle_scripts || "disabled"}</span>
+                    </div>
+                    {(report.cli.location_count || report.cli.unique_artifacts) && (
+                      <div className="cli-status-item">
+                        <strong>Audit Scope</strong>
+                        <span>
+                          {report.cli.unique_artifacts ?? 0} packages across {report.cli.location_count ?? 0} locations
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {reasons.length > 0 && (
+                    <div className="cli-reasons-container">
+                      <div className="cli-reasons-title">
+                        Decision Reasons ({reasons.length})
+                      </div>
+                      <ul className="cli-reasons-list">
+                        {reasons.map((reason, index) => (
+                          <li key={index} className="cli-reason-item">
+                            <span className="cli-reason-dot" aria-hidden="true" />
+                            <span>{reason}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "12px" }}>
+                    <button
+                      type="button"
+                      className="btn-cli-toggle"
+                      onClick={() => setCliDetailsOpen(false)}
+                    >
+                      <span>Minimize details</span>
+                      <ChevronUp size={14} />
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </section>
+        );
+      })()}
 
       {/* Main Report Header */}
       <header className="report-main-header">
@@ -540,7 +656,7 @@ export default function ReportView({
                 <ChevronRight size={13} />
               </button>
             )}
-            {onPrepareFix && elevatedFindings.length > 0 && (
+            {onPrepareFix && report.findings.length > 0 && (
               <button
                 type="button"
                 className="summary-autopilot-quick-btn"
@@ -554,57 +670,6 @@ export default function ReportView({
           </div>
         </div>
       </section>
-
-      {/* Guardian Autopilot Highlight Banner */}
-      {onPrepareFix && report.findings.length > 0 && (
-        <section className="autopilot-hero-banner">
-          <div className="autopilot-hero-content">
-            <div className="autopilot-hero-badge">
-              <span className="autopilot-pulse-dot" />
-              <Wrench size={12} />
-              <span>GUARDIAN AUTOPILOT REMEDIATION</span>
-            </div>
-            <h3 className="autopilot-hero-title">
-              Prepare precision code fixes with Guardian Autopilot
-            </h3>
-            <p className="autopilot-hero-description">
-              Autonomous security patching engineered with mathematical precision. Proposes deterministic AST syntax edits, renders interactive unified diffs, and applies changes directly in your browser with SHA-256 pre-flight checks and automatic IndexedDB rollback backups.
-            </p>
-            <div className="autopilot-hero-features">
-              <span className="autopilot-feature-pill">
-                <CheckCircle2 size={13} />
-                <span>Deterministic AST Edits</span>
-              </span>
-              <span className="autopilot-feature-pill">
-                <CheckCircle2 size={13} />
-                <span>Interactive Unified Diffs</span>
-              </span>
-              <span className="autopilot-feature-pill">
-                <CheckCircle2 size={13} />
-                <span>IndexedDB Undo Protection</span>
-              </span>
-              <span className="autopilot-feature-pill">
-                <CheckCircle2 size={13} />
-                <span>Zero Server-side Code Execution</span>
-              </span>
-            </div>
-          </div>
-          <div className="autopilot-hero-action-box">
-            <button
-              type="button"
-              className="btn-autopilot-hero-launch"
-              onClick={() => onPrepareFix(elevatedFindings[0] || report.findings[0])}
-            >
-              <Wrench size={16} />
-              <span>Prepare fix with Guardian Autopilot</span>
-              <ArrowRight size={15} />
-            </button>
-            <span className="autopilot-hero-note">
-              {report.findings.length} recorded {report.findings.length === 1 ? "finding" : "findings"} · Review diffs before writing
-            </span>
-          </div>
-      </section>
-      )}
 
       {/* 4 Independent Assessment Dimension Cards */}
       <section className="dimensions-section">
@@ -768,7 +833,6 @@ export default function ReportView({
           />
         </div>
       </section>
-
       {/* Main Content Area: Tabs + Aside */}
       <div className="report-body-layout">
         <div className="report-main-col">
@@ -1508,26 +1572,6 @@ function FindingItemCard({
             </div></li>
             <li><span className="evidence-index">03</span><div>
               <h4>What you can do</h4><p>{f.recommendation}</p>
-              {onPrepareFix && (
-                <div className="finding-autopilot-step-action">
-                  <div className="autopilot-step-label">
-                    <Wrench size={13} />
-                    <span>Guardian Autopilot can generate and apply a verified code patch for this finding.</span>
-                  </div>
-                  <button
-                    type="button"
-                    className="btn-autopilot-step"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onPrepareFix(f);
-                    }}
-                  >
-                    <Wrench size={12} />
-                    <span>Prepare fix with Guardian Autopilot</span>
-                    <ArrowRight size={12} />
-                  </button>
-                </div>
-              )}
             </div></li>
           </ol>
 
