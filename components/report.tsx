@@ -14,10 +14,12 @@ import {
 } from "lucide-react";
 import {
   ArrowLeft,
+  ArrowRight,
   ChevronDown,
   ChevronRight,
   ShieldCheck,
   Check,
+  CheckCircle2,
   Package,
   Wrench,
   Search,
@@ -74,7 +76,7 @@ export default function ReportView({
 }: {
   report: Report;
   onBack: () => void;
-  onPrepareFix?: (finding: Finding) => void;
+  onPrepareFix?: (finding?: Finding) => void;
   onInvestigateProject?: (report: Report) => void;
   onHandoffFinding?: (findingId: string) => void;
   onHandoffScan?: () => void;
@@ -314,6 +316,18 @@ export default function ReportView({
             <span>Get AI Fix Instructions</span>
           </button>
 
+          {onPrepareFix && report.findings.length > 0 && (
+            <button
+              type="button"
+              className="btn-header-autopilot"
+              onClick={() => onPrepareFix(elevatedFindings[0] || report.findings[0])}
+              title="Launch Guardian Autopilot code remediation"
+            >
+              <Wrench size={14} />
+              <span>Prepare Fix with Autopilot</span>
+            </button>
+          )}
+
           {onInvestigateProject && (
             <button
               type="button"
@@ -493,186 +507,85 @@ export default function ReportView({
                 : "Findings to review"}
             </span>
           </div>
-          {elevatedFindings.length > 0 && (
+          <div className="summary-stats-actions">
+            {elevatedFindings.length > 0 && (
+              <button
+                type="button"
+                className="summary-jump-btn"
+                onClick={() => {
+                  setTab("Findings");
+                  setFilterSeverity("all");
+                }}
+              >
+                <span>View findings</span>
+                <ChevronRight size={13} />
+              </button>
+            )}
+            {onPrepareFix && elevatedFindings.length > 0 && (
+              <button
+                type="button"
+                className="summary-autopilot-quick-btn"
+                onClick={() => onPrepareFix(elevatedFindings[0] || report.findings[0])}
+                title="Prepare precision remediation plan with Guardian Autopilot"
+              >
+                <Wrench size={13} />
+                <span>Fix with Autopilot</span>
+              </button>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {/* Guardian Autopilot Highlight Banner */}
+      {onPrepareFix && report.findings.length > 0 && (
+        <section className="autopilot-hero-banner">
+          <div className="autopilot-hero-content">
+            <div className="autopilot-hero-badge">
+              <span className="autopilot-pulse-dot" />
+              <Wrench size={12} />
+              <span>GUARDIAN AUTOPILOT REMEDIATION</span>
+            </div>
+            <h3 className="autopilot-hero-title">
+              Prepare precision code fixes with Guardian Autopilot
+            </h3>
+            <p className="autopilot-hero-description">
+              Autonomous security patching engineered with mathematical precision. Proposes deterministic AST syntax edits, renders interactive unified diffs, and applies changes directly in your browser with SHA-256 pre-flight checks and automatic IndexedDB rollback backups.
+            </p>
+            <div className="autopilot-hero-features">
+              <span className="autopilot-feature-pill">
+                <CheckCircle2 size={13} />
+                <span>Deterministic AST Edits</span>
+              </span>
+              <span className="autopilot-feature-pill">
+                <CheckCircle2 size={13} />
+                <span>Interactive Unified Diffs</span>
+              </span>
+              <span className="autopilot-feature-pill">
+                <CheckCircle2 size={13} />
+                <span>IndexedDB Undo Protection</span>
+              </span>
+              <span className="autopilot-feature-pill">
+                <CheckCircle2 size={13} />
+                <span>Zero Server-side Code Execution</span>
+              </span>
+            </div>
+          </div>
+          <div className="autopilot-hero-action-box">
             <button
               type="button"
-              className="summary-jump-btn"
-              onClick={() => {
-                setTab("Findings");
-                setFilterSeverity("all");
-              }}
+              className="btn-autopilot-hero-launch"
+              onClick={() => onPrepareFix(elevatedFindings[0] || report.findings[0])}
             >
-              <span>View findings</span>
-              <ChevronRight size={13} />
+              <Wrench size={16} />
+              <span>Prepare fix with Guardian Autopilot</span>
+              <ArrowRight size={15} />
             </button>
-          )}
-        </div>
-      </section>
-
-      {/* 4 Independent Assessment Dimension Cards */}
-      <section className="dimensions-section">
-        <div className="dimension-grid">
-          {/* 1. Behavioral Assessment */}
-          <SecurityDimensionCard
-            title="Behavioral Assessment"
-            domain="CODE BEHAVIOR"
-            status={
-              elevatedBehavioral.length > 0
-                ? "Signals detected"
-                : report.files_analyzed === 0
-                  ? "Unavailable"
-                  : "Clean"
-            }
-            statusTone={
-              elevatedBehavioral.some((f) =>
-                ["critical", "high"].includes(f.severity),
-              )
-                ? "danger"
-                : elevatedBehavioral.length > 0
-                  ? "warning"
-                  : report.files_analyzed === 0
-                    ? "purple"
-                    : "success"
-            }
-            headline={
-              elevatedBehavioral.length > 0
-                ? `${elevatedBehavioral.length} behavioral ${elevatedBehavioral.length === 1 ? "signal" : "signals"}`
-                : report.files_analyzed === 0
-                  ? "Source code uninspected"
-                  : "No suspicious behaviors"
-            }
-            description={
-              report.files_analyzed === 0
-                ? "Manifest-only scan: no JavaScript/TypeScript syntax trees analyzed."
-                : advanced
-                  ? `Analyzed ${report.files_analyzed} files under Babel AST for process execution, network sinks, and credential reads.`
-                  : elevatedBehavioral.length > 0
-                    ? "Suspicious runtime patterns like sensitive data access or shell commands detected."
-                    : "Direct AST inspection found no credential exfiltration, shell spawning, or dynamic code execution."
-            }
-            metric={elevatedBehavioral.length}
-            metricLabel="behavioral findings"
-            icon={<FileCode2 size={18} />}
-            onClick={() => {
-              setTab("Findings");
-              setFilterDomain("behavioral");
-            }}
-          />
-
-          {/* 2. Known Vulnerabilities (OSV) */}
-          <SecurityDimensionCard
-            title="Known Vulnerabilities"
-            domain="OSV DATABASE"
-            status={
-              osvFindings.length > 0
-                ? "Advisories present"
-                : report.intelligence === "checked"
-                  ? "Checked"
-                  : report.intelligence
-            }
-            statusTone={
-              osvFindings.some((f) => ["critical", "high"].includes(f.severity))
-                ? "danger"
-                : osvFindings.length > 0
-                  ? "warning"
-                  : "success"
-            }
-            headline={
-              osvFindings.length > 0
-                ? `${osvFindings.length} advisory ${osvFindings.length === 1 ? "match" : "matches"}`
-                : "No known vulnerabilities"
-            }
-            description={
-              osvFindings.length > 0
-                ? `${osvFindings.filter((f) => f.severity === "critical").length} critical, ${osvFindings.filter((f) => f.severity === "high").length} high priority vulnerabilities found in resolved dependency versions.`
-                : `Queried the OSV advisory database against ${deps.totalResolved} resolved dependency ${deps.totalResolved === 1 ? "version" : "versions"}.`
-            }
-            metric={osvFindings.length}
-            metricLabel="upstream advisories"
-            icon={<Network size={18} />}
-            onClick={() => {
-              setTab("Findings");
-              setFilterDomain("vulnerabilities");
-            }}
-          />
-
-          {/* 3. Package Integrity */}
-          <SecurityDimensionCard
-            title="Package Integrity"
-            domain="CHECKSUM VERIFICATION"
-            status={
-              integrityFindings.length > 0
-                ? "Integrity concern"
-                : report.root_integrity?.status === "verified"
-                  ? "Verified"
-                  : report.root_integrity?.status || "Not applicable"
-            }
-            statusTone={
-              integrityFindings.length > 0
-                ? "danger"
-                : report.root_integrity?.status === "verified"
-                  ? "success"
-                  : "neutral"
-            }
-            headline={
-              integrityFindings.length > 0
-                ? `${integrityFindings.length} checksum mismatches`
-                : report.root_integrity?.status === "verified"
-                  ? "Registry checksum verified"
-                  : "Integrity verified or local"
-            }
-            description={
-              report.root_integrity
-                ? `Published SHA-512 / SHA-256 digest matches registry metadata. (Notice: Checksums establish byte consistency, never software safety.)`
-                : "No remote npm tarballs downloaded; project files evaluated in bounded local memory."
-            }
-            metric={report.root_integrity?.status || "Local"}
-            metricLabel="registry digest status"
-            icon={<ShieldCheck size={18} />}
-            onClick={() => setTab("Dependencies")}
-          />
-
-          {/* 4. Source Inspection Coverage */}
-          <SecurityDimensionCard
-            title="Inspection Coverage"
-            domain="ANALYSIS BOUNDARIES"
-            status={
-              report.assessments?.inspection?.status ||
-              (report.files_analyzed > 0 ? "Complete" : "Manifest only")
-            }
-            statusTone={
-              report.assessments?.inspection?.status === "incomplete" ||
-              report.coverage.some((c) => c.includes("skipped"))
-                ? "warning"
-                : report.files_analyzed === 0
-                  ? "purple"
-                  : "success"
-            }
-            headline={
-              report.inspection_summary
-                ? `${deps.inspected} / ${deps.totalResolved} dependencies inspected`
-                : `${report.files_analyzed} source files inspected`
-            }
-            description={
-              report.inspection_summary
-                ? `${deps.skipped} skipped by budget profile, ${deps.unavailable + deps.unresolved} unavailable or unretrieved.`
-                : "Deep syntax analysis executed under bounded recursion without executing untrusted code."
-            }
-            metric={
-              report.inspection_summary
-                ? `${deps.inspected}/${deps.totalResolved}`
-                : `${report.files_analyzed}`
-            }
-            metricLabel={
-              report.inspection_summary
-                ? "inspected dependencies"
-                : "files analyzed"
-            }
-            icon={<Package size={18} />}
-            onClick={() => setTab("Coverage")}
-          />
-        </div>
-      </section>
+            <span className="autopilot-hero-note">
+              {report.findings.length} recorded {report.findings.length === 1 ? "finding" : "findings"} · Review diffs before writing
+            </span>
+          </div>
+        </section>
+      )}
 
       {/* Main Content Area: Tabs + Aside */}
       <div className="report-body-layout">
@@ -1075,6 +988,33 @@ export default function ReportView({
             </div>
           </div>
 
+          {/* Guardian Autopilot Quick Launch Aside Banner */}
+          {onPrepareFix && report.findings.length > 0 && (
+            <div className="card autopilot-aside-card">
+              <div className="autopilot-aside-header">
+                <div className="autopilot-aside-icon-wrap">
+                  <Wrench size={16} />
+                </div>
+                <div>
+                  <Eyebrow>AUTONOMOUS REMEDIATION</Eyebrow>
+                  <h4>Guardian Autopilot</h4>
+                </div>
+              </div>
+              <p>
+                Deterministic AST code patches with interactive unified diffs, local SHA-256 pre-flight checks, and automatic IndexedDB rollback backups.
+              </p>
+              <button
+                type="button"
+                className="autopilot-aside-btn"
+                onClick={() => onPrepareFix(elevatedFindings[0] || report.findings[0])}
+              >
+                <Wrench size={13} />
+                <span>Prepare fix with Autopilot</span>
+                <ArrowRight size={13} />
+              </button>
+            </div>
+          )}
+
           {/* Copilot Quick Launch Banner */}
           <div className="card copilot-callout-card">
             <div className="copilot-callout-top">
@@ -1172,7 +1112,7 @@ function PackageFindingsGroup({
   selectedId: string | null;
   onSelectFinding: (id: string) => void;
   onAskCopilot: (f: Finding) => void;
-  onPrepareFix?: (f: Finding) => void;
+  onPrepareFix?: (f?: Finding) => void;
   onHandoffFinding?: (findingId: string) => void;
   advanced: boolean;
 }) {
@@ -1212,6 +1152,20 @@ function PackageFindingsGroup({
         </div>
 
         <div className="pkg-header-right">
+          {onPrepareFix && findings.length > 0 && (
+            <button
+              type="button"
+              className="btn-finding-autopilot-pill"
+              onClick={(e) => {
+                e.stopPropagation();
+                onPrepareFix(findings[0]);
+              }}
+              title={`Prepare fix with Guardian Autopilot for ${packageName}`}
+            >
+              <Wrench size={12} />
+              <span>Fix with Autopilot</span>
+            </button>
+          )}
           <Badge severity={highestSeverity} size="sm" />
           <ChevronDown
             size={16}
@@ -1256,7 +1210,7 @@ function FindingItemCard({
   isOpen: boolean;
   onToggle: () => void;
   onAskCopilot: () => void;
-  onPrepareFix?: (f: Finding) => void;
+  onPrepareFix?: (f?: Finding) => void;
   onHandoffFinding?: (findingId: string) => void;
   advanced: boolean;
   isGrouped?: boolean;
@@ -1318,6 +1272,20 @@ function FindingItemCard({
                 Fixed: {f.advisory.fixed_versions[0]}
               </span>
             )}
+          {onPrepareFix && (
+            <button
+              type="button"
+              className="btn-finding-autopilot-pill"
+              onClick={(e) => {
+                e.stopPropagation();
+                onPrepareFix(f);
+              }}
+              title="Prepare precision fix with Guardian Autopilot"
+            >
+              <Wrench size={12} />
+              <span>Fix with Autopilot</span>
+            </button>
+          )}
           <Badge severity={f.severity} size="sm" />
           <ChevronDown
             size={16}
@@ -1344,6 +1312,26 @@ function FindingItemCard({
             </div></li>
             <li><span className="evidence-index">03</span><div>
               <h4>What you can do</h4><p>{f.recommendation}</p>
+              {onPrepareFix && (
+                <div className="finding-autopilot-step-action">
+                  <div className="autopilot-step-label">
+                    <Wrench size={13} />
+                    <span>Guardian Autopilot can generate and apply a verified code patch for this finding.</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn-autopilot-step"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onPrepareFix(f);
+                    }}
+                  >
+                    <Wrench size={12} />
+                    <span>Prepare fix with Guardian Autopilot</span>
+                    <ArrowRight size={12} />
+                  </button>
+                </div>
+              )}
             </div></li>
           </ol>
 
@@ -1414,6 +1402,20 @@ function FindingItemCard({
             </div>
 
             <div className="finding-action-right">
+              {onPrepareFix && (
+                <button
+                  type="button"
+                  className="btn-prepare-fix btn-prepare-fix-hero"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onPrepareFix(f);
+                  }}
+                >
+                  <Wrench size={14} />
+                  <span>Prepare fix with Guardian Autopilot</span>
+                </button>
+              )}
+
               <button
                 type="button"
                 className="btn-copilot-ask"
@@ -1425,20 +1427,6 @@ function FindingItemCard({
                 <Sparkles size={13} />
                 <span>Ask Guardian Intelligence</span>
               </button>
-
-              {onPrepareFix && (
-                <button
-                  type="button"
-                  className="btn-prepare-fix"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onPrepareFix(f);
-                  }}
-                >
-                  <Wrench size={13} />
-                  <span>Prepare fix with Guardian Autopilot</span>
-                </button>
-              )}
 
               {onHandoffFinding && (
                 <button

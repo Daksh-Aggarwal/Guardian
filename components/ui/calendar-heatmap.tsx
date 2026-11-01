@@ -251,7 +251,12 @@ export function CalendarHeatmap({
         }}
         onRetry={onRetry}
       >
-        <div className="heatmap-grid-scroll relative flex w-full justify-center overflow-x-auto py-2">
+        <div
+          className={cn(
+            "heatmap-grid-scroll relative flex w-full overflow-x-auto py-2",
+            ready && w > width ? "justify-start" : "justify-center",
+          )}
+        >
           {!ready ? null : (
             <svg
               width={w}

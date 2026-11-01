@@ -170,13 +170,7 @@ export default function BehavioralFlowExplorer({
       </div>
 
       {/* Main Flow Inspector Layout */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "320px 1fr",
-          gap: "16px",
-        }}
-      >
+      <div className="behavioral-flow-layout">
         {/* Left Col: Finding & Flow Selector */}
         <div
           className="card"
