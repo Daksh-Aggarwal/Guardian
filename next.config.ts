@@ -16,5 +16,28 @@ const config: NextConfig = {
       },
     ];
   },
+  webpack: (webpackConfig, { dev }) => {
+    if (dev) {
+      webpackConfig.watchOptions = {
+        ...webpackConfig.watchOptions,
+        ignored: [
+          "**/node_modules/**",
+          "**/.git/**",
+          "**/backend/**",
+          "**/.venv/**",
+          "**/.pytest_cache/**",
+          "**/fixtures/**",
+          "**/*.sqlite3*",
+          "**/*.sqlite3-journal*",
+          "**/*.sqlite3-wal*",
+          "**/*.sqlite3-shm*",
+          "**/tsconfig.tsbuildinfo",
+          "**/next-env.d.ts",
+          "**/*.md",
+        ],
+      };
+    }
+    return webpackConfig;
+  },
 };
 export default config;
