@@ -31,7 +31,7 @@ def settings():
     url = os.getenv('SUPABASE_URL') or os.getenv('NEXT_PUBLIC_SUPABASE_URL', '')
     key = os.getenv('SUPABASE_PUBLISHABLE_KEY') or os.getenv('NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY', '')
     if not url or not key:
-        raise HTTPException(503, 'Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY in Guardian .env, then restart.')
+        raise HTTPException(503, 'Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY in Guardian .env, then restart.', headers={'X-Guardian-Error':'auth_not_configured'})
     return trusted_origin(url, 'Supabase URL'), key
 
 

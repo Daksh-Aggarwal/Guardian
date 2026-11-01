@@ -262,3 +262,17 @@ def test_account_request_size_timestamp_and_session_refresh_revocation(auth,monk
     client.post('/api/account/devices/'+d['id']+'/revoke',headers=headers(token))
     assert client.post('/api/account/cli/refresh',json=body).status_code==403
     assert client.post('/api/account/scans',headers=headers(token),json={'report':report().model_dump(mode='json'),'device_id':d['id'],'consent':True}).status_code==403
+
+
+@pytest.mark.parametrize('password',['[YOUR-PASSWORD]','%5BYOUR-PASSWORD%5D','your_password'])
+def test_placeholder_database_password_is_reported_before_connecting(auth,monkeypatch,password):
+    import psycopg
+    monkeypatch.setenv('GUARDIAN_DATABASE_URL',f'postgresql://postgres:{password}@db.example.invalid:5432/postgres')
+    def unexpected_connect(*args,**kwargs): raise AssertionError('Placeholder must not reach PostgreSQL')
+    monkeypatch.setattr(psycopg,'connect',unexpected_connect)
+    data={**device(),'state':'s'*43,'code_challenge':'c'*43,'redirect_uri':'http://127.0.0.1:45123/callback'}
+    result=TestClient(app).post('/api/account/cli/authorize',json=data)
+    assert result.status_code==503
+    assert result.headers['x-guardian-error']=='database_password_placeholder'
+    assert 'placeholder password' in result.json()['detail']
+    assert 'db.example.invalid' not in result.text

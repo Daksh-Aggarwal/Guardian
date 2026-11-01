@@ -151,3 +151,35 @@ def test_chained_backend_uses_os_store_and_rejects_plaintext_backends(monkeypatc
     c=Credentials('https://guardian.example');assert c.prepare()=='keyring'
     backend.backends=[Plain()]
     assert c.secure_backend() is None
+
+
+@pytest.mark.parametrize('code,expected',[
+    ('database_password_placeholder','placeholder password'),
+    ('database_unavailable','nonempty database URL takes precedence'),
+    ('database_not_configured','GUARDIAN_ACCOUNT_STORE=sqlite'),
+    ('auth_not_configured','Supabase URL and publishable key'),
+    ('unknown-secret-token','not configured or temporarily unavailable'),
+])
+def test_account_setup_errors_are_actionable_without_echoing_server_data(monkeypatch,code,expected):
+    real_client=httpx.Client
+    transport=httpx.MockTransport(lambda request:httpx.Response(503,headers={'X-Guardian-Error':code},json={'detail':'untrusted secret-token and terminal escape \u001b[31m'}))
+    monkeypatch.setattr(connected.httpx,'Client',lambda **kwargs:real_client(transport=transport,**kwargs))
+    with pytest.raises(AcquisitionError) as failure:connected.AccountClient().request('POST','/cli/authorize',{})
+    assert expected in str(failure.value)
+    assert 'secret-token' not in str(failure.value) and '\x1b' not in str(failure.value)
+
+
+def test_previous_api_database_error_has_a_safe_diagnostic(monkeypatch):
+    real_client=httpx.Client
+    transport=httpx.MockTransport(lambda request:httpx.Response(503,json={'detail':'Account database unavailable. Check GUARDIAN_DATABASE_URL and apply the account migration.','secret':'must-not-display'}))
+    monkeypatch.setattr(connected.httpx,'Client',lambda **kwargs:real_client(transport=transport,**kwargs))
+    with pytest.raises(AcquisitionError) as failure:connected.AccountClient().request('POST','/cli/authorize',{})
+    assert 'Account database unavailable' in str(failure.value)
+    assert 'must-not-display' not in str(failure.value)
+
+
+def test_account_error_does_not_claim_an_installation_was_attempted(capsys):
+    from backend.guardian import cli
+    assert cli.main(['login','--offline'])==cli.EXIT_ACQUIRE
+    output=capsys.readouterr().err
+    assert 'requires network access' in output and 'installation' not in output

@@ -3,6 +3,7 @@ import json
 import os
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from urllib.parse import urlparse, unquote
 
 from fastapi import HTTPException
 from . import storage
@@ -39,13 +40,19 @@ class AccountStore:
     def connection(self):
         postgres = bool(os.getenv('GUARDIAN_DATABASE_URL'))
         if postgres:
+            try:
+                password=unquote(urlparse(os.environ['GUARDIAN_DATABASE_URL']).password or '').lower()
+            except ValueError:
+                password=''
+            if password in {'[your-password]','your-password','your_password','<your-password>','[password]','<password>','password_here'}:
+                raise HTTPException(503, 'GUARDIAN_DATABASE_URL still contains a placeholder password. Replace it in Guardian .env with your real Supabase PostgreSQL connection string and restart the API. For local SQLite, leave GUARDIAN_DATABASE_URL blank and keep GUARDIAN_ACCOUNT_STORE=sqlite.', headers={'X-Guardian-Error':'database_password_placeholder'})
             import psycopg
             from psycopg.rows import dict_row
             try:
                 with psycopg.connect(os.environ['GUARDIAN_DATABASE_URL'], connect_timeout=5, prepare_threshold=None, row_factory=dict_row) as db:
                     yield AccountDB(db, True)
             except psycopg.Error as error:
-                raise HTTPException(503, 'Account database unavailable. Check GUARDIAN_DATABASE_URL and apply the account migration.') from error
+                raise HTTPException(503, 'Account database unavailable. Check GUARDIAN_DATABASE_URL and apply the account migration.', headers={'X-Guardian-Error':'database_unavailable'}) from error
         elif os.getenv('GUARDIAN_ACCOUNT_STORE') == 'sqlite' and os.getenv('GUARDIAN_CLOUD_MODE', 'false').lower() != 'true':
             import sqlite3
             with storage.connection() as db:
@@ -53,7 +60,7 @@ class AccountStore:
                 db.executescript(SQLITE_SCHEMA)
                 yield AccountDB(db, False)
         else:
-            raise HTTPException(503, 'Set GUARDIAN_DATABASE_URL for Supabase PostgreSQL, or explicitly set GUARDIAN_ACCOUNT_STORE=sqlite for local development.')
+            raise HTTPException(503, 'Set GUARDIAN_DATABASE_URL for Supabase PostgreSQL, or explicitly set GUARDIAN_ACCOUNT_STORE=sqlite for local development.', headers={'X-Guardian-Error':'database_not_configured'})
 
     def session_revoked(self, user_id, session_id):
         with self.connection() as db:

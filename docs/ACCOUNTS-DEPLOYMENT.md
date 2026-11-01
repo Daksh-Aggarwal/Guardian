@@ -142,3 +142,11 @@ These tests are not live GitHub OAuth or hosted deployment verification. Complet
 - Checks: `backend/tests/{test_accounts,test_connected}.py`, isolated test environment in `conftest.py`, updated offline account expectation in `test_cli.py`, `scripts/{test_account.mjs,test_account_postgres.py}`.
 
 November 1, 2026: full backend suite **481 passed**; frontend suite **40 passed** (29 filesystem, 6 Handoff, 5 account); strict TypeScript and local/cloud-mode production builds passed; real temporary PostgreSQL migration/API/RLS check passed. Browser inspection verified the logged-out/configuration state and cloud root redirect. No separate lint script exists. Existing Python/OpenSSL/deprecation and Node module warnings remain. Live GitHub OAuth, native OS keychain interaction, actual Supabase-hosted PostgreSQL and Vercel/Render deployments have **not** been verified; provider settings and credentials are intentionally left for you to fill.
+
+## Troubleshooting `guardian login` setup errors
+
+A nonempty `GUARDIAN_DATABASE_URL` always selects PostgreSQL, even when `GUARDIAN_ACCOUNT_STORE=sqlite` is also set. Supabase's copied URL contains a password placeholder until you replace it. Enter your actual **database password**, URL-encoded, in the ignored Guardian `.env` and restart the API. Prefer the dashboard's Session pooler URL and `sslmode=require`; apply the account migration through the SQL Editor. Do not use an anon/publishable key as the database password or paste the connection string into chat.
+
+For local account development without PostgreSQL, explicitly leave `GUARDIAN_DATABASE_URL=` empty and keep `GUARDIAN_ACCOUNT_STORE=sqlite`. Restart the API after changing `.env`; an existing process retains its earlier configuration. This local mode does not share storage with a deployed dashboard.
+
+The API labels known configuration failures with safe error codes; the CLI translates those codes into actionable messages. It never prints arbitrary server response text, PostgreSQL exception details, passwords or connection strings. Placeholder passwords are rejected before attempting a database connection.

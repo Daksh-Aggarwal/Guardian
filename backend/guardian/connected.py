@@ -99,6 +99,21 @@ class AccountClient:
                     if response.status_code>=300:
                         # Server errors contain no trusted arbitrary display text.
                         message={401:'Account session expired. Run guardian login.',403:'Account or device authorization was revoked. Run guardian login.',409:'Report/device identity conflict. Local reports were preserved.',429:'Account request rate limit reached. Retry shortly.',503:'Account service is not configured or temporarily unavailable.'}.get(response.status_code,'Account request failed. Local reports were preserved.')
+                        if response.status_code==503:
+                            setup_messages={
+                                'database_password_placeholder':'GUARDIAN_DATABASE_URL still has a placeholder password. Replace it in Guardian .env with your Supabase PostgreSQL connection string and restart the API. For local SQLite instead, leave GUARDIAN_DATABASE_URL blank and keep GUARDIAN_ACCOUNT_STORE=sqlite.',
+                                'database_unavailable':'Account database unavailable. Check GUARDIAN_DATABASE_URL in the API environment, apply the Supabase account migration, and restart the API after changing .env. A nonempty database URL takes precedence over GUARDIAN_ACCOUNT_STORE=sqlite.',
+                                'database_not_configured':'Configure GUARDIAN_DATABASE_URL on the API, or leave it blank and set GUARDIAN_ACCOUNT_STORE=sqlite for local development. Restart the API afterward.',
+                                'auth_not_configured':'Set the Supabase URL and publishable key in Guardian .env and restart the API.',
+                            }
+                            code=response.headers.get('X-Guardian-Error','')
+                            # Older API versions have no error code. Recognize only a fixed safe message.
+                            if not code:
+                                try:
+                                    body=json.loads(raw)
+                                    if isinstance(body,dict) and body.get('detail')=='Account database unavailable. Check GUARDIAN_DATABASE_URL and apply the account migration.': code='database_unavailable'
+                                except (ValueError,TypeError): pass
+                            if code in setup_messages: message=setup_messages[code]
                         raise AcquisitionError(message,category='account_request_failed',detail=f'HTTP status {response.status_code}.')
                     return json.loads(raw) if raw else {}
         except (httpx.HTTPError,ValueError) as error:

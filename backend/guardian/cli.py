@@ -274,7 +274,7 @@ def main(argv=None):
                 for key, value in diagnostic.items():
                     safe = ''.join(c if c >= ' ' else '?' for c in str(value))
                     print(f'  {key}: {safe}', file=sys.stderr)
-            if isinstance(error, AcquisitionError):
+            if isinstance(error, AcquisitionError) and args.command in {'install','check','audit'}:
                 print('No installation was attempted.', file=sys.stderr)
         return code
     except Exception as error:
