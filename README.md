@@ -1,261 +1,245 @@
-# Guardian
+<div align="center">
 
-> **Know what you trust.** A local-first, explainable supply-chain security and remediation platform for npm and PyPI.
+# 🛡️ Guardian
 
-Guardian reads package manifests, extracts deep dependency trees, verifies cryptographic package integrity, performs deterministic static AST data-flow analysis, and surfaces actionable security intelligence. It explains findings with evidence-grounded AI, assists with safe in-browser automated remediations, and exports hardened instructions to external coding agents—all without executing untrusted code or sending source files to the cloud.
+### **Know What You Trust.**
+**Next-Generation Supply-Chain Intelligence, Static Data-Flow Analysis & In-Browser Autonomous Remediation**
 
----
+[![Next.js](https://img.shields.io/badge/Next.js-16.0-black?style=for-the-badge&logo=next.js)](https://nextjs.org/)
+[![React](https://img.shields.io/badge/React-19.2-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](https://react.dev/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![Google Gemini](https://img.shields.io/badge/Gemini_3.8_Flash-AI_Advisor-8E75C2?style=for-the-badge&logo=google-gemini&logoColor=white)](https://deepmind.google/technologies/gemini/)
+[![Zero Execution](https://img.shields.io/badge/Execution-Zero_Arbitrary_Code-critical?style=for-the-badge&logo=shield)](https://github.com)
 
-## Executive Overview
+<br/>
 
-Software supply-chain attacks are surging: malicious lifecycle scripts, typosquatted package names, credential exfiltration, and deeply nested transitive vulnerabilities routinely evade traditional scanners. Conventional software composition analysis (SCA) tools either produce opaque lists of CVEs or collapse complex risk profiles into misleading single scores.
-
-Guardian takes a radically different approach:
-
-* **Deterministic Evidence First**: Rather than guessing intent, Guardian tracks concrete AST data flows from sensitive sources (environment variables, files, credentials) to network or process sinks.
-* **Decoupled 4-Dimension Posture**: Risk is evaluated across four strictly independent domains—Behavioral Signals, Known Vulnerabilities (OSV), Package Integrity (SRI), and Inspection Coverage. A clean scan is never mislabeled as a "safety guarantee".
-* **Safe In-Browser Autopilot**: Remediation plans are validated down to exact verbatim text replacements and applied directly in the browser via the File System Access API—backed by SHA-256 pre-flight checks, automatic IndexedDB snapshots, write journals, and one-click undo.
-* **AI-Agnostic Coding Agent Handoff**: Seamlessly hand off evidence-backed remediation tasks to tools like Claude Code, Cursor, OpenAI Codex, or GitHub Copilot with built-in prompt-injection defense and machine-readable JSON evidence.
-* **Zero Arbitrary Code Execution**: Guardian never runs package lifecycle scripts (`preinstall`, `postinstall`), never executes uploaded archives, and never runs untrusted code in an unmonitored sandbox.
-
----
-
-## Core Capabilities
-
-### 1. Deterministic Static Data-Flow Engine
-Powered by a trusted Babel AST front-end and a Python static analysis core, Guardian models execution semantics without running code:
-* **Scope-Aware Lexical Analysis**: Tracks variable declarations, reassignments, lexical scopes, and shadowing.
-* **Interprocedural Propagation**: Traces values through function arguments, parameter bindings, and return values.
-* **Object Field & Destructuring Tracking**: Follows data across object property writes, reads, and destructuring patterns.
-* **Cross-File Data Flow**: Follows static ES Module (`import`/`export`) and CommonJS (`require`/`module.exports`) propagation paths.
-* **Concrete Source-to-Sink Evidence**: Pinpoints the exact line, column, code snippet, and intermediate variable bindings for sensitive operations (e.g. `process.env.AWS_SECRET_ACCESS_KEY` $\rightarrow$ `https.request()`).
-
-### 2. Decoupled 4-Dimension Security Assessment
-Guardian refuses to conceal critical risk factors behind an arbitrary single score. Every scan report provides four independent assessments:
-
-| Dimension | Scope & Methodology | Key Indicators |
-|---|---|---|
-| **1. Behavioral Assessment** | Static AST data-flow analysis & manifest inspection | Lifecycle execution scripts, dynamic code evaluation, network calls, filesystem access, typosquatting |
-| **2. Known Vulnerabilities** | Querybatch integration with Open Source Vulnerabilities (OSV) database | CVE/GHSA advisories, CVSS vectors, affected version ranges, sanitized fixed versions |
-| **3. Package Integrity** | Subresource Integrity (SRI) validation against published registries and lockfiles | SHA-512 / SHA-384 / SHA-256 / SHA-1 checksum match, digest tampering detection |
-| **4. Inspection Coverage** | Reconciled dependency accounting across direct and transitive graphs | Exact counts for inspected, skipped, unavailable, unresolved, and integrity-failed packages |
-
-### 3. Project Investigation Workspace
-A dedicated, multi-faceted workspace for deep project-level security audits across 6 interactive views:
-* **Overview**: Project identity, detected frameworks (Next.js, Express, React, Vite, Fastify, Jest, etc.), 4D posture summary, and scan-over-scan deltas.
-* **Interactive Dependency Graph**: Hierarchical directed acyclic graph (DAG) powered by `@xyflow/react` and `@dagrejs/dagre` with zoom, pan, minimap, depth controls, severity filtering, focused upstream/downstream subtree isolation, and package detail drawer.
-* **Vulnerabilities Explorer**: Dependency-first breakdown mapping packages to OSV advisories with published CVSS severity, Guardian review priority, and 1-click jump-to-graph actions.
-* **Behavioral Flows Explorer**: Visual step-by-step trace (`Source` $\rightarrow$ `Assignment` $\rightarrow$ `Argument` $\rightarrow$ `Parameter` $\rightarrow$ `Return` $\rightarrow$ `Sink`) with syntax code snippets, variable binding badges, and explicit limitation disclosures.
-* **Remediation History**: Audit log of Guardian Autopilot remediation plans, user approvals/rejections, applied files, and post-remediation rescan verification states.
-* **Security Timeline**: Chronological tracking of security posture changes across commits with side-by-side delta comparisons between any two historical scans.
-
-### 4. Guardian Autopilot — Safe Local Remediation
-Remediate security findings directly in your local repository with ironclad safety boundaries:
-* **Browser File System Access API**: Connects local directories (`window.showDirectoryPicker`) in read-only mode until explicit user approval. Source files never leave your machine.
-* **Structured Remediation Planning**: Generates targeted remediation plans powered by Google Gemini (or local deterministic planner) with Pydantic validation, trade-off analysis, potential regressions, and manual validation steps.
-* **Verbatim Text-Edit Validation**: Enforces exact verbatim `old_text` $\rightarrow$ `new_text` replacements with single-anchor verification and non-overlapping edit checks.
-* **Interactive Unified Diff Viewer**: Review file-by-file changes with additions, deletions, line numbers, and downloadable `.patch` bundles.
-* **Multi-Layer Safety Engine**:
-  * *Pre-flight verification*: Asserts target files have not drifted by comparing on-disk SHA-256 hashes against expected baselines.
-  * *Pre-flight collision rejection*: Refuses to create new files if a file already exists at the target path.
-  * *Automatic IndexedDB Backup*: Captures an instant snapshot of original file contents in local browser storage before applying any write.
-  * *Operational Write Journal*: Writes files sequentially; if any write fails, an automatic rollback restores modified files and deletes newly created files.
-  * *Safe One-Click Undo*: Verifies file integrity before cleanly restoring the pre-remediation state from IndexedDB.
-  * *Deterministic Rescan Verification*: Re-analyzes modified code to mathematically verify whether targeted findings are resolved, persistent, or if new signals were introduced.
-
-### 5. Guardian Handoff — AI-Agnostic Agent Instructions Export
-When you prefer delegating security fixes to an external coding assistant or autonomous agent, Guardian Handoff exports evidence-grounded, prompt-injection-defended instruction packages:
-* **Canonical Schema (`v1.0.0`)**: Every export is derived from a single validated representation (`CanonicalHandoff`), preventing prompt drift across tools.
-* **5 Tailored Agent Adapters**:
-  1. *Universal Markdown*: Self-contained prompt for ChatGPT, Claude web, Gemini, or any LLM interface.
-  2. *Claude Code*: Terminal-optimized instructions with file pre-inspection, minimal diffs, and verification commands.
-  3. *Cursor*: IDE pair-programming workflow emphasizing scoped edits, workspace symbols, and linter checks.
-  4. *OpenAI Codex*: Deterministic repository repair workflow focusing on architecture conventions and test execution.
-  5. *GitHub Copilot*: GitHub-aligned chat and agent workflow emphasizing repo coding standards and pull requests.
-* **Two Remediation Modes**:
-  * *Focused Fix*: Minimal, conservative patch strictly addressing the immediate finding.
-  * *Deep Security Remediation*: Expanded security review checking transitive trees, lockfile consistency, whole-repo insecure pattern searches, and follow-up concerns.
-* **Hardened Security Defenses**: Context-aware escaping, pipe character escaping, dynamic backtick scaling (preventing code fence breakout), credential redaction, and prompt-injection defense directives instructing agents to treat scanner evidence as inert data.
-* **Machine-Readable JSON Evidence Appendix**: Appends an independently parseable JSON block preserving exact finding IDs, CVSS scores, dependency paths, and provenance.
-
-### 6. Guardian Intelligence — Contextual AI Security Advisor
-* **Collapsible Persistent Drawer**: Slides in alongside reports, maintaining context with whichever finding or project tab you are currently viewing.
-* **Grounded Reasoning**: Powered by Google Gemini (`gemini-3.8-flash`) via the official `google-genai` SDK, with automatic graceful fallback to the local deterministic engine when offline.
-* **Privacy-First Guardrails**: Automated secret redaction layer strips API keys, tokens, credentials, and private keys before inference; requires explicit opt-in user consent.
-* **Strict Citation Verification**: Every claim or citation made by the AI advisor must reference a verified finding ID from the active report—hallucinated citations are rejected. Clickable citations in the chat immediately highlight and scroll to the exact finding in the report.
-
-### 7. Repository Integration & Pre-Installation CLI
-* **GitHub App Integration**: Connect GitHub repositories with RS256 JWT authentication, explore branches and commit SHAs, ingest source via Git Trees/Blobs APIs under strict limits, and open automated Guardian Autopilot remediation Pull Requests.
-* **Pre-Installation CLI (`guardian`)**: Command-line tool for npm and PyPI developers. Resolves dependency graphs and installs packages directly into isolated project environments without executing arbitrary lifecycle scripts (`npm ci --ignore-scripts` equivalent with offline hash verification).
+<p align="center">
+  <b>Guardian is an evidence-first security platform for npm and PyPI packages.</b><br/>
+  It maps full dependency trees, verifies cryptographic package integrity (SRI), tracks AST data flows from sensitive sources to network sinks, explains risks with grounded AI, safely patches repositories right inside the browser with rollback journals, and exports hardened prompts to Claude Code, Cursor, and Copilot.
+</p>
 
 ---
 
-## Architecture
+![Guardian Security Dashboard](docs/screenshots/dashboard-dark.png)
+
+</div>
+
+---
+
+## ⚡ Why Guardian? (The Paradigm Shift)
+
+Traditional SCA tools search for known CVEs in an outdated database. But **supply-chain attacks don't wait for a CVE**—malicious maintainer takeovers, typosquatted packages, sensitive token exfiltration, and malicious `postinstall` hooks strike immediately.
+
+| Traditional SCA Tools | The Guardian Platform |
+|:---|:---|
+| ❌ **Black-box single score** (e.g. "88/100 Safe") | 🎯 **Decoupled 4D Posture**: Behavioral, OSV, SRI, and Coverage evaluated independently |
+| ❌ **Vulnerability lists only**: Misses zero-day behavioral malware | 🔬 **Deterministic Static Data-Flow Engine**: Traces secrets from source to sink across files |
+| ❌ **Cloud-first exposure**: Uploads your private source code | 🔒 **100% Local-First Privacy**: AST analysis in-memory; source code never leaves your machine |
+| ❌ **Blind trust**: Executes install scripts in containers | 🛡️ **Zero Arbitrary Execution**: Scripts and tarballs are never executed |
+| ❌ **Manual fix slog**: Leaves developers stuck fixing files | 🚀 **Guardian Autopilot**: In-browser local patching with IndexedDB rollback snapshots |
+| ❌ **Prompt drift**: Copy-pasting raw CVEs into ChatGPT | 🤖 **Guardian Handoff**: Hardened, injection-defended exports for Claude Code & Cursor |
+
+---
+
+## 🌟 Superpowers & Killer Features
+
+```mermaid
+flowchart TD
+    subgraph INGEST["1. Bounded Ingestion"]
+        A["Package Manifests / ZIP / npm Registry / Local Project"] --> B["Safe Streaming Ingest: Path Traversal Guards, Decompression Bomb Limits & Secret Exclusion"]
+    end
+
+    subgraph ENGINE["2. Deep Static Analysis Engine"]
+        B --> C["Babel AST Static Flow: Scope tracking, interprocedural parameter flow & cross-file exports"]
+        B --> D["Lockfile Graph Resolver: Exact direct and transitive graph traversal"]
+        D --> E["Subresource Integrity SRI: Cryptographic SHA-512 and SHA-256 validation"]
+        D --> F["OSV Batch Intelligence: Position-validated CVE and GHSA advisories with CVSS vectors"]
+    end
+
+    subgraph REPORT["3. Reconciled Security Report"]
+        C & E & F --> G["Immutable Report Snapshot: 4 Decoupled Security Dimensions with Strict Accounting"]
+    end
+
+    subgraph ACTIONS["4. Interactive Intelligence & Remediation"]
+        G --> H["Project Workspace: Interactive ReactFlow DAG, Subtree Isolation and 6 Audit Tabs"]
+        G --> I["Guardian Intelligence: Gemini 3.8 Flash Advisor with Redaction and Verified Citations"]
+        G --> J["Guardian Autopilot: Browser-Native File System Patching with Rollback Journals"]
+        G --> K["Guardian Handoff: AI-Agnostic Instruction Export to Claude Code, Cursor and Copilot"]
+    end
+
+    style INGEST fill:#0f172a,stroke:#3b82f6,stroke-width:2px,color:#f8fafc
+    style ENGINE fill:#0f172a,stroke:#8b5cf6,stroke-width:2px,color:#f8fafc
+    style REPORT fill:#0f172a,stroke:#10b981,stroke-width:2px,color:#f8fafc
+    style ACTIONS fill:#0f172a,stroke:#f59e0b,stroke-width:2px,color:#f8fafc
+```
+
+### 1. 🔍 Deep AST Data-Flow Engine (Zero-Execution Leak Detection)
+Guardian doesn't just scan for regex keywords. It utilizes a trusted Babel AST front-end and a Python static engine that builds a real syntax tree to trace variables:
+* **Source-to-Sink Tracking**: Tracks tokens like `process.env.AWS_SECRET_ACCESS_KEY` or `process.env.NPM_TOKEN` through variable reassignments, parameter passing, and object destructuring until they hit a network sink (`fetch()`, `https.request()`, `axios()`).
+* **Cross-File Data Flow**: Resolves static ES Module (`import`/`export`) and CommonJS (`require`/`module.exports`) imports to follow data across project boundaries.
+* **Exact Evidence**: Pinpoints the exact line, column, syntax snippet, and binding chain.
+
+---
+
+### 2. 🛠️ Guardian Autopilot (Safe In-Browser AI Remediation)
+> **The world's first browser-native supply chain remediation system with ironclad rollback safety.**
+
+When an issue is identified, Guardian doesn't just tell you to fix it—it fixes it for you directly in your browser using the modern **File System Access API**, backed by a multi-tier safety architecture:
+
+```mermaid
+flowchart TD
+    A["Security Finding Identified"] --> B["Generate Structured Remediation Plan: Gemini 3.8 Flash or Deterministic Planner"]
+    B --> C["Review Interactive Unified Diff: Line-by-line additions, deletions and file changes"]
+    C --> D["Explicit User Confirmation: Git branch safety verification"]
+    
+    D --> E{"Pre-Flight Check"}
+    E -- "SHA-256 Hash Mismatch or Collision" --> F["Abort Operation: Zero disk modifications"]
+    E -- "Verified Clean Baseline" --> G["Capture IndexedDB Snapshot: Browser-local file backup"]
+    
+    G --> H["Sequential Atomic Writes: Operational journal execution"]
+    H --> I{"Write Successful?"}
+    I -- "Write Fails at Any Point" --> J["Automatic Rollback Journal: Restore modified and delete created files"]
+    I -- "All Writes Verified" --> K["Plan Marked as Applied"]
+    
+    K --> L["Deterministic Rescan: Verify finding is completely resolved"]
+    K --> M["One-Click Safe Undo: Instant restoration of original state from IndexedDB"]
+
+    style A fill:#0f172a,stroke:#64748b,color:#f8fafc
+    style B fill:#0f172a,stroke:#38bdf8,color:#f8fafc
+    style C fill:#0f172a,stroke:#38bdf8,color:#f8fafc
+    style D fill:#0f172a,stroke:#f59e0b,color:#f8fafc
+    style E fill:#1e293b,stroke:#eab308,color:#f8fafc
+    style F fill:#450a0a,stroke:#ef4444,color:#fca5a5
+    style G fill:#064e3b,stroke:#10b981,color:#a7f3d0
+    style H fill:#0f172a,stroke:#38bdf8,color:#f8fafc
+    style I fill:#1e293b,stroke:#eab308,color:#f8fafc
+    style J fill:#450a0a,stroke:#ef4444,color:#fca5a5
+    style K fill:#064e3b,stroke:#10b981,color:#a7f3d0
+    style L fill:#1e1b4b,stroke:#8b5cf6,color:#ddd6fe
+    style M fill:#1e1b4b,stroke:#8b5cf6,color:#ddd6fe
+```
+
+* **Local Browser Handles**: Source files remain in browser memory (`window.showDirectoryPicker`). No server uploads.
+* **Verbatim Text Edits**: Edits require unique text anchors and exact before/after matching.
+* **Pre-Flight SHA-256 Verification**: Verifies disk contents match the snapshot before touching a single byte.
+* **Instant IndexedDB Recovery**: Before any change is written, full file bytes are snapshotted in IndexedDB for 1-click atomic rollback.
+
+---
+
+### 3. 🤖 Guardian Handoff (AI-Agnostic Agent Instructions)
+Prefer handing off remediation to an autonomous CLI agent or your favorite IDE assistant? Guardian Handoff deterministically compiles security findings into hardened, prompt-injection-defended instruction packages:
+
+```mermaid
+flowchart LR
+    A["Report Findings and Evidence"] --> B["Canonical Handoff Builder: Schema v1.0.0 Ground Truth"]
+    
+    B --> C{"Select Mode"}
+    C --> D["Focused Fix: Minimal surgical patch"]
+    C --> E["Deep Remediation: Transitive tree and repo pattern review"]
+    
+    D & E --> F["Hardened Defenses: Injection fences, pipe escaping and credential redaction"]
+    
+    F --> G["Claude Code CLI"]
+    F --> H["Cursor IDE"]
+    F --> I["Universal Markdown"]
+    F --> J["OpenAI Codex"]
+    F --> K["GitHub Copilot"]
+    
+    style A fill:#0f172a,stroke:#64748b,color:#f8fafc
+    style B fill:#1e1b4b,stroke:#8b5cf6,color:#ddd6fe
+    style C fill:#1e293b,stroke:#f59e0b,color:#f8fafc
+    style D fill:#064e3b,stroke:#10b981,color:#a7f3d0
+    style E fill:#064e3b,stroke:#10b981,color:#a7f3d0
+    style F fill:#450a0a,stroke:#f43f5e,color:#fecdd3
+    style G fill:#0f172a,stroke:#38bdf8,color:#f8fafc
+    style H fill:#0f172a,stroke:#38bdf8,color:#f8fafc
+    style I fill:#0f172a,stroke:#38bdf8,color:#f8fafc
+    style J fill:#0f172a,stroke:#38bdf8,color:#f8fafc
+    style K fill:#0f172a,stroke:#38bdf8,color:#f8fafc
+```
+
+* **5 Tailored Agent Adapters**: Universal Markdown, Claude Code, Cursor, OpenAI Codex, and GitHub Copilot.
+* **Dual Modes**: **Focused Fix** (minimal, zero-regression patch) vs **Deep Security Remediation** (transitive audits, lockfile verification, and repo-wide pattern scans).
+* **Adversarial Defenses**: Dynamic backtick scaling, markdown pipe escaping, and strict instructions directing receiving agents to treat scanner evidence as untrusted data.
+* **Machine-Readable JSON Appendix**: Appends schema-validated JSON with exact advisory IDs, CVSS vectors, and dependency paths.
+
+---
+
+### 4. 🧠 Guardian Intelligence (Contextual Security Advisor)
+* **Persistent Collapsible Drawer**: Slides in smoothly alongside any scan report or investigation tab.
+* **Powered by Gemini 3.8 Flash**: Fast, nuanced reasoning powered by Google DeepMind's official `google-genai` SDK.
+* **Strict Anti-Hallucination Guardrails**: Every advisory citation generated by the AI is mathematically validated against genuine report findings. Citations are interactive buttons that highlight and jump directly to the finding in the report.
+* **Automated Privacy Redaction**: Automatically scrubs API keys, private keys, auth headers, and tokens before transmitting context.
+
+---
+
+### 5. 🕸️ Project Investigation Workspace (6 Dedicated Views)
+A state-of-the-art interactive workspace engineered with **`@xyflow/react`** and **`@dagrejs/dagre`**:
+
+![Finding Detail View](docs/screenshots/finding-detail.png)
+
+1. **Overview**: Framework detection (Next.js, Vite, Jest, Express), package stats, and scan deltas.
+2. **Interactive Dependency Graph**: Hierarchical zoomable DAG with search, severity filtering, depth controls, and focused subtree isolation.
+3. **Vulnerabilities Explorer**: Package-first tree mapping direct/transitive dependencies to published OSV advisories.
+4. **Behavioral Flows**: Visual step-by-step trace showing source, assignment, parameter, and sink progression.
+5. **Remediation History**: Audit log of all applied plans, approvals, undos, and rescan verification outcomes.
+6. **Security Timeline**: Multi-scan posture tracking across commits with side-by-side delta comparisons.
+
+---
+
+### 6. ⚖️ Decoupled 4-Dimension Security Assessment
+Guardian strictly enforces independent security domains. A clean vulnerability scan never conceals uninspected code, and external API outages never break local static analysis:
 
 ```
-+---------------------------------------------------------------------------------------------------------+
-|                                           GUARDIAN ARCHITECTURE                                         |
-|                                                                                                         |
-|   +-----------------------+     +------------------------+     +------------------------------------+   |
-|   |   Project ZIP / Code  |     |   npm / PyPI Registry  |     |   Local Folder (FS Access API)     |   |
-|   +-----------+-----------+     +-----------+------------+     +-----------------+------------------+   |
-|               │                             │                                    │                      |
-|               └──────────────────────┬──────┴────────────────────────────────────┘                      |
-|                                      ▼                                                                  |
-|                        +───────────────────────────+                                                    |
-|                        |   Bounded Ingestion Core  | (Decompression limits, path traversal guards,      |
-|                        +─────────────┬─────────────+  secret file exclusion, normalized path checks)    |
-|                                      ▼                                                                  |
-|                        +───────────────────────────+                                                    |
-|                        |   Static Analysis Engine  |                                                    |
-|                        |   - Babel AST Static Flow | (Lexical scope, parameter propagation,             |
-|                        |   - Python Security Rules |  CommonJS / ESM cross-file data flows)             |
-|                        +─────────────┬─────────────+                                                    |
-|                                      │                                                                  |
-|            ┌─────────────────────────┼─────────────────────────┐                                        |
-|            ▼                         ▼                         ▼                                        |
-|   +────────────────-+       +────────────────-+       +────────────────-+                               |
-|   |  OSV Database   |       |   SRI Digest    |       | Lockfile Graph  |                               |
-|   |  (Batch Query)  |       |  Verification   |       | (Reconciliation)|                               |
-|   +────────┬────────+       +────────┬────────+       +────────┬────────+                               |
-|            └─────────────────────────┼─────────────────────────┘                                        |
-|                                      ▼                                                                  |
-|                        +───────────────────────────+                                                    |
-|                        | Immutable Security Report | (4 Decoupled Dimensions, Reconciled Accounting)   |
-|                        +─────────────┬─────────────+                                                    |
-|                                      ▼                                                                  |
-|      ┌───────────────────────────────┴───────────────────────────────┐                                  |
-|      ▼                                                               ▼                                  |
-|  +─────────────────────────────────────────────+       +─────────────────────────────────────────────+  |
-|  |             Next.js Web Interface           |       |              Local Guardian CLI             |  |
-|  | - Security Command Centre & Report View     |       | - guardian check                            |  |
-|  | - 6-Tab Project Investigation Workspace    |       | - guardian install (script-free, verified)  |  |
-|  | - Interactive Dependency DAG (ReactFlow)    |       | - Private local SQLite report persistence   |  |
-|  | - Guardian Intelligence Advisor (Gemini)    |       +─────────────────────────────────────────────+  |
-|  | - Guardian Autopilot In-Browser Remediation |                                                        |
-|  | - Guardian Handoff to External AI Agents   |                                                        |
-|  +─────────────────────────────────────────────+                                                        |
-+---------------------------------------------------------------------------------------------------------+
-```
-
-### Safety & In-Browser Rollback Architecture
-
-```
-[Finding Identified] ──> [Generate Remediation Plan] ──> [Review Unified Diff]
-                                                                  │
-                                                                  ▼
-                                                      [Explicit User Approval]
-                                                                  │
-                                                                  ▼
-                                                    [Pre-Flight Verification]
-                                                    - Target file SHA-256 match
-                                                    - New file does not exist
-                                                                  │
-                     ┌─────────────────── Fail ───────────────────┤ Success
-                     ▼                                            ▼
-               [Abort Apply]                         [Capture IndexedDB Backup]
-             (No disk changes)                                    │
-                                                                  ▼
-                                                    [Apply Changes via Journal]
-                                                    - Sequential atomic writes
-                                                                  │
-                     ┌─────────────────── Fail ───────────────────┤ Success
-                     ▼                                            ▼
-           [Automatic Rollback]                         [Plan Marked Applied]
-         - Restore modified files                                 │
-         - Delete created files                     ┌─────────────┴─────────────┐
-                                                    ▼                           ▼
-                                            [Rescan & Verify]           [One-Click Undo]
-                                         (Prove finding resolved)   (Restore from IndexedDB)
+┌───────────────────────────┬───────────────────────────┐
+│  ⚡ BEHAVIORAL SIGNALS    │  🛡️ KNOWN VULNERABILITIES │
+│  - Static AST Data Flow   │  - OSV Querybatch Data    │
+│  - Install Scripts        │  - CVSS v2 / v3 / v4      │
+│  - Network & Filesystem   │  - Fixed Version Callouts │
+├───────────────────────────┼───────────────────────────┤
+│  🔐 PACKAGE INTEGRITY     │  📊 INSPECTION COVERAGE   │
+│  - Subresource Integrity  │  - Inspected vs Skipped   │
+│  - Lockfile vs Registry   │  - Strict Reconciliation  │
+│  - Tamper Detection (SRI) │  - Scope Accounting       │
+└───────────────────────────┴───────────────────────────┘
 ```
 
 ---
 
-## Live Demo Presentation Walkthrough
+## 🎬 The 5-Minute Live Demo Script
 
-Follow this step-by-step walkthrough to present Guardian's core capabilities in a live demo:
+Impressing an audience or presentation panel? Run this proven walkthrough:
 
 ```
-┌────────────────────────────────────────────────────────────────────────────────────────┐
-│                              LIVE DEMO FLOW (10-15 MIN)                                │
-│                                                                                        │
-│  1. Baseline Inspection ──> 2. AST Data Flow ──> 3. AI Intelligence ──>                │
-│     (Benign fixture)          (Exfiltration)        (Grounded Advisor)                 │
-│                                                                                        │
-│  4. Graph Investigation ──> 5. In-Browser Autopilot ──> 6. Multi-Agent Handoff         │
-│     (Interactive DAG)          (Safe Fix & Rescan)         (Claude Code / Cursor)      │
-└────────────────────────────────────────────────────────────────────────────────────────┘
+ 1. Everyday Package    ──>  2. Sensitive Data Leak  ──>  3. Suspicious Installer
+    (Baseline sanity)            (AST source-to-sink)         (AI Advisor drawer)
+           │                             │                            │
+           ▼                             ▼                            ▼
+ 4. Dependency DAG      ──>  5. In-Browser Autopilot ──>  6. Multi-Agent Handoff
+    (Interactive graph)          (Safe fix & rescan)          (Claude Code / Cursor)
 ```
 
-### Step 1: The Everyday Baseline (Observations vs False Positives)
-1. In the **Security Command Centre**, click the synthetic fixture: **Everyday package**.
-2. Notice that public HTTP access and reading environment variables are cataloged as **Observations**, not elevated risks.
-3. Show how Guardian avoids alert fatigue: normal library behavior is recognized without triggering alarm bells.
-
-### Step 2: Uncovering AST Data-Flow Leaks
-1. Click **Sensitive data flow** on the launchpad.
-2. In the report, select the sensitive data transmission finding and toggle to **Advanced mode**.
-3. Point out the exact step-by-step AST propagation trace:
-   * **Source**: `process.env.NPM_TOKEN` (reading authentication secret).
-   * **Assignment**: Bound to local variable `token`.
-   * **Parameter**: Passed as header payload into `requestOptions`.
-   * **Sink**: Transmitted across the network via `https.request()`.
-4. Highlight that Guardian provides line numbers, column numbers, syntax snippets, and explicit static analysis limitations.
-
-### Step 3: Correlated Behavioral Risks & Guardian Intelligence
-1. Click **Suspicious installer**.
-2. Notice multiple correlated risks: `INSTALL_REMOTE` (downloading code in a postinstall script) combined with `EXEC_DYNAMIC` (spawning child processes).
-3. Open the **Guardian Intelligence** drawer on the right.
-4. Click the suggested question: *"What should I do next?"*
-5. Demonstrate that the AI advisor cites verified findings with clickable links that scroll and highlight the evidence directly in the report.
-
-### Step 4: Exploring the Project Investigation Workspace
-1. Navigate to **Project workspace** in the sidebar.
-2. Open the **Dependency Graph** tab to reveal the interactive DAG:
-   * Zoom, pan, and search for specific packages.
-   * Filter nodes by severity (Critical / High / Medium / Low).
-   * Click an infected dependency to isolate its upstream and downstream subtrees.
-   * Open the package inspector drawer to view exact lockfile resolution versions and SRI checksum verifications.
-3. Check the **Behavioral Flows** tab to see source-to-sink data paths visualized as discrete flow step cards.
-
-### Step 5: Guardian Autopilot In-Browser Remediation
-1. In the Project Workspace, select `fixtures/remediation-demo` (or connect a local folder with the directory picker).
-2. Click **Inspect project** to analyze the codebase.
-3. Review the identified `INSTALL_REMOTE` lifecycle finding.
-4. Click **Prepare a fix with Guardian**.
-5. Inspect the generated plan:
-   * View the structured analysis: summary, trade-offs, potential regressions, and manual steps.
-   * Open the **Interactive Diff Viewer** showing the exact unified diff removing the dangerous install hook.
-6. Click **Approve and apply**:
-   * The browser requests write permission only upon user confirmation.
-   * Guardian captures an IndexedDB backup snapshot and writes the changes to disk.
-7. Click **Rescan & verify outcome**:
-   * Guardian automatically rescans the updated project.
-   * The verification panel confirms: `INSTALL_REMOTE` **Resolved**!
-8. Click **Undo latest changes** to demonstrate instant, risk-free rollback restoring the original files.
-
-### Step 6: Multi-Agent Handoff
-1. Open any report and click **Export Handoff Instructions**.
-2. In the modal, select your target coding assistant (e.g., **Claude Code**, **Cursor**, or **Universal Markdown**).
-3. Toggle between **Focused Fix** and **Deep Security Remediation** to show how instructions adapt based on task depth.
-4. Point out the built-in defenses:
-   * Escaped markdown delimiters preventing prompt injection.
-   * Directives instructing the external agent to treat findings as untrusted data.
-   * The **JSON Evidence Appendix** adhering to Canonical Handoff Schema `1.0.0`.
-5. Click **Copy to Clipboard** or **Download (.md)** to hand off the task.
+1. **Step 1: The Baseline Sanity Check**  
+   Click **Everyday package** on the dashboard launchpad. Notice how normal HTTP requests and environment access are cataloged as neutral **Observations**, not alarming vulnerabilities. Zero alert fatigue!
+2. **Step 2: Uncovering AST Data-Flow Leaks**  
+   Click **Sensitive data flow**. Switch to **Advanced mode** on the sensitive transmission finding. Show how Guardian tracks `process.env.NPM_TOKEN` through variables and parameters straight into an `https.request()` network call!
+3. **Step 3: Correlated Behavioral Risks & AI Advisor**  
+   Click **Suspicious installer**. See `INSTALL_REMOTE` and `EXEC_DYNAMIC` flagged. Open the **Guardian Intelligence** drawer and ask: *"What should I do next?"* Watch the AI cite findings with clickable links that scroll to the exact code snippet.
+4. **Step 4: Interactive Dependency Graph**  
+   Navigate to **Project workspace** $\rightarrow$ **Dependency Graph**. Zoom and pan across the interactive DAG. Click a high-severity dependency to isolate its upstream impact subtree!
+5. **Step 5: In-Browser Autopilot Remediation & Rollback**  
+   Select `fixtures/remediation-demo`. Click **Prepare a fix with Guardian**. Review the interactive diff removing the dangerous install hook. Click **Approve and apply** (backed by IndexedDB). Click **Rescan & verify** to watch the finding flip to **Resolved**! Then click **Undo latest changes** to prove instantaneous safe rollback.
+6. **Step 6: Multi-Agent Handoff**  
+   Click **Export Handoff Instructions**. Choose **Claude Code** or **Cursor**, toggle **Deep Remediation**, and show the prompt-injection defenses and the machine-readable JSON Evidence Appendix.
 
 ---
 
-## Quickstart
+## 🚀 Quick Local Setup
 
-### Prerequisites
-* **Node.js**: 20.9+ (tested on Node 22 and 26)
-* **Python**: 3.9+ (tested on Python 3.9.6, 3.11, 3.12)
-* **npm**: standard package manager
+Want to run the full stack locally? It takes less than 2 minutes.
 
-### 1. Installation
-Clone the repository and install dependencies:
-
+### 1. Clone & Install
 ```sh
 cd Guardian
 npm ci --ignore-scripts
@@ -263,155 +247,43 @@ python3 -m venv .venv
 .venv/bin/pip install -r backend/requirements.txt
 ```
 
-### 2. Launch Services
-Start the Python FastAPI backend:
+### 2. Launch
+Start the backend:
 ```sh
 .venv/bin/python -m uvicorn backend.guardian.main:app --host 127.0.0.1 --port 8000
 ```
 
-In a second terminal, start the Next.js frontend:
+Start the frontend:
 ```sh
 npm run dev
 ```
 
-Open **http://127.0.0.1:3000** in your browser.  
-Backend OpenAPI documentation is available at **http://127.0.0.1:8000/docs**.
-
-> The Next.js frontend automatically proxies `/api/*` requests to `http://127.0.0.1:8000`, so all browser requests remain strictly same-origin.
+Open **[http://127.0.0.1:3000](http://127.0.0.1:3000)**.  
+*(Optional: set `GUARDIAN_AI_ENABLED=true` and `GEMINI_API_KEY=your_key` to activate the Gemini security advisor).*
 
 ---
 
-## Configuration
+## 🔒 Ironclad Security Guardrails
 
-Configuration is managed via environment variables. See `.env.example` for reference.
-
-### Backend Environment Variables
-Set shell variables before launching the Uvicorn server:
-
-```sh
-# Enable Google Gemini AI Security Advisor (Optional)
-GUARDIAN_AI_ENABLED=true
-GEMINI_API_KEY=your_gemini_api_key
-GEMINI_MODEL=gemini-3.8-flash
-
-# OSV Vulnerability Intelligence (Defaults to true)
-GUARDIAN_OSV_ENABLED=true
-
-# Database Path (Defaults to backend/guardian.sqlite3)
-GUARDIAN_DB=backend/guardian.sqlite3
-
-# Operator Inspection Ceilings
-GUARDIAN_MAX_PACKAGES=20       # Max packages per deep scan (default: 6 fast, 20 deep)
-GUARDIAN_MAX_DEPTH=4          # Max dependency tree depth (default: 2 fast, 4 deep)
-GUARDIAN_DOWNLOAD_MB=50        # Max aggregate download size in MB
-GUARDIAN_EXPANDED_MB=80        # Max aggregate decompressed size in MB
-```
-
-> **Privacy Guarantee**: Guardian works completely offline and deterministically without an LLM key. When `GUARDIAN_AI_ENABLED` is omitted or `false`, the platform automatically falls back to its deterministic explanation engine. API keys and source code are never uploaded or exposed in logs.
-
----
-
-## Guardian CLI
-
-Guardian includes a pre-installation CLI tool that allows developers to safely check and install packages from their terminal:
-
-```sh
-# Install CLI in editable mode inside your virtual environment
-.venv/bin/python -m pip install -e .
-
-# Inspect an npm or PyPI package without running scripts
-guardian check --ecosystem npm lodash@4.17.21
-guardian check --ecosystem pypi requests
-
-# Verify integrity and install with lifecycle scripts disabled
-guardian install express                      # npm project
-guardian install requests                     # PyPI project
-guardian install                              # All declared dependencies in manifest
-```
-
-See [docs/CLI.md](docs/CLI.md) for full CLI commands, security boundaries, and local cache mechanics.
-
----
-
-## Verification & Testing
-
-Guardian maintains an exhaustive test suite covering static analysis, archive security, rollback journals, and OSV integration:
-
-```sh
-# Run full backend test suite (200+ tests)
-.venv/bin/python -m pytest backend/tests -q
-
-# Run frontend typecheck and tests
-npm run typecheck
-npm test
-
-# Build production bundle
-npm run build
-```
-
----
-
-## Security Principles & System Guardrails
-
-* **Zero Arbitrary Execution**: Guardian never executes package lifecycle scripts (`preinstall`, `postinstall`, `prepare`), never executes uploaded archives, and never executes untrusted code in an unmonitored sandbox.
-* **Privacy & Local-First Boundaries**: Project files remain in browser memory handles; file writes occur strictly upon explicit user approval; all secrets, tokens, and keys are automatically redacted prior to any external AI advisor call.
-* **Reconciled Accounting Invariants**: Every dependency and finding is accounted for arithmetically:
+* **Zero Arbitrary Execution**: Guardian never runs package scripts (`preinstall`, `postinstall`), never executes uploaded archives, and never runs untrusted code in an unmonitored sandbox.
+* **Privacy-First Boundaries**: Ingestion runs in-memory; local project handles remain in browser memory; API keys and sensitive tokens are automatically redacted.
+* **Reconciled Accounting Invariants**:
   $$\text{declaredDirect} + \text{transitive} = \text{totalResolved}$$
   $$\text{inspected} + \text{skipped} + \text{unavailable} + \text{unresolved} + \text{integrity\_failed} + \text{not\_attempted} = \text{totalResolved}$$
-* **No Single Artificial Metric**: Behavioral risk, known vulnerabilities, cryptographic integrity, and inspection coverage are strictly separated. An OSV API outage never conceals static behavioral findings, and static clean scans never guarantee the absence of unknown vulnerabilities.
-* **Operator Ceilings**: Hard limits on memory (256 MB Node heap), decompression size (25 MB aggregate), package depth, and execution time (20s parser timeout) protect the host system from zip-bomb and resource exhaustion attacks.
+* **Fail Visibly**: Incomplete coverage, skipped dependencies, or API outages are always surfaced visibly—never concealed.
 
 ---
 
-## Project Structure
+## 📚 Deep-Dive Documentation
 
-```
-Guardian/
-├── app/                        # Next.js App Router (Layouts, themes, navigation)
-├── components/                 # React UI Components
-│   ├── scan-panel.tsx          # Scan launchpad, file dropzone & package lookup
-│   ├── report.tsx              # 4D report view, finding breakdown & filters
-│   ├── project-workspace.tsx   # 6-tab Project Investigation Workspace
-│   ├── dependency-graph.tsx    # Interactive DAG explorer (@xyflow/react + dagre)
-│   ├── vulnerabilities-explorer.tsx # Hierarchical OSV vulnerability explorer
-│   ├── behavioral-flow-explorer.tsx # Visual source-to-sink data flow steps
-│   ├── remediation-panel.tsx   # Guardian Autopilot approval, apply & undo
-│   ├── remediation-plan.tsx    # Structured remediation plan & trade-offs
-│   ├── diff-viewer.tsx         # Interactive unified diff viewer
-│   ├── handoff-modal.tsx       # Guardian Handoff export dialog (5 AI targets)
-│   ├── intelligence-panel.tsx  # Persistent Guardian Intelligence drawer
-│   └── github-connect-panel.tsx# GitHub App repository connection panel
-├── backend/guardian/           # Python Security Core & FastAPI Application
-│   ├── main.py                 # API routes, job state machine & concurrency lock
-│   ├── engine.py               # Manifest inventory, static flow orchestration
-│   ├── dependencies.py         # Lockfile graph traversal & dependency accounting
-│   ├── integrity.py            # Subresource Integrity (SRI) validation
-│   ├── intelligence.py         # OSV batch query, CVSS & advisory enrichment
-│   ├── advisor.py              # Gemini AI security advisor & secret redaction
-│   ├── projects.py             # In-memory project snapshots & framework detection
-│   ├── remediation.py          # Autopilot remediation planning & diff validation
-│   ├── handoff.py              # Canonical handoff builder & target adapters
-│   └── storage.py              # SQLite report & conversation persistence
-├── scripts/                    # AST Parsers & Verification Scripts
-│   ├── parse.cjs               # Trusted Babel AST adapter
-│   └── static-flow.cjs         # Scope-aware static data-flow tracker
-├── fixtures/                   # Synthetic test fixtures (inert, never executed)
-│   ├── benign/                 # Benign baseline patterns
-│   ├── exfiltration/           # Sensitive data exfiltration AST traces
-│   ├── postinstall/            # Correlated postinstall execution risks
-│   └── remediation-demo/       # Complete Autopilot repair demonstration
-└── docs/                       # Technical documentation & guides
-    ├── CLI.md                  # Pre-installation CLI guide
-    ├── CLI-BUDGETS.md          # Acquisition budgets & diagnostics
-    └── ACCOUNTS-DEPLOYMENT.md  # Account sync & deployment guide
-```
+* 📐 [Architecture Specification](ARCHITECTURE.md) — System modules, data flow, concurrency, and API contracts
+* 🛡️ [Detection Rules Reference](DETECTION_RULES.md) — Rule IDs, severity classifications, and AST matchers
+* 📋 [Product Requirements Document](PRD.md) — User personas, design contracts, and product vision
+* 💻 [CLI & Offline Installation Guide](docs/CLI.md) — Pre-installation CLI, lockfile pinning, and cache mechanics
+* 🗺️ [Project Roadmap](ROADMAP.md) — MicroVM sandboxes, multi-ecosystem expansion, and roadmap milestones
 
 ---
 
-## Documentation
-
-* [Architecture Deep Dive](ARCHITECTURE.md) — System modules, data flow, concurrency, and API contracts
-* [Detection Rules Specification](DETECTION_RULES.md) — Rule IDs, severity classifications, and AST matchers
-* [Product Requirements (PRD)](PRD.md) — Personas, delivered capabilities, and design contracts
-* [Roadmap](ROADMAP.md) — Ecosystem expansion, sandboxing evolution, and future milestones
-* [CLI Security & Resolution](docs/CLI.md) — Command reference, offline verified installs, and security limits
+<div align="center">
+  <sub>Built with precision for developers and security engineers who value verifiable truth over black-box scores.</sub>
+</div>
