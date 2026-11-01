@@ -30,7 +30,8 @@ function openRegistryDB(): Promise<IDBDatabase> {
       }
     };
     req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error || new Error("Failed to open project registry DB."));
+    req.onerror = () =>
+      reject(req.error || new Error("Failed to open project registry DB."));
   });
 }
 
@@ -40,7 +41,7 @@ function openRegistryDB(): Promise<IDBDatabase> {
  */
 function putEntryWithTransaction(
   db: IDBDatabase,
-  record: RegisteredProjectHandle
+  record: RegisteredProjectHandle,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     try {
@@ -52,11 +53,21 @@ function putEntryWithTransaction(
       };
 
       tx.onerror = () => {
-        reject(tx.error || new Error("IndexedDB transaction failed while persisting project registration."));
+        reject(
+          tx.error ||
+            new Error(
+              "IndexedDB transaction failed while persisting project registration.",
+            ),
+        );
       };
 
       tx.onabort = () => {
-        reject(tx.error || new Error("IndexedDB transaction was aborted while persisting project registration."));
+        reject(
+          tx.error ||
+            new Error(
+              "IndexedDB transaction was aborted while persisting project registration.",
+            ),
+        );
       };
 
       store.put(record);
@@ -78,31 +89,40 @@ function putEntryWithTransaction(
 export async function resolveProjectDirectoryId(
   directoryHandle: FileSystemDirectoryHandle,
   projectName: string,
-  existingProjectId?: string | null
+  existingProjectId?: string | null,
 ): Promise<string> {
   // If a known valid project ID was already associated with this scan session, preserve it
   if (existingProjectId) {
     return existingProjectId;
   }
 
-  const sanitized = projectName.replace(/[^a-zA-Z0-9]/g, "_").toLowerCase() || "dir";
+  const sanitized =
+    projectName.replace(/[^a-zA-Z0-9]/g, "_").toLowerCase() || "dir";
 
   let db: IDBDatabase | null = null;
   try {
     db = await openRegistryDB();
-    const entries: RegisteredProjectHandle[] = await new Promise((resolve, reject) => {
-      const tx = db!.transaction(REGISTRY_STORE, "readonly");
-      const store = tx.objectStore(REGISTRY_STORE);
-      const req = store.getAll();
-      req.onsuccess = () => resolve(req.result || []);
-      req.onerror = () => reject(req.error || new Error("Failed to query project registry."));
-    });
+    const entries: RegisteredProjectHandle[] = await new Promise(
+      (resolve, reject) => {
+        const tx = db!.transaction(REGISTRY_STORE, "readonly");
+        const store = tx.objectStore(REGISTRY_STORE);
+        const req = store.getAll();
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror = () =>
+          reject(req.error || new Error("Failed to query project registry."));
+      },
+    );
 
     // Check if any registered handle matches the current directory handle
     for (const entry of entries) {
-      if (entry.handle && typeof (entry.handle as any).isSameEntry === "function") {
+      if (
+        entry.handle &&
+        typeof (entry.handle as any).isSameEntry === "function"
+      ) {
         try {
-          const isSame = await (directoryHandle as any).isSameEntry(entry.handle);
+          const isSame = await (directoryHandle as any).isSameEntry(
+            entry.handle,
+          );
           if (isSame) {
             // Reopening the same directory: refresh lastOpened timestamp and update handle reference
             const updated: RegisteredProjectHandle = {

@@ -170,7 +170,10 @@ export type AIStatus = {
   timeout_seconds: number;
   max_turns: number;
 };
-export async function initSession(): Promise<{ initialized: boolean; new: boolean }> {
+export async function initSession(): Promise<{
+  initialized: boolean;
+  new: boolean;
+}> {
   try {
     const res = await fetch("/api/session/init", {
       method: "POST",
@@ -279,10 +282,7 @@ export type ProposedFileChange = {
 };
 
 export type ValidationStatus =
-  | "VERIFIED"
-  | "UNVERIFIED"
-  | "REJECTED"
-  | "VALIDATION_FAILED";
+  "VERIFIED" | "UNVERIFIED" | "REJECTED" | "VALIDATION_FAILED";
 
 export type RemediationPlan = {
   plan_id: string;

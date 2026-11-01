@@ -263,11 +263,17 @@ export async function reloadProjectDirectory(
   }
 
   if ((directoryHandle as any).queryPermission) {
-    const status = await (directoryHandle as any).queryPermission({ mode: "read" });
+    const status = await (directoryHandle as any).queryPermission({
+      mode: "read",
+    });
     if (status !== "granted") {
-      const requested = await (directoryHandle as any).requestPermission({ mode: "read" });
+      const requested = await (directoryHandle as any).requestPermission({
+        mode: "read",
+      });
       if (requested !== "granted") {
-        throw new Error("Permission to read project directory was not granted.");
+        throw new Error(
+          "Permission to read project directory was not granted.",
+        );
       }
     }
   }
@@ -614,7 +620,10 @@ export async function applyPlanToFileSystem(
 
     // Restore updated files only if a writable was opened or writing was attempted
     for (const entry of backupEntries) {
-      if (tx.openedWritables.has(entry.path) || tx.writeAttempted.has(entry.path)) {
+      if (
+        tx.openedWritables.has(entry.path) ||
+        tx.writeAttempted.has(entry.path)
+      ) {
         try {
           const handle = await resolveFileHandle(
             directoryHandle,
@@ -640,7 +649,10 @@ export async function applyPlanToFileSystem(
 
     // Remove newly created files only if a handle was created
     for (const createdPath of createdFiles) {
-      if (tx.createdFileHandles.has(createdPath) || tx.openedWritables.has(createdPath)) {
+      if (
+        tx.createdFileHandles.has(createdPath) ||
+        tx.openedWritables.has(createdPath)
+      ) {
         try {
           await removeFileHandle(directoryHandle, createdPath);
         } catch {

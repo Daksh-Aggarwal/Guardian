@@ -163,7 +163,10 @@ export function isValidSemver(
   if (!version || typeof version !== "string") return false;
   let clean = version.trim();
   if (FORBIDDEN_SEMVER_CHARS.test(clean)) return false;
-  if (options.allowLeadingV && (clean.startsWith("v") || clean.startsWith("V"))) {
+  if (
+    options.allowLeadingV &&
+    (clean.startsWith("v") || clean.startsWith("V"))
+  ) {
     clean = clean.slice(1);
   }
   return STRICT_SEMVER_REGEX.test(clean);
@@ -200,8 +203,10 @@ export function compareSemver(
   let clean2 = v2.trim();
 
   if (options.allowLeadingV) {
-    if (clean1.startsWith("v") || clean1.startsWith("V")) clean1 = clean1.slice(1);
-    if (clean2.startsWith("v") || clean2.startsWith("V")) clean2 = clean2.slice(1);
+    if (clean1.startsWith("v") || clean1.startsWith("V"))
+      clean1 = clean1.slice(1);
+    if (clean2.startsWith("v") || clean2.startsWith("V"))
+      clean2 = clean2.slice(1);
   }
 
   if (!isValidSemver(clean1, { allowLeadingV: false })) {
@@ -300,7 +305,12 @@ export function isValidPep440(version?: string | null): boolean {
   if (!version || typeof version !== "string") return false;
   const clean = version.trim();
   if (["unresolved", "latest", "*", ""].includes(clean)) return false;
-  if (clean.includes("*") || clean.includes("==") || FORBIDDEN_PEP440_CHARS.test(clean)) return false;
+  if (
+    clean.includes("*") ||
+    clean.includes("==") ||
+    FORBIDDEN_PEP440_CHARS.test(clean)
+  )
+    return false;
   return PEP440_REGEX.test(clean);
 }
 
@@ -308,7 +318,12 @@ export function parsePep440(version: string): ParsedPep440 | null {
   if (!version || typeof version !== "string") return null;
   const clean = version.trim();
   if (["unresolved", "latest", "*", ""].includes(clean)) return null;
-  if (clean.includes("*") || clean.includes("==") || FORBIDDEN_PEP440_CHARS.test(clean)) return null;
+  if (
+    clean.includes("*") ||
+    clean.includes("==") ||
+    FORBIDDEN_PEP440_CHARS.test(clean)
+  )
+    return null;
   const m = clean.match(PEP440_REGEX);
   if (!m) return null;
 
