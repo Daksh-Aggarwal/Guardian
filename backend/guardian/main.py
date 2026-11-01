@@ -671,6 +671,24 @@ def create_remediation_plan(scan_id: str, request: PlanGenerationRequest, req: R
         raise HTTPException(404, 'Report not found')
     _verify_scan_access(rep, req)
     snap = project_manager.get_snapshot(scan_id)
+    if not snap and rep.source_metadata and rep.source_metadata.source_type == "github":
+        try:
+            session_id = _get_session_id(req)
+            if session_id:
+                repo_full_name, files_dict, gh_meta, warnings = github.retrieve_repository_snapshot(
+                    repo_id=rep.source_metadata.repository_id,
+                    branch=rep.source_metadata.branch,
+                    session_id=session_id
+                )
+                snap = project_manager.save_snapshot(
+                    scan_id=scan_id,
+                    name=repo_full_name,
+                    raw_files=files_dict,
+                    project_id=f"github:{rep.source_metadata.repository_id}"
+                )
+        except Exception as err:
+            logger.warning(f"Could not re-retrieve GitHub snapshot for scan {scan_id}: {err}")
+
     if not snap:
         raise HTTPException(400, 'Project snapshot is not available or has expired (30-minute inactivity limit). Please rescan or reconnect the project to prepare a remediation plan.')
 

@@ -119,6 +119,14 @@ def is_version_vulnerable_to_advisory(ver_str: str, advisory: Optional[Advisory]
 
     return False
 
+_NPM_REGISTRY_CACHE: Dict[Tuple[str, Optional[str]], Tuple[Optional[Dict[str, Any]], str, Optional[str]]] = {}
+_OSV_CACHE: Dict[Tuple[str, str], Tuple[List[Dict[str, Any]], str]] = {}
+
+def clear_remediation_caches():
+    """Clears in-memory registry and OSV caches (useful for tests)."""
+    _NPM_REGISTRY_CACHE.clear()
+    _OSV_CACHE.clear()
+
 def query_npm_registry(pkg_name: str, version: Optional[str] = None) -> Tuple[Optional[Dict[str, Any]], str, Optional[str]]:
     """
     Queries npm registry for package or package@version.
@@ -126,50 +134,66 @@ def query_npm_registry(pkg_name: str, version: Optional[str] = None) -> Tuple[Op
     status: 'ok', 'not_found', 'unavailable', 'invalid'
     """
     clean_name = pkg_name.strip()
-    if version:
-        clean_ver = re.sub(r"^[vV^~>=< ]+", "", str(version).strip()).split()[0]
+    clean_ver = re.sub(r"^[vV^~>=< ]+", "", str(version).strip()).split()[0] if version else None
+    cache_key = (clean_name, clean_ver)
+    if cache_key in _NPM_REGISTRY_CACHE:
+        return _NPM_REGISTRY_CACHE[cache_key]
+
+    if clean_ver:
         url = f"https://registry.npmjs.org/{quote(clean_name, safe='')}/{quote(clean_ver, safe='')}"
     else:
         url = f"https://registry.npmjs.org/{quote(clean_name, safe='')}"
 
     try:
-        resp = httpx.get(url, timeout=10.0, follow_redirects=False)
+        resp = httpx.get(url, timeout=5.0, follow_redirects=False)
         if resp.status_code == 200:
             try:
                 data = resp.json()
                 if not isinstance(data, dict):
-                    return None, "invalid", "Malformed JSON payload from registry"
-                return data, "ok", None
+                    res = (None, "invalid", "Malformed JSON payload from registry")
+                else:
+                    res = (data, "ok", None)
             except Exception as e:
-                return None, "invalid", f"JSON decode error: {e}"
+                res = (None, "invalid", f"JSON decode error: {e}")
         elif resp.status_code == 404:
-            return None, "not_found", "Package or version not found (HTTP 404)"
+            res = (None, "not_found", "Package or version not found (HTTP 404)")
         elif resp.status_code in (401, 403):
-            return None, "unavailable", f"Registry authentication or permission error (HTTP {resp.status_code})"
+            res = (None, "unavailable", f"Registry authentication or permission error (HTTP {resp.status_code})")
         else:
-            return None, "unavailable", f"Registry returned HTTP status {resp.status_code}"
+            res = (None, "unavailable", f"Registry returned HTTP status {resp.status_code}")
     except (httpx.TimeoutException, httpx.RequestError) as err:
-        return None, "unavailable", f"Registry request failed ({type(err).__name__}: {err})"
+        res = (None, "unavailable", f"Registry request failed ({type(err).__name__}: {err})")
     except Exception as err:
-        return None, "unavailable", f"Unexpected error during registry query ({type(err).__name__}: {err})"
+        res = (None, "unavailable", f"Unexpected error during registry query ({type(err).__name__}: {err})")
+
+    _NPM_REGISTRY_CACHE[cache_key] = res
+    return res
 
 def query_osv_vulnerability(pkg_name: str, version: str) -> Tuple[List[Dict[str, Any]], str]:
     """Queries OSV for known vulnerabilities for pkg_name@version."""
     clean_ver = re.sub(r"^[vV^~>=< ]+", "", str(version).strip()).split()[0]
+    cache_key = (pkg_name, clean_ver)
+    if cache_key in _OSV_CACHE:
+        return _OSV_CACHE[cache_key]
+
     try:
         resp = httpx.post(
             "https://api.osv.dev/v1/query",
             json={"package": {"name": pkg_name, "ecosystem": "npm"}, "version": clean_ver},
-            timeout=8.0,
+            timeout=5.0,
             follow_redirects=False
         )
         if resp.status_code == 200:
             data = resp.json()
             vulns = data.get("vulns", []) if isinstance(data, dict) else []
-            return (vulns if isinstance(vulns, list) else []), "ok"
-        return [], "unavailable"
+            res = (vulns if isinstance(vulns, list) else []), "ok"
+        else:
+            res = [], "unavailable"
     except Exception:
-        return [], "unavailable"
+        res = [], "unavailable"
+
+    _OSV_CACHE[cache_key] = res
+    return res
 
 def extract_manifest_dependency_changes(orig_pkg_json: str, prop_pkg_json: str) -> Dict[str, Dict[str, str]]:
     """Compares original and proposed package.json contents and extracts changed dependencies."""
@@ -385,7 +409,20 @@ def select_patched_dependency_version(
     safe_candidates.sort(key=lambda item: (item[0][0], item[0][1], item[0][2]))
 
     same_major = [c for c in safe_candidates if c[0][0] == orig_semver[0]]
-    selected_ver = same_major[0][1] if same_major else safe_candidates[0][1]
+    ordered_candidates = same_major if same_major else safe_candidates
+
+    selected_ver = None
+    # Pick the smallest safe upgrade not reported vulnerable by OSV
+    for cand in ordered_candidates:
+        ver = cand[1]
+        vulns, st = query_osv_vulnerability(pkg_name, ver)
+        if st == "ok" and vulns:
+            continue
+        selected_ver = ver
+        break
+
+    if not selected_ver and ordered_candidates:
+        selected_ver = ordered_candidates[0][1]
 
     dist_meta = None
     if packument and "versions" in packument and selected_ver in packument["versions"]:
@@ -666,10 +703,23 @@ class RemediationPlanner:
             target_findings = [f for f in report.findings if f.id in finding_ids]
         if not target_findings:
             # Default to actionable findings (elevated severity, OSV, install scripts)
-            target_findings = [
+            # Prioritize: critical -> high -> medium, selecting distinct rule/package pairings
+            actionable = [
                 f for f in report.findings
                 if f.severity in ('critical', 'high', 'medium') or f.rule == 'OSV' or f.rule.startswith('INSTALL_')
             ]
+            sev_rank = {'critical': 0, 'high': 1, 'medium': 2, 'low': 3, 'info': 4}
+            actionable.sort(key=lambda f: sev_rank.get(f.severity.lower() if f.severity else 'info', 5))
+            seen_actionable_keys: Set[Tuple[str, str]] = set()
+            distinct_actionable: List[Finding] = []
+            for f in actionable:
+                key = (f.rule, f.package or '')
+                if key not in seen_actionable_keys:
+                    seen_actionable_keys.add(key)
+                    distinct_actionable.append(f)
+                if len(distinct_actionable) >= 5:
+                    break
+            target_findings = distinct_actionable
         if not target_findings:
             target_findings = report.findings[:3]
 
@@ -751,16 +801,14 @@ class RemediationPlanner:
                 "fixed_versions": f.advisory.fixed_versions if f.advisory else []
             })
 
-        # Always include package.json and package-lock.json if present
+        # Include package.json if present (never include raw lockfiles in LLM context to prevent token bloat and timeouts)
         if "package.json" in snapshot.files:
             relevant_files.add("package.json")
-        if "package-lock.json" in snapshot.files:
-            relevant_files.add("package-lock.json")
 
         # Bounded file context: up to 5 files, at most 30 KB each
         files_context = []
         for path in sorted(list(relevant_files))[:5]:
-            if is_secret_file(path) or path.startswith(".git/"):
+            if is_secret_file(path) or path.startswith(".git/") or path in ("package-lock.json", "yarn.lock", "pnpm-lock.yaml"):
                 continue
             content = snapshot.files.get(path, "")
             # Truncate if very large
@@ -779,6 +827,7 @@ class RemediationPlanner:
                 "runtime": snapshot.metadata.runtime,
                 "language": snapshot.metadata.language,
                 "test_framework": snapshot.metadata.test_framework,
+                "has_package_lock": "package-lock.json" in snapshot.files,
             },
             "findings": findings_context,
             "relevant_files": files_context
@@ -805,10 +854,8 @@ class RemediationPlanner:
             "1. PROPOSED EDITS MUST BE EXACT: For every update to an existing file, provide an exact 'old_text' snippet "
             "that matches VERBATIM in the file, and its replacement 'new_text'. The 'old_text' MUST appear EXACTLY ONCE.\n"
             "2. DO NOT REWRITE ENTIRE FILES: Provide minimal, precise, targeted text replacements.\n"
-            "3. DEPENDENCY & LOCKFILE CONSISTENCY: When updating npm dependencies in projects that contain a "
-            "package-lock.json, you MUST update package.json AND package-lock.json together with consistent version declarations. "
-            "Never update package.json without also updating package-lock.json. Never fabricate package versions, "
-            "registry metadata, or integrity hashes.\n"
+            "3. DEPENDENCY CHANGES: For npm dependency upgrades, propose edits in package.json and populate dependency_proposals. "
+            "Do NOT directly edit package-lock.json; Guardian's deterministic engine automatically generates verified lockfile entries with authentic SRI hashes.\n"
             "4. EVIDENCE-BACKED DEPENDENCY PROPOSALS: For any dependency modification, populate dependency_proposals "
             "identifying original and proposed versions, explaining why the target version addresses the specific finding, "
             "identifying any major-version change, and stating any uncertainty. Prefer the smallest safe upgrade that resolves "
@@ -832,17 +879,23 @@ class RemediationPlanner:
             "Ensure every 'old_text' is an exact verbatim substring from the provided file content."
         )
 
-        timeout_ms = ai_cfg["timeout"] * 1000 if ai_cfg["timeout"] < 1000 else ai_cfg["timeout"]
+        timeout_sec = min(int(ai_cfg.get("timeout", 12)), 12)
+        timeout_ms = timeout_sec * 1000
         client = genai.Client(
             api_key=ai_cfg["api_key"],
             http_options=types.HttpOptions(timeout=timeout_ms)
         )
+
+        thinking_config = None
+        if hasattr(types, "ThinkingConfig"):
+            thinking_config = types.ThinkingConfig(thinking_budget=1024)
 
         config = types.GenerateContentConfig(
             system_instruction=system_instruction,
             response_mime_type="application/json",
             response_schema=LLMRemediationOutput,
             temperature=0.1,
+            thinking_config=thinking_config,
         )
 
         response = client.models.generate_content(
@@ -877,12 +930,16 @@ class RemediationPlanner:
         pkg_json_content = snapshot.files.get("package.json")
         lock_content = snapshot.files.get("package-lock.json")
 
+        addressed_pkgs: Set[str] = set()
         for f in target_findings:
             # Case 1: OSV advisory with package.json
             if f.rule == "OSV" and f.advisory and pkg_json_content:
                 pkg_name, _ = parse_package_specifier(f.package)
                 if not pkg_name:
                     pkg_name = f.package or ""
+                if pkg_name in addressed_pkgs:
+                    findings_addressed.append(f.id)
+                    continue
                 pattern = rf'("{re.escape(pkg_name)}"\s*:\s*")([^"]+)(")'
                 match = re.search(pattern, pkg_json_content)
                 if match:
@@ -894,6 +951,7 @@ class RemediationPlanner:
                             advisory=f.advisory
                         )
                         if target_version and dist_meta:
+                            addressed_pkgs.add(pkg_name)
                             prefix = "^"
                             if orig_spec.startswith("~"):
                                 prefix = "~"
@@ -969,6 +1027,13 @@ class RemediationPlanner:
                             tradeoffs.append(f"Neutralizing {stage} prevents automated build tasks during installation.")
                             risks.append(f"If the package requires native asset compilation, run that build step manually.")
                             manual_steps.append(f"If native compilation is required, execute the necessary build step explicitly.")
+
+        # Associate all scan findings for the remediated packages
+        for f in report.findings:
+            if f.rule == "OSV" and f.package:
+                p_name, _ = parse_package_specifier(f.package)
+                if p_name in addressed_pkgs and f.id not in findings_addressed:
+                    findings_addressed.append(f.id)
 
         if not proposed_changes:
             # Generic guidance plan if no automatic edits could be generated
