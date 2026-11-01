@@ -945,6 +945,7 @@ export default function DependencyGraph({
             fitViewOptions={{ padding: 0.12 }}
             minZoom={0.08}
             maxZoom={1.8}
+            colorMode="dark"
           >
             <Background color="#1e293b" gap={18} size={1} />
             <Controls
@@ -952,6 +953,7 @@ export default function DependencyGraph({
                 background: "#0f172a",
                 border: "1px solid rgba(255, 255, 255, 0.15)",
                 borderRadius: "6px",
+                overflow: "hidden",
               }}
             />
             <MiniMap

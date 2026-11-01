@@ -6702,6 +6702,66 @@ select {
   overflow-y: auto;
 }
 
+/* Custom XYFlow / ReactFlow Controls Styling for Dark Theme */
+.react-flow {
+  --xy-controls-button-background-color: #0f172a;
+  --xy-controls-button-background-color-hover: #1e293b;
+  --xy-controls-button-color: #94a3b8;
+  --xy-controls-button-color-hover: #f8fafc;
+  --xy-controls-button-border-color: rgba(255, 255, 255, 0.12);
+  --xy-controls-box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.react-flow__controls {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4) !important;
+  border-radius: 6px !important;
+  overflow: hidden !important;
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+  background: #0f172a !important;
+}
+
+.react-flow__controls-button {
+  background: #0f172a !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12) !important;
+  color: #94a3b8 !important;
+  fill: #94a3b8 !important;
+  transition: background-color 0.15s ease, color 0.15s ease, fill 0.15s ease !important;
+}
+
+.react-flow__controls-button:hover {
+  background: #1e293b !important;
+  color: #f8fafc !important;
+  fill: #f8fafc !important;
+}
+
+.react-flow__controls-button:active {
+  background: #334155 !important;
+}
+
+.react-flow__controls-button:last-child {
+  border-bottom: none !important;
+}
+
+.react-flow__controls.horizontal .react-flow__controls-button {
+  border-bottom: none !important;
+  border-right: 1px solid rgba(255, 255, 255, 0.12) !important;
+}
+
+.react-flow__controls.horizontal .react-flow__controls-button:last-child {
+  border-right: none !important;
+}
+
+.react-flow__controls-button svg {
+  fill: currentColor !important;
+  max-width: 14px;
+  max-height: 14px;
+}
+
+.react-flow__controls-button:disabled {
+  opacity: 0.35 !important;
+  cursor: not-allowed;
+}
+
 /* Custom XYFlow / ReactFlow Node Styling for Dark Theme */
 .react-flow__node {
   font-family: inherit;
