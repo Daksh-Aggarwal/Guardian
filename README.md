@@ -10,6 +10,8 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![Google Gemini](https://img.shields.io/badge/Gemini_3.8_Flash-AI_Advisor-8E75C2?style=for-the-badge&logo=google-gemini&logoColor=white)](https://deepmind.google/technologies/gemini/)
+[![CLI](https://img.shields.io/badge/CLI-npm_%26_PyPI-4B32C3?style=for-the-badge&logo=gnubash&logoColor=white)](docs/CLI.md)
+[![Cloud Sync](https://img.shields.io/badge/Supabase-PKCE_Sync-3ECF8E?style=for-the-badge&logo=supabase&logoColor=white)](docs/ACCOUNTS-DEPLOYMENT.md)
 [![Zero Execution](https://img.shields.io/badge/Execution-Zero_Arbitrary_Code-critical?style=for-the-badge&logo=shield)](https://github.com)
 
 <br/>
@@ -35,10 +37,12 @@ Traditional SCA tools search for known CVEs in an outdated database. But **suppl
 |:---|:---|
 | ❌ **Black-box single score** (e.g. "88/100 Safe") | 🎯 **Decoupled 4D Posture**: Behavioral, OSV, SRI, and Coverage evaluated independently |
 | ❌ **Vulnerability lists only**: Misses zero-day behavioral malware | 🔬 **Deterministic Static Data-Flow Engine**: Traces secrets from source to sink across files |
+| ❌ **Post-install panic**: Alerts you after malicious code ran on your laptop | 💻 **Pre-Installation CLI Enforcement**: Blocks malicious packages before they touch disk |
 | ❌ **Cloud-first exposure**: Uploads your private source code | 🔒 **100% Local-First Privacy**: AST analysis in-memory; source code never leaves your machine |
 | ❌ **Blind trust**: Executes install scripts in containers | 🛡️ **Zero Arbitrary Execution**: Scripts and tarballs are never executed |
 | ❌ **Manual fix slog**: Leaves developers stuck fixing files | 🚀 **Guardian Autopilot**: In-browser local patching with IndexedDB rollback snapshots |
 | ❌ **Prompt drift**: Copy-pasting raw CVEs into ChatGPT | 🤖 **Guardian Handoff**: Hardened, injection-defended exports for Claude Code & Cursor |
+| ❌ **Siloed tools**: Terminal disconnected from web reports | ☁️ **Seamless Cloud Sync**: Device PKCE auth with optional sanitized dashboard sync |
 
 ---
 
@@ -47,7 +51,7 @@ Traditional SCA tools search for known CVEs in an outdated database. But **suppl
 ```mermaid
 flowchart TD
     subgraph INGEST["1. Bounded Ingestion"]
-        A["Package Manifests / ZIP / npm Registry / Local Project"] --> B["Safe Streaming Ingest: Path Traversal Guards, Decompression Bomb Limits & Secret Exclusion"]
+        A["Package Manifests / ZIP / npm Registry / Local Project / Terminal CLI"] --> B["Safe Streaming Ingest: Path Traversal Guards, Decompression Bomb Limits & Secret Exclusion"]
     end
 
     subgraph ENGINE["2. Deep Static Analysis Engine"]
@@ -61,11 +65,12 @@ flowchart TD
         C & E & F --> G["Immutable Report Snapshot: 4 Decoupled Security Dimensions with Strict Accounting"]
     end
 
-    subgraph ACTIONS["4. Interactive Intelligence & Remediation"]
+    subgraph ACTIONS["4. Interactive Intelligence, CLI & Remediation"]
         G --> H["Project Workspace: Interactive ReactFlow DAG, Subtree Isolation and 6 Audit Tabs"]
         G --> I["Guardian Intelligence: Gemini 3.8 Flash Advisor with Redaction and Verified Citations"]
         G --> J["Guardian Autopilot: Browser-Native File System Patching with Rollback Journals"]
         G --> K["Guardian Handoff: AI-Agnostic Instruction Export to Claude Code, Cursor and Copilot"]
+        G --> L["Terminal CLI: Pre-Installation Policy Enforcement, Verified Installs & Cloud Sync"]
     end
 
     style INGEST fill:#0f172a,stroke:#3b82f6,stroke-width:2px,color:#f8fafc
@@ -73,6 +78,8 @@ flowchart TD
     style REPORT fill:#0f172a,stroke:#10b981,stroke-width:2px,color:#f8fafc
     style ACTIONS fill:#0f172a,stroke:#f59e0b,stroke-width:2px,color:#f8fafc
 ```
+
+---
 
 ### 1. 🔍 Deep AST Data-Flow Engine (Zero-Execution Leak Detection)
 Guardian doesn't just scan for regex keywords. It utilizes a trusted Babel AST front-end and a Python static engine that builds a real syntax tree to trace variables:
@@ -82,7 +89,63 @@ Guardian doesn't just scan for regex keywords. It utilizes a trusted Babel AST f
 
 ---
 
-### 2. 🛠️ Guardian Autopilot (Safe In-Browser AI Remediation)
+### 2. 💻 Local-First Terminal CLI (Pre-Installation Enforcement)
+> **Catch threats at the front door before `npm install` or `pip install` compromises your workstation.**
+
+The **`guardian`** CLI brings Guardian’s full static analysis and verification engine directly to developer workflows in the terminal:
+
+<div align="center">
+
+![Guardian CLI in Action](docs/screenshots/CLI.png)
+
+</div>
+
+* **Pre-Installation Verification**: Run `guardian install <pkg>` instead of standard package managers. Guardian downloads tarballs or wheels in-memory, verifies cryptographic hashes, inspects the dependency graph, and analyzes AST data flows **before** anything touches your disk.
+* **Dual-Ecosystem (npm & PyPI)**: Full support for JavaScript/TypeScript (`package-lock.json` v2/v3) and Python (`requirements.txt`, PEP 440/503/621 wheels).
+* **Script-Free Verified Installations**: Disables lifecycle hooks (`preinstall`, `postinstall`) completely. Populates an isolated verified cache and performs atomic staging into `node_modules` or Python virtual environments.
+* **Deterministic Policy Gate**: Evaluates outcomes as `ALLOW`, `WARN`, `BLOCK`, or `REVIEW`. Malicious code evaluation, credential exfiltration, or typosquats are immediately blocked.
+* **Offline Inspection**: Inspect local packages (`guardian check ./dist.tgz --offline`) with zero network dependency.
+
+```sh
+# Pre-install inspection and safe, script-free installation
+guardian install express                      # npm project: verified script-free install
+guardian install requests                     # PyPI project: hash-pinned wheel install
+guardian check npm:lodash@4.17.21             # Inspect package without installing
+guardian audit                                # Audit current project source + dependencies
+guardian report --output scan.json            # Export atomic local JSON report
+```
+
+---
+
+### 3. ☁️ Seamless Cloud Sync & Web Federation (Supabase PKCE)
+> **Bridge your local terminal with the full power of the web dashboard—privately and on your terms.**
+
+Guardian provides an optional, privacy-respecting synchronization bridge connecting the CLI and the web application:
+
+```mermaid
+flowchart LR
+    A["Developer Terminal: guardian audit / install"] --> B["Local Private Report: SQLite / In-Memory"]
+    B --> C["Explicit User Sync: guardian sync"]
+    C --> D["Automated Secret Redaction: Strips API keys, passwords & private source"]
+    D --> E["Supabase Auth API: PKCE Token Verification with GitHub Identity"]
+    E --> F["Guardian Web Command Centre: Live Project Workspace & DAG Explorer"]
+
+    style A fill:#0f172a,stroke:#64748b,color:#f8fafc
+    style B fill:#0f172a,stroke:#38bdf8,color:#f8fafc
+    style C fill:#1e293b,stroke:#f59e0b,color:#f8fafc
+    style D fill:#450a0a,stroke:#f43f5e,color:#fecdd3
+    style E fill:#064e3b,stroke:#10b981,color:#a7f3d0
+    style F fill:#1e1b4b,stroke:#8b5cf6,color:#ddd6fe
+```
+
+* **Device-Bound PKCE Authorization**: Run `guardian login` in the terminal to launch a browser-based GitHub OAuth flow via Supabase. Credentials are saved directly into your system's secure OS keychain (macOS Keychain, Linux SecretService, Windows Credential Manager).
+* **Explicit, Sanitized Synchronization**: Guardian **never** syncs automatically. Scans stay local until you explicitly run `guardian sync`. Reports are sanitized—all sensitive credentials and proprietary code are redacted before upload.
+* **Integrated Web Inspection**: CLI scans immediately surface in the web dashboard under your authenticated profile. Jump straight from a terminal warning into the interactive DAG or launch Guardian Autopilot to remediate it.
+* **Offline CLI Report Import**: Air-gapped or offline? Export reports with `guardian report --json` and drag-and-drop the file into the web UI using the built-in **CLI Report Import** bridge.
+
+---
+
+### 4. 🛠️ Guardian Autopilot (Safe In-Browser AI Remediation)
 > **The world's first browser-native supply chain remediation system with ironclad rollback safety.**
 
 When an issue is identified, Guardian doesn't just tell you to fix it—it fixes it for you directly in your browser using the modern **File System Access API**, backed by a multi-tier safety architecture:
@@ -127,7 +190,7 @@ flowchart TD
 
 ---
 
-### 3. 🤖 Guardian Handoff (AI-Agnostic Agent Instructions)
+### 5. 🤖 Guardian Handoff (AI-Agnostic Agent Instructions)
 Prefer handing off remediation to an autonomous CLI agent or your favorite IDE assistant? Guardian Handoff deterministically compiles security findings into hardened, prompt-injection-defended instruction packages:
 
 ```mermaid
@@ -166,7 +229,7 @@ flowchart LR
 
 ---
 
-### 4. 🧠 Guardian Intelligence (Contextual Security Advisor)
+### 6. 🧠 Guardian Intelligence (Contextual Security Advisor)
 * **Persistent Collapsible Drawer**: Slides in smoothly alongside any scan report or investigation tab.
 * **Powered by Gemini 3.8 Flash**: Fast, nuanced reasoning powered by Google DeepMind's official `google-genai` SDK.
 * **Strict Anti-Hallucination Guardrails**: Every advisory citation generated by the AI is mathematically validated against genuine report findings. Citations are interactive buttons that highlight and jump directly to the finding in the report.
@@ -174,7 +237,7 @@ flowchart LR
 
 ---
 
-### 5. 🕸️ Project Investigation Workspace (6 Dedicated Views)
+### 7. 🕸️ Project Investigation Workspace (6 Dedicated Views)
 A state-of-the-art interactive workspace engineered with **`@xyflow/react`** and **`@dagrejs/dagre`**:
 
 ![Finding Detail View](docs/screenshots/finding-detail.png)
@@ -188,7 +251,7 @@ A state-of-the-art interactive workspace engineered with **`@xyflow/react`** and
 
 ---
 
-### 6. ⚖️ Decoupled 4-Dimension Security Assessment
+### 8. ⚖️ Decoupled 4-Dimension Security Assessment
 Guardian strictly enforces independent security domains. A clean vulnerability scan never conceals uninspected code, and external API outages never break local static analysis:
 
 ```
@@ -216,8 +279,8 @@ Impressing an audience or presentation panel? Run this proven walkthrough:
     (Baseline sanity)            (AST source-to-sink)         (AI Advisor drawer)
            │                             │                            │
            ▼                             ▼                            ▼
- 4. Dependency DAG      ──>  5. In-Browser Autopilot ──>  6. Multi-Agent Handoff
-    (Interactive graph)          (Safe fix & rescan)          (Claude Code / Cursor)
+ 4. Terminal CLI        ──>  5. In-Browser Autopilot ──>  6. Multi-Agent Handoff
+    (Pre-install block)          (Safe fix & rescan)          (Claude Code / Cursor)
 ```
 
 1. **Step 1: The Baseline Sanity Check**  
@@ -226,8 +289,8 @@ Impressing an audience or presentation panel? Run this proven walkthrough:
    Click **Sensitive data flow**. Switch to **Advanced mode** on the sensitive transmission finding. Show how Guardian tracks `process.env.NPM_TOKEN` through variables and parameters straight into an `https.request()` network call!
 3. **Step 3: Correlated Behavioral Risks & AI Advisor**  
    Click **Suspicious installer**. See `INSTALL_REMOTE` and `EXEC_DYNAMIC` flagged. Open the **Guardian Intelligence** drawer and ask: *"What should I do next?"* Watch the AI cite findings with clickable links that scroll to the exact code snippet.
-4. **Step 4: Interactive Dependency Graph**  
-   Navigate to **Project workspace** $\rightarrow$ **Dependency Graph**. Zoom and pan across the interactive DAG. Click a high-severity dependency to isolate its upstream impact subtree!
+4. **Step 4: Terminal Pre-Installation Enforcement & Sync**  
+   Switch to the terminal: run `guardian check npm:postinstall-demo`. Show the immediate `BLOCK` verdict before installation. Run `guardian sync` and switch to the browser to reveal the scan instantly appearing in the web dashboard!
 5. **Step 5: In-Browser Autopilot Remediation & Rollback**  
    Select `fixtures/remediation-demo`. Click **Prepare a fix with Guardian**. Review the interactive diff removing the dangerous install hook. Click **Approve and apply** (backed by IndexedDB). Click **Rescan & verify** to watch the finding flip to **Resolved**! Then click **Undo latest changes** to prove instantaneous safe rollback.
 6. **Step 6: Multi-Agent Handoff**  
@@ -245,6 +308,7 @@ cd Guardian
 npm ci --ignore-scripts
 python3 -m venv .venv
 .venv/bin/pip install -r backend/requirements.txt
+.venv/bin/pip install --no-deps -e .   # Install guardian CLI executable
 ```
 
 ### 2. Launch
@@ -280,6 +344,7 @@ Open **[http://127.0.0.1:3000](http://127.0.0.1:3000)**.
 * 🛡️ [Detection Rules Reference](DETECTION_RULES.md) — Rule IDs, severity classifications, and AST matchers
 * 📋 [Product Requirements Document](PRD.md) — User personas, design contracts, and product vision
 * 💻 [CLI & Offline Installation Guide](docs/CLI.md) — Pre-installation CLI, lockfile pinning, and cache mechanics
+* ☁️ [Accounts, Sync & Cloud Deployment](docs/ACCOUNTS-DEPLOYMENT.md) — Supabase PKCE login, report sync, and Render/Vercel setup
 * 🗺️ [Project Roadmap](ROADMAP.md) — MicroVM sandboxes, multi-ecosystem expansion, and roadmap milestones
 
 ---
