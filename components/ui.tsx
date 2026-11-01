@@ -33,7 +33,7 @@ export function Brand({ size = "default" }: { size?: "default" | "compact" }) {
         <ShieldCheckIcon size={pixelSize} className="inline-flex items-center justify-center" />
       </motion.span>
       <span className="brand-text">
-        guardian<span className="brand-dot">.</span>
+        DevGuardian<span className="brand-dot">.</span>
       </span>
     </div>
   );

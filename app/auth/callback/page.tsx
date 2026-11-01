@@ -54,7 +54,7 @@ export default function CallbackPage() {
       <p role={error ? "alert" : "status"}>
         {error || "Finishing GitHub sign-in…"}
       </p>
-      {error && <a href="/account">Return to Guardian</a>}
+      {error && <a href="/account">Return to DevGuardian</a>}
     </main>
   );
 }

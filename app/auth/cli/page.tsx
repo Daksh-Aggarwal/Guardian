@@ -72,7 +72,7 @@ export default function CLIAuthPage() {
         )}
         <p className="account-muted">
           This account connection does not grant GitHub repository permissions
-          or install the Guardian GitHub App.
+          or install the DevGuardian GitHub App.
         </p>
       </section>
     </main>

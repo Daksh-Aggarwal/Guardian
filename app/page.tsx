@@ -1101,7 +1101,7 @@ export default function Home() {
           <footer>
             <span>
               <ShieldCheck size={14} />
-              Guardian 3.0 · Software Supply-Chain Intelligence
+              DevGuardian 3.0 · Software Supply-Chain Intelligence
             </span>
             <span>
               Static inspection. Transparent coverage. Grounded AI reasoning.
@@ -1132,7 +1132,7 @@ function Methodology() {
           {
             n: "01",
             title: "Inspect. Never execute.",
-            text: "Guardian unpacks ZIP files and npm tarballs strictly in bounded virtual memory with recursive size and symlink checks. Uploaded lifecycle scripts and untrusted executables are never run.",
+            text: "DevGuardian unpacks ZIP files and npm tarballs strictly in bounded virtual memory with recursive size and symlink checks. Uploaded lifecycle scripts and untrusted executables are never run.",
           },
           {
             n: "02",
@@ -1159,7 +1159,7 @@ function Methodology() {
       </div>
 
       <Note>
-        Guardian is a local supply-chain defense engine. It performs bounded AST
+        DevGuardian is a local supply-chain defense engine. It performs bounded AST
         static analysis and exact OSV database cross-referencing. Explanation
         responses are evidence-grounded in stored scan findings.
       </Note>
