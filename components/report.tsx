@@ -357,7 +357,7 @@ export default function ReportView({
           </button>
 
           {/* Simple vs Advanced mode selector */}
-          <div
+          {/* <div
             className="mode-toggle-pill"
             role="group"
             aria-label="Report detail level"
@@ -376,7 +376,7 @@ export default function ReportView({
             >
               Advanced
             </button>
-          </div>
+          </div> */}
         </div>
       </div>
 
@@ -672,7 +672,7 @@ export default function ReportView({
       </section>
 
       {/* 4 Independent Assessment Dimension Cards */}
-      <section className="dimensions-section">
+      <section className="dimensions-section hidden">
         <div className="dimension-grid">
           {/* 1. Behavioral Assessment */}
           <SecurityDimensionCard
@@ -1235,7 +1235,7 @@ export default function ReportView({
           </div>
 
           {/* Guardian Autopilot Quick Launch Aside Banner */}
-          {onPrepareFix && report.findings.length > 0 && (
+          {/* {onPrepareFix && report.findings.length > 0 && (
             <div className="card autopilot-aside-card">
               <div className="autopilot-aside-header">
                 <div className="autopilot-aside-icon-wrap">
@@ -1259,7 +1259,7 @@ export default function ReportView({
                 <ArrowRight size={13} />
               </button>
             </div>
-          )}
+          )} */}
 
           {/* Copilot Quick Launch Banner */}
           <div className="card copilot-callout-card">
