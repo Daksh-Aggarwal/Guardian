@@ -1,11 +1,6 @@
 "use client";
 
-import {
-  ShieldAlert,
-  AlertTriangle,
-  FileCode2,
-  Info,
-} from "lucide-react";
+import { ShieldAlert, AlertTriangle, FileCode2, Info } from "lucide-react";
 import {
   CheckCircle2,
   Terminal,
@@ -155,23 +150,24 @@ export default function RemediationPlanView({
               >
                 {currentStatus.label}
               </span>
-              {plan.validation_status && validationBadges[plan.validation_status] && (
-                <span
-                  style={{
-                    fontSize: "10px",
-                    fontWeight: 600,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.06em",
-                    padding: "2px 8px",
-                    borderRadius: "4px",
-                    background: validationBadges[plan.validation_status].bg,
-                    color: validationBadges[plan.validation_status].color,
-                    border: `1px solid ${validationBadges[plan.validation_status].border}`,
-                  }}
-                >
-                  {validationBadges[plan.validation_status].label}
-                </span>
-              )}
+              {plan.validation_status &&
+                validationBadges[plan.validation_status] && (
+                  <span
+                    style={{
+                      fontSize: "10px",
+                      fontWeight: 600,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.06em",
+                      padding: "2px 8px",
+                      borderRadius: "4px",
+                      background: validationBadges[plan.validation_status].bg,
+                      color: validationBadges[plan.validation_status].color,
+                      border: `1px solid ${validationBadges[plan.validation_status].border}`,
+                    }}
+                  >
+                    {validationBadges[plan.validation_status].label}
+                  </span>
+                )}
               <span
                 style={{
                   fontSize: "10px",

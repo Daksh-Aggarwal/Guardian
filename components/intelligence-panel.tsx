@@ -518,7 +518,10 @@ export default function IntelligencePanel({
                   whileHover={{ scale: 1.08, rotate: 6 }}
                   transition={{ type: "spring", stiffness: 400, damping: 15 }}
                 >
-                  <SparklesIcon size={16} className="copilot-spark-icon inline-flex items-center justify-center" />
+                  <SparklesIcon
+                    size={16}
+                    className="copilot-spark-icon inline-flex items-center justify-center"
+                  />
                   <span className="copilot-pulse" />
                 </motion.div>
                 <div>
@@ -533,12 +536,17 @@ export default function IntelligencePanel({
                       title="Click to toggle AI Privacy & Consent settings"
                     >
                       {consent ? (
-                        <ShieldCheck size={11} className="text-emerald inline-icon" />
+                        <ShieldCheck
+                          size={11}
+                          className="text-emerald inline-icon"
+                        />
                       ) : (
                         <Shield size={11} className="inline-icon" />
                       )}
                       <span>
-                        {activeProvider === "gemini" ? activeModel : "Deterministic Engine"}
+                        {activeProvider === "gemini"
+                          ? activeModel
+                          : "Deterministic Engine"}
                       </span>
                     </motion.button>
                   </div>
@@ -678,7 +686,10 @@ export default function IntelligencePanel({
               {messages.length === 0 ? (
                 <div className="copilot-empty">
                   <div className="copilot-empty-icon">
-                    <SparklesIcon size={26} className="inline-flex items-center justify-center text-amber-400" />
+                    <SparklesIcon
+                      size={26}
+                      className="inline-flex items-center justify-center text-amber-400"
+                    />
                   </div>
                   <h4>Evidence-Grounded Security Advisor</h4>
                   <p>

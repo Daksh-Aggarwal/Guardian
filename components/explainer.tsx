@@ -1,13 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import {
-  Loader2,
-  Shield,
-  PlusCircle,
-  AlertTriangle,
-  Info,
-} from "lucide-react";
+import { Loader2, Shield, PlusCircle, AlertTriangle, Info } from "lucide-react";
 import {
   Sparkles,
   ArrowUp,

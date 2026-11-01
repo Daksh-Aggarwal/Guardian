@@ -112,9 +112,15 @@ export default function DiffViewer({
             title="Copy diff to clipboard"
           >
             {copied ? (
-              <CheckIcon size={13} className="inline-flex items-center justify-center text-emerald-400" />
+              <CheckIcon
+                size={13}
+                className="inline-flex items-center justify-center text-emerald-400"
+              />
             ) : (
-              <CopyIcon size={13} className="inline-flex items-center justify-center" />
+              <CopyIcon
+                size={13}
+                className="inline-flex items-center justify-center"
+              />
             )}
             {copied ? "Copied" : "Copy diff"}
           </button>

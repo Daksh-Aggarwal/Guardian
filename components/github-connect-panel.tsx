@@ -1,11 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import {
-  Globe,
-  Loader2,
-  AlertTriangle,
-} from "lucide-react";
+import { Globe, Loader2, AlertTriangle } from "lucide-react";
 import {
   GitBranch,
   Search,
@@ -50,7 +46,9 @@ export default function GitHubConnectPanel({
   const [repos, setRepos] = useState<GitHubRepository[]>([]);
   const [loadingRepos, setLoadingRepos] = useState(false);
   const [search, setSearch] = useState("");
-  const [selectedRepo, setSelectedRepo] = useState<GitHubRepository | null>(null);
+  const [selectedRepo, setSelectedRepo] = useState<GitHubRepository | null>(
+    null,
+  );
   const [branches, setBranches] = useState<GitHubBranch[]>([]);
   const [loadingBranches, setLoadingBranches] = useState(false);
   const [selectedBranch, setSelectedBranch] = useState<string>("");
@@ -112,8 +110,14 @@ export default function GitHubConnectPanel({
       setStatus(res);
       if (res.connected) {
         fetchRepos();
-      } else if (!res.available_installations || res.available_installations.length === 0) {
-        setError(res.reason || "No GitHub App installation found on your GitHub account. Ensure the app is installed at GitHub.");
+      } else if (
+        !res.available_installations ||
+        res.available_installations.length === 0
+      ) {
+        setError(
+          res.reason ||
+            "No GitHub App installation found on your GitHub account. Ensure the app is installed at GitHub.",
+        );
       }
     } catch (err) {
       setError((err as Error).message);
@@ -140,7 +144,9 @@ export default function GitHubConnectPanel({
   const fetchRepos = async (query?: string) => {
     setLoadingRepos(true);
     try {
-      const url = query ? `/github/repositories?q=${encodeURIComponent(query)}` : "/github/repositories";
+      const url = query
+        ? `/github/repositories?q=${encodeURIComponent(query)}`
+        : "/github/repositories";
       const list = await api<GitHubRepository[]>(url);
       setRepos(list);
     } catch (err) {
@@ -187,9 +193,12 @@ export default function GitHubConnectPanel({
   const handleConnect = async () => {
     setError(null);
     try {
-      const flow = await api<{ install_url: string; state: string }>("/github/connect", {
-        method: "POST",
-      });
+      const flow = await api<{ install_url: string; state: string }>(
+        "/github/connect",
+        {
+          method: "POST",
+        },
+      );
       window.location.href = flow.install_url;
     } catch (err) {
       setError((err as Error).message);
@@ -201,7 +210,9 @@ export default function GitHubConnectPanel({
     setLoading(true);
     setError(null);
     try {
-      await api<GitHubInstallation>(`/github/installations/${instId}/select`, { method: "POST" });
+      await api<GitHubInstallation>(`/github/installations/${instId}/select`, {
+        method: "POST",
+      });
       setSelectedRepo(null);
       setRepos([]);
       setBranches([]);
@@ -220,7 +231,9 @@ export default function GitHubConnectPanel({
     try {
       const targetId = instId || status?.installation?.id;
       if (targetId) {
-        await api(`/github/installations/${targetId}/disconnect`, { method: "POST" });
+        await api(`/github/installations/${targetId}/disconnect`, {
+          method: "POST",
+        });
       } else {
         await api("/github/disconnect", { method: "POST" });
       }
@@ -240,7 +253,9 @@ export default function GitHubConnectPanel({
     if (!search.trim()) return repos;
     const term = search.toLowerCase();
     return repos.filter(
-      (r) => r.name.toLowerCase().includes(term) || r.full_name.toLowerCase().includes(term)
+      (r) =>
+        r.name.toLowerCase().includes(term) ||
+        r.full_name.toLowerCase().includes(term),
     );
   }, [repos, search]);
 
@@ -268,8 +283,14 @@ export default function GitHubConnectPanel({
 
   if (!sessionReady || loading) {
     return (
-      <div style={{ padding: "40px", textAlign: "center", color: "var(--muted)" }}>
-        <Loader2 size={20} className="animate-spin" style={{ margin: "0 auto 8px" }} />
+      <div
+        style={{ padding: "40px", textAlign: "center", color: "var(--muted)" }}
+      >
+        <Loader2
+          size={20}
+          className="animate-spin"
+          style={{ margin: "0 auto 8px" }}
+        />
         <p style={{ fontSize: "13px" }}>Checking GitHub connection status...</p>
       </div>
     );
@@ -288,13 +309,26 @@ export default function GitHubConnectPanel({
         }}
       >
         <div style={{ display: "flex", gap: "12px", alignItems: "flex-start" }}>
-          <FolderGit2 size={24} style={{ color: "var(--accent)", marginTop: "2px" }} />
+          <FolderGit2
+            size={24}
+            style={{ color: "var(--accent)", marginTop: "2px" }}
+          />
           <div>
-            <h3 style={{ margin: "0 0 6px", fontSize: "15px", fontWeight: 600 }}>
+            <h3
+              style={{ margin: "0 0 6px", fontSize: "15px", fontWeight: 600 }}
+            >
               GitHub App Configuration Required
             </h3>
-            <p style={{ margin: "0 0 12px", fontSize: "13px", color: "var(--muted)", lineHeight: 1.5 }}>
-              To connect Guardian to GitHub, configure your GitHub App credentials in the server environment (.env).
+            <p
+              style={{
+                margin: "0 0 12px",
+                fontSize: "13px",
+                color: "var(--muted)",
+                lineHeight: 1.5,
+              }}
+            >
+              To connect Guardian to GitHub, configure your GitHub App
+              credentials in the server environment (.env).
             </p>
             <div
               style={{
@@ -308,13 +342,18 @@ export default function GitHubConnectPanel({
                 marginBottom: "12px",
               }}
             >
-              GITHUB_APP_ID=your_app_id<br />
-              GITHUB_APP_CLIENT_ID=your_client_id<br />
-              GITHUB_APP_CLIENT_SECRET=your_client_secret<br />
+              GITHUB_APP_ID=your_app_id
+              <br />
+              GITHUB_APP_CLIENT_ID=your_client_id
+              <br />
+              GITHUB_APP_CLIENT_SECRET=your_client_secret
+              <br />
               GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----..."
             </div>
             <p style={{ margin: 0, fontSize: "12px", color: "var(--muted)" }}>
-              Permissions required: <code>Contents (read & write)</code>, <code>Pull Requests (read & write)</code>, <code>Metadata (read)</code>.
+              Permissions required: <code>Contents (read & write)</code>,{" "}
+              <code>Pull Requests (read & write)</code>,{" "}
+              <code>Metadata (read)</code>.
             </p>
           </div>
         </div>
@@ -356,110 +395,182 @@ export default function GitHubConnectPanel({
           <h3 style={{ margin: "0 0 6px", fontSize: "16px", fontWeight: 600 }}>
             Connect Your GitHub Account
           </h3>
-          <p style={{ margin: "0 auto", maxWidth: "440px", fontSize: "13px", color: "var(--muted)", lineHeight: 1.5 }}>
-            Authorize the Guardian GitHub App to discover accessible repositories, inspect actual code without execution, and open automated Autopilot remediation pull requests.
+          <p
+            style={{
+              margin: "0 auto",
+              maxWidth: "440px",
+              fontSize: "13px",
+              color: "var(--muted)",
+              lineHeight: 1.5,
+            }}
+          >
+            Authorize the Guardian GitHub App to discover accessible
+            repositories, inspect actual code without execution, and open
+            automated Autopilot remediation pull requests.
           </p>
         </div>
 
         {error && (
-          <div style={{ color: "#ef4444", fontSize: "12px", background: "rgba(239, 68, 68, 0.1)", padding: "6px 12px", borderRadius: "4px" }}>
+          <div
+            style={{
+              color: "#ef4444",
+              fontSize: "12px",
+              background: "rgba(239, 68, 68, 0.1)",
+              padding: "6px 12px",
+              borderRadius: "4px",
+            }}
+          >
             {error}
           </div>
         )}
 
-        {status.available_installations && status.available_installations.length > 0 && (
-          <div
-            style={{
-              width: "100%",
-              maxWidth: "480px",
-              background: "var(--surface)",
-              border: "1px solid var(--line)",
-              borderRadius: "8px",
-              padding: "16px",
-              textAlign: "left",
-              display: "flex",
-              flexDirection: "column",
-              gap: "10px",
-              marginTop: "4px",
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <CheckCircle2 size={16} style={{ color: "var(--accent)" }} />
-              <span style={{ fontSize: "13px", fontWeight: 600, color: "var(--text)" }}>
-                Detected GitHub App Installations
-              </span>
-            </div>
-            <p style={{ margin: 0, fontSize: "12px", color: "var(--muted)", lineHeight: 1.4 }}>
-              The Guardian GitHub App is already installed on the following account(s). Choose your account to connect this session:
-            </p>
+        {status.available_installations &&
+          status.available_installations.length > 0 && (
             <div
-              data-lenis-prevent="true"
-              className="github-repo-list"
-              onWheel={(e) => e.stopPropagation()}
               style={{
+                width: "100%",
+                maxWidth: "480px",
+                background: "var(--surface)",
+                border: "1px solid var(--line)",
+                borderRadius: "8px",
+                padding: "16px",
+                textAlign: "left",
                 display: "flex",
                 flexDirection: "column",
-                gap: "8px",
+                gap: "10px",
                 marginTop: "4px",
-                maxHeight: "240px",
-                overflowY: "auto",
-                overscrollBehavior: "contain",
-                WebkitOverflowScrolling: "touch",
               }}
             >
-              {status.available_installations.map((inst) => (
-                <div
-                  key={inst.id}
-                  className="github-installation-row"
+              <div
+                style={{ display: "flex", alignItems: "center", gap: "8px" }}
+              >
+                <CheckCircle2 size={16} style={{ color: "var(--accent)" }} />
+                <span
+                  style={{
+                    fontSize: "13px",
+                    fontWeight: 600,
+                    color: "var(--text)",
+                  }}
                 >
-                  <div style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 0 }}>
-                    {inst.avatar_url ? (
-                      <img
-                        src={inst.avatar_url}
-                        alt={inst.account_login}
-                        style={{ width: "24px", height: "24px", borderRadius: "50%", flexShrink: 0 }}
-                      />
-                    ) : (
-                      <GitBranch size={16} style={{ color: "var(--accent)", flexShrink: 0 }} />
-                    )}
-                    <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
-                      <div style={{ fontSize: "13px", fontWeight: 600, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                        {inst.account_login}
-                      </div>
-                      <div style={{ fontSize: "11px", color: "var(--muted)" }}>
-                        {inst.account_type} &bull; #{inst.id}
+                  Detected GitHub App Installations
+                </span>
+              </div>
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: "12px",
+                  color: "var(--muted)",
+                  lineHeight: 1.4,
+                }}
+              >
+                The Guardian GitHub App is already installed on the following
+                account(s). Choose your account to connect this session:
+              </p>
+              <div
+                data-lenis-prevent="true"
+                className="github-repo-list"
+                onWheel={(e) => e.stopPropagation()}
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "8px",
+                  marginTop: "4px",
+                  maxHeight: "240px",
+                  overflowY: "auto",
+                  overscrollBehavior: "contain",
+                  WebkitOverflowScrolling: "touch",
+                }}
+              >
+                {status.available_installations.map((inst) => (
+                  <div key={inst.id} className="github-installation-row">
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "10px",
+                        minWidth: 0,
+                      }}
+                    >
+                      {inst.avatar_url ? (
+                        <img
+                          src={inst.avatar_url}
+                          alt={inst.account_login}
+                          style={{
+                            width: "24px",
+                            height: "24px",
+                            borderRadius: "50%",
+                            flexShrink: 0,
+                          }}
+                        />
+                      ) : (
+                        <GitBranch
+                          size={16}
+                          style={{ color: "var(--accent)", flexShrink: 0 }}
+                        />
+                      )}
+                      <div
+                        style={{
+                          minWidth: 0,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontSize: "13px",
+                            fontWeight: 600,
+                            color: "var(--text)",
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                          }}
+                        >
+                          {inst.account_login}
+                        </div>
+                        <div
+                          style={{ fontSize: "11px", color: "var(--muted)" }}
+                        >
+                          {inst.account_type} &bull; #{inst.id}
+                        </div>
                       </div>
                     </div>
+                    <button
+                      onClick={() => handleLinkInstallation(inst.id)}
+                      disabled={linkingId === inst.id}
+                      className="button primary"
+                      style={{
+                        fontSize: "12px",
+                        padding: "6px 14px",
+                        flexShrink: 0,
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "6px",
+                      }}
+                    >
+                      {linkingId === inst.id ? (
+                        <>
+                          <Loader2 size={12} className="animate-spin" />
+                          <span>Connecting...</span>
+                        </>
+                      ) : (
+                        <span>Connect as {inst.account_login}</span>
+                      )}
+                    </button>
                   </div>
-                  <button
-                    onClick={() => handleLinkInstallation(inst.id)}
-                    disabled={linkingId === inst.id}
-                    className="button primary"
-                    style={{
-                      fontSize: "12px",
-                      padding: "6px 14px",
-                      flexShrink: 0,
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "6px",
-                    }}
-                  >
-                    {linkingId === inst.id ? (
-                      <>
-                        <Loader2 size={12} className="animate-spin" />
-                        <span>Connecting...</span>
-                      </>
-                    ) : (
-                      <span>Connect as {inst.account_login}</span>
-                    )}
-                  </button>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
-        <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", justifyContent: "center", marginTop: "4px" }}>
+        <div
+          style={{
+            display: "flex",
+            gap: "10px",
+            flexWrap: "wrap",
+            justifyContent: "center",
+            marginTop: "4px",
+          }}
+        >
           <button
             onClick={handleConnect}
             className="button primary"
@@ -476,7 +587,9 @@ export default function GitHubConnectPanel({
             style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}
           >
             <RefreshCw size={14} className={syncing ? "animate-spin" : ""} />
-            <span>{syncing ? "Checking GitHub..." : "Check Existing Installation"}</span>
+            <span>
+              {syncing ? "Checking GitHub..." : "Check Existing Installation"}
+            </span>
           </button>
         </div>
       </div>
@@ -502,7 +615,14 @@ export default function GitHubConnectPanel({
           border: "1px solid var(--line)",
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "10px",
+            flexWrap: "wrap",
+          }}
+        >
           {installation?.avatar_url ? (
             <img
               src={installation.avatar_url}
@@ -512,7 +632,9 @@ export default function GitHubConnectPanel({
           ) : (
             <GitBranch size={16} style={{ color: "var(--accent)" }} />
           )}
-          <span style={{ fontSize: "13px", fontWeight: 600, color: "var(--text)" }}>
+          <span
+            style={{ fontSize: "13px", fontWeight: 600, color: "var(--text)" }}
+          >
             {installation?.account_login}
           </span>
           <span
@@ -532,11 +654,22 @@ export default function GitHubConnectPanel({
           </span>
 
           {status?.installations && status.installations.length > 1 && (
-            <div style={{ display: "inline-flex", alignItems: "center", gap: "6px", marginLeft: "8px" }}>
-              <label style={{ fontSize: "11px", color: "var(--muted)" }}>Switch Account:</label>
+            <div
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                marginLeft: "8px",
+              }}
+            >
+              <label style={{ fontSize: "11px", color: "var(--muted)" }}>
+                Switch Account:
+              </label>
               <select
                 value={installation?.id}
-                onChange={(e) => handleSelectInstallation(Number(e.target.value))}
+                onChange={(e) =>
+                  handleSelectInstallation(Number(e.target.value))
+                }
                 style={{
                   fontSize: "12px",
                   padding: "3px 8px",
@@ -562,7 +695,12 @@ export default function GitHubConnectPanel({
             onClick={handleConnect}
             className="button secondary compact"
             title="Connect another GitHub account or organization"
-            style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "11px" }}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "4px",
+              fontSize: "11px",
+            }}
           >
             <GitBranch size={12} />
             <span>+ Add Account</span>
@@ -572,16 +710,30 @@ export default function GitHubConnectPanel({
             disabled={loadingRepos}
             className="button secondary compact"
             title="Refresh repository list"
-            style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "11px" }}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "4px",
+              fontSize: "11px",
+            }}
           >
-            <RefreshCw size={12} className={loadingRepos ? "animate-spin" : ""} />
+            <RefreshCw
+              size={12}
+              className={loadingRepos ? "animate-spin" : ""}
+            />
             <span>Refresh</span>
           </button>
           <button
             onClick={() => handleDisconnect()}
             className="button secondary compact"
             title="Disconnect current GitHub account"
-            style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "11px", color: "#f87171" }}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "4px",
+              fontSize: "11px",
+              color: "#f87171",
+            }}
           >
             <LogOut size={12} />
             <span>Disconnect</span>
@@ -609,15 +761,37 @@ export default function GitHubConnectPanel({
 
       {/* Repository Selection */}
       <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <label style={{ fontSize: "12px", fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
+          <label
+            style={{
+              fontSize: "12px",
+              fontWeight: 600,
+              color: "var(--muted)",
+              textTransform: "uppercase",
+              letterSpacing: "0.05em",
+            }}
+          >
             Select Repository to Inspect ({filteredRepos.length})
           </label>
         </div>
 
         {/* Search Input */}
         <div style={{ position: "relative" }}>
-          <Search size={14} style={{ position: "absolute", left: "12px", top: "10px", color: "var(--muted)" }} />
+          <Search
+            size={14}
+            style={{
+              position: "absolute",
+              left: "12px",
+              top: "10px",
+              color: "var(--muted)",
+            }}
+          />
           <input
             type="text"
             placeholder="Search repositories by name..."
@@ -656,13 +830,33 @@ export default function GitHubConnectPanel({
           }}
         >
           {loadingRepos ? (
-            <div style={{ padding: "24px", textAlign: "center", color: "var(--muted)" }}>
-              <Loader2 size={16} className="animate-spin" style={{ margin: "0 auto 6px" }} />
-              <span style={{ fontSize: "12px" }}>Loading accessible repositories...</span>
+            <div
+              style={{
+                padding: "24px",
+                textAlign: "center",
+                color: "var(--muted)",
+              }}
+            >
+              <Loader2
+                size={16}
+                className="animate-spin"
+                style={{ margin: "0 auto 6px" }}
+              />
+              <span style={{ fontSize: "12px" }}>
+                Loading accessible repositories...
+              </span>
             </div>
           ) : filteredRepos.length === 0 ? (
-            <div style={{ padding: "24px", textAlign: "center", color: "var(--muted)", fontSize: "12px" }}>
-              No matching repositories found. Ensure the Guardian GitHub App has access granted.
+            <div
+              style={{
+                padding: "24px",
+                textAlign: "center",
+                color: "var(--muted)",
+                fontSize: "12px",
+              }}
+            >
+              No matching repositories found. Ensure the Guardian GitHub App has
+              access granted.
             </div>
           ) : (
             filteredRepos.map((r) => {
@@ -675,25 +869,44 @@ export default function GitHubConnectPanel({
                     padding: "8px 12px",
                     borderRadius: "5px",
                     cursor: "pointer",
-                    background: isSelected ? "var(--accent-soft, rgba(99, 102, 241, 0.15))" : "transparent",
-                    border: isSelected ? "1px solid var(--accent, #6366f1)" : "1px solid transparent",
+                    background: isSelected
+                      ? "var(--accent-soft, rgba(99, 102, 241, 0.15))"
+                      : "transparent",
+                    border: isSelected
+                      ? "1px solid var(--accent, #6366f1)"
+                      : "1px solid transparent",
                     display: "flex",
                     justifyContent: "space-between",
                     alignItems: "center",
                     transition: "all 0.12s ease",
                   }}
                 >
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                      minWidth: 0,
+                    }}
+                  >
                     {r.private ? (
-                      <Lock size={13} style={{ color: "#f59e0b", flexShrink: 0 }} />
+                      <Lock
+                        size={13}
+                        style={{ color: "#f59e0b", flexShrink: 0 }}
+                      />
                     ) : (
-                      <Globe size={13} style={{ color: "var(--muted)", flexShrink: 0 }} />
+                      <Globe
+                        size={13}
+                        style={{ color: "var(--muted)", flexShrink: 0 }}
+                      />
                     )}
                     <span
                       style={{
                         fontSize: "13px",
                         fontWeight: isSelected ? 600 : 500,
-                        color: isSelected ? "var(--accent, #6366f1)" : "var(--text)",
+                        color: isSelected
+                          ? "var(--accent, #6366f1)"
+                          : "var(--text)",
                         overflow: "hidden",
                         textOverflow: "ellipsis",
                         whiteSpace: "nowrap",
@@ -703,11 +916,23 @@ export default function GitHubConnectPanel({
                     </span>
                   </div>
 
-                  <div style={{ display: "flex", alignItems: "center", gap: "6px", flexShrink: 0 }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "6px",
+                      flexShrink: 0,
+                    }}
+                  >
                     <span style={{ fontSize: "11px", color: "var(--muted)" }}>
                       {r.default_branch}
                     </span>
-                    {isSelected && <CheckCircle2 size={14} style={{ color: "var(--accent)" }} />}
+                    {isSelected && (
+                      <CheckCircle2
+                        size={14}
+                        style={{ color: "var(--accent)" }}
+                      />
+                    )}
                   </div>
                 </div>
               );
@@ -731,10 +956,26 @@ export default function GitHubConnectPanel({
             gap: "12px",
           }}
         >
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              flexWrap: "wrap",
+              gap: "8px",
+            }}
+          >
             <div>
-              <strong style={{ fontSize: "14px", color: "var(--text)" }}>{selectedRepo.full_name}</strong>
-              <div style={{ fontSize: "11px", color: "var(--muted)", marginTop: "2px" }}>
+              <strong style={{ fontSize: "14px", color: "var(--text)" }}>
+                {selectedRepo.full_name}
+              </strong>
+              <div
+                style={{
+                  fontSize: "11px",
+                  color: "var(--muted)",
+                  marginTop: "2px",
+                }}
+              >
                 Targeting commit SHA for immutable, verifiable security scanning
               </div>
             </div>
@@ -758,14 +999,34 @@ export default function GitHubConnectPanel({
           </div>
 
           {/* Branch Picker */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "10px" }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+              gap: "10px",
+            }}
+          >
             <div>
-              <label style={{ display: "block", fontSize: "11px", color: "var(--muted)", marginBottom: "4px" }}>
+              <label
+                style={{
+                  display: "block",
+                  fontSize: "11px",
+                  color: "var(--muted)",
+                  marginBottom: "4px",
+                }}
+              >
                 Select Branch
               </label>
               {loadingBranches ? (
-                <div style={{ padding: "6px 10px", fontSize: "12px", color: "var(--muted)" }}>
-                  <Loader2 size={12} className="animate-spin inline mr-1" /> Loading branches...
+                <div
+                  style={{
+                    padding: "6px 10px",
+                    fontSize: "12px",
+                    color: "var(--muted)",
+                  }}
+                >
+                  <Loader2 size={12} className="animate-spin inline mr-1" />{" "}
+                  Loading branches...
                 </div>
               ) : (
                 <select
@@ -796,7 +1057,14 @@ export default function GitHubConnectPanel({
             </div>
 
             <div>
-              <label style={{ display: "block", fontSize: "11px", color: "var(--muted)", marginBottom: "4px" }}>
+              <label
+                style={{
+                  display: "block",
+                  fontSize: "11px",
+                  color: "var(--muted)",
+                  marginBottom: "4px",
+                }}
+              >
                 Resolved Commit SHA
               </label>
               <div
@@ -813,7 +1081,11 @@ export default function GitHubConnectPanel({
                   justifyContent: "space-between",
                 }}
               >
-                <span>{activeCommitSha ? activeCommitSha.slice(0, 10) : "Resolving..."}</span>
+                <span>
+                  {activeCommitSha
+                    ? activeCommitSha.slice(0, 10)
+                    : "Resolving..."}
+                </span>
                 <span
                   style={{
                     fontSize: "10px",
@@ -841,7 +1113,9 @@ export default function GitHubConnectPanel({
           >
             <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
               <Sliders size={13} style={{ color: "var(--muted)" }} />
-              <span style={{ fontSize: "12px", color: "var(--muted)" }}>Inspection Profile:</span>
+              <span style={{ fontSize: "12px", color: "var(--muted)" }}>
+                Inspection Profile:
+              </span>
             </div>
 
             <div style={{ display: "flex", gap: "4px" }}>
@@ -853,9 +1127,13 @@ export default function GitHubConnectPanel({
                   borderRadius: "4px",
                   fontSize: "11px",
                   cursor: "pointer",
-                  background: profile === "fast" ? "var(--accent-soft)" : "transparent",
+                  background:
+                    profile === "fast" ? "var(--accent-soft)" : "transparent",
                   color: profile === "fast" ? "var(--accent)" : "var(--muted)",
-                  border: profile === "fast" ? "1px solid var(--accent)" : "1px solid transparent",
+                  border:
+                    profile === "fast"
+                      ? "1px solid var(--accent)"
+                      : "1px solid transparent",
                 }}
               >
                 Fast (Direct)
@@ -868,9 +1146,13 @@ export default function GitHubConnectPanel({
                   borderRadius: "4px",
                   fontSize: "11px",
                   cursor: "pointer",
-                  background: profile === "deep" ? "var(--accent-soft)" : "transparent",
+                  background:
+                    profile === "deep" ? "var(--accent-soft)" : "transparent",
                   color: profile === "deep" ? "var(--accent)" : "var(--muted)",
-                  border: profile === "deep" ? "1px solid var(--accent)" : "1px solid transparent",
+                  border:
+                    profile === "deep"
+                      ? "1px solid var(--accent)"
+                      : "1px solid transparent",
                 }}
               >
                 Deep (Transitive)
@@ -881,7 +1163,9 @@ export default function GitHubConnectPanel({
           {/* Launch Scan Button */}
           <button
             onClick={handleStartScan}
-            disabled={disabled || startingScan || !selectedRepo || !activeCommitSha}
+            disabled={
+              disabled || startingScan || !selectedRepo || !activeCommitSha
+            }
             className="button primary"
             style={{
               width: "100%",

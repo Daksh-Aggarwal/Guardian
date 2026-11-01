@@ -49,7 +49,11 @@ const TARGET_OPTIONS: {
   id: HandoffTarget;
   label: string;
   badge: string;
-  icon: React.ComponentType<{ size?: number; className?: string; color?: string }>;
+  icon: React.ComponentType<{
+    size?: number;
+    className?: string;
+    color?: string;
+  }>;
   description: string;
 }[] = [
   {
@@ -57,35 +61,40 @@ const TARGET_OPTIONS: {
     label: "Universal Markdown",
     badge: "Portable",
     icon: FileText,
-    description: "Self-contained package for ChatGPT, Gemini, Claude, or any web/desktop agent",
+    description:
+      "Self-contained package for ChatGPT, Gemini, Claude, or any web/desktop agent",
   },
   {
     id: "claude_code",
     label: "Claude Code",
     badge: "CLI Agent",
     icon: Terminal,
-    description: "Autonomous CLI workflow: pre-inspection, minimal safe edits, and test validation",
+    description:
+      "Autonomous CLI workflow: pre-inspection, minimal safe edits, and test validation",
   },
   {
     id: "cursor",
     label: "Cursor",
     badge: "IDE Composer",
     icon: Code,
-    description: "Interactive IDE pair programming: scoped workspace edits and inline review",
+    description:
+      "Interactive IDE pair programming: scoped workspace edits and inline review",
   },
   {
     id: "codex",
     label: "OpenAI Codex",
     badge: "Code Agent",
     icon: Cpu,
-    description: "Agentic repo repair: architecture conventions, deterministic steps, command outputs",
+    description:
+      "Agentic repo repair: architecture conventions, deterministic steps, command outputs",
   },
   {
     id: "github_copilot",
     label: "GitHub Copilot",
     badge: "Copilot Chat",
     icon: Layers,
-    description: "GitHub-aligned remediation: repo standards, regression tests, and PR readiness",
+    description:
+      "GitHub-aligned remediation: repo standards, regression tests, and PR readiness",
   },
 ];
 
@@ -101,24 +110,24 @@ export default function HandoffModal({
 }: HandoffModalProps) {
   const [target, setTarget] = useState<HandoffTarget>(initialTarget);
   const [mode, setMode] = useState<RemediationMode>(initialMode);
-  
+
   // Scope state: 'single' | 'selected' | 'all'
   const defaultScopeType = initialFindingId
     ? "single"
     : initialFindingIds && initialFindingIds.length > 0
-    ? "selected"
-    : "all";
+      ? "selected"
+      : "all";
   const [scopeType, setScopeType] = useState<"single" | "selected" | "all">(
-    defaultScopeType
+    defaultScopeType,
   );
 
   const [activeTab, setActiveTab] = useState<"preview" | "raw" | "json">(
-    "preview"
+    "preview",
   );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [exportData, setExportData] = useState<HandoffExportResponse | null>(
-    null
+    null,
   );
   const [copied, setCopied] = useState(false);
   const requestIdRef = React.useRef(0);
@@ -151,7 +160,11 @@ export default function HandoffModal({
     if (scopeType === "single" && initialFindingId) {
       return [initialFindingId];
     }
-    if (scopeType === "selected" && initialFindingIds && initialFindingIds.length > 0) {
+    if (
+      scopeType === "selected" &&
+      initialFindingIds &&
+      initialFindingIds.length > 0
+    ) {
       return initialFindingIds;
     }
     return null; // Entire scan
@@ -175,14 +188,16 @@ export default function HandoffModal({
             mode,
             finding_ids: activeFindingIds,
           }),
-        }
+        },
       );
       if (currentReqId === requestIdRef.current) {
         setExportData(response);
       }
     } catch (err) {
       if (currentReqId === requestIdRef.current) {
-        setError((err as Error).message || "Failed to generate handoff bundle.");
+        setError(
+          (err as Error).message || "Failed to generate handoff bundle.",
+        );
       }
     } finally {
       if (currentReqId === requestIdRef.current) {
@@ -317,7 +332,9 @@ export default function HandoffModal({
                 <Share2 size={20} />
               </div>
               <div>
-                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <div
+                  style={{ display: "flex", alignItems: "center", gap: "8px" }}
+                >
                   <h2 style={{ fontSize: "17px", fontWeight: 600, margin: 0 }}>
                     Guardian Handoff 1.0
                   </h2>
@@ -341,7 +358,8 @@ export default function HandoffModal({
                     margin: "2px 0 0",
                   }}
                 >
-                  Transfer authoritative security context, findings, and evidence to your receiving coding agent.
+                  Transfer authoritative security context, findings, and
+                  evidence to your receiving coding agent.
                 </p>
               </div>
             </div>
@@ -425,7 +443,10 @@ export default function HandoffModal({
                       }}
                       title={opt.description}
                     >
-                      <Icon size={14} color={isSelected ? "var(--accent)" : "currentColor"} />
+                      <Icon
+                        size={14}
+                        color={isSelected ? "var(--accent)" : "currentColor"}
+                      />
                       <span>{opt.label}</span>
                     </button>
                   );
@@ -444,7 +465,9 @@ export default function HandoffModal({
               }}
             >
               {/* Remediation Mode Selector */}
-              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <div
+                style={{ display: "flex", alignItems: "center", gap: "8px" }}
+              >
                 <span
                   style={{
                     fontSize: "11px",
@@ -479,7 +502,9 @@ export default function HandoffModal({
                           ? "var(--accent)"
                           : "transparent",
                       color:
-                        mode === "focused_fix" ? "var(--on-accent)" : "var(--muted)",
+                        mode === "focused_fix"
+                          ? "var(--on-accent)"
+                          : "var(--muted)",
                     }}
                   >
                     Focused Fix
@@ -498,7 +523,9 @@ export default function HandoffModal({
                           ? "var(--accent)"
                           : "transparent",
                       color:
-                        mode === "deep_remediation" ? "var(--on-accent)" : "var(--muted)",
+                        mode === "deep_remediation"
+                          ? "var(--on-accent)"
+                          : "var(--muted)",
                     }}
                   >
                     Deep Security Remediation
@@ -507,7 +534,9 @@ export default function HandoffModal({
               </div>
 
               {/* Scope Selector */}
-              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <div
+                style={{ display: "flex", alignItems: "center", gap: "8px" }}
+              >
                 <span
                   style={{
                     fontSize: "11px",
@@ -543,7 +572,9 @@ export default function HandoffModal({
                             ? "var(--accent)"
                             : "transparent",
                         color:
-                          scopeType === "single" ? "var(--on-accent)" : "var(--muted)",
+                          scopeType === "single"
+                            ? "var(--on-accent)"
+                            : "var(--muted)",
                       }}
                     >
                       Finding ({initialFindingId})
@@ -564,7 +595,9 @@ export default function HandoffModal({
                             ? "var(--accent)"
                             : "transparent",
                         color:
-                          scopeType === "selected" ? "var(--on-accent)" : "var(--muted)",
+                          scopeType === "selected"
+                            ? "var(--on-accent)"
+                            : "var(--muted)",
                       }}
                     >
                       {initialFindingIds.length} Selected Findings
@@ -581,7 +614,10 @@ export default function HandoffModal({
                       cursor: "pointer",
                       background:
                         scopeType === "all" ? "var(--accent)" : "transparent",
-                      color: scopeType === "all" ? "var(--on-accent)" : "var(--muted)",
+                      color:
+                        scopeType === "all"
+                          ? "var(--on-accent)"
+                          : "var(--muted)",
                     }}
                   >
                     Entire Scan ({report.findings?.length || 0})
@@ -606,7 +642,9 @@ export default function HandoffModal({
                 gap: "8px",
               }}
             >
-              <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+              <div
+                style={{ display: "flex", alignItems: "center", gap: "12px" }}
+              >
                 <span>
                   <strong>{summary.findings_count}</strong> finding(s) in scope
                 </span>
@@ -648,15 +686,31 @@ export default function HandoffModal({
               </div>
 
               {canonical?.project.is_github ? (
-                <div style={{ display: "flex", alignItems: "center", gap: "6px", color: "var(--muted)" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    color: "var(--muted)",
+                  }}
+                >
                   <GitBranch size={13} />
                   <span>
                     {canonical.project.github_repo_name} @{" "}
-                    <code>{canonical.project.github_commit_sha?.slice(0, 7)}</code>
+                    <code>
+                      {canonical.project.github_commit_sha?.slice(0, 7)}
+                    </code>
                   </span>
                 </div>
               ) : (
-                <div style={{ display: "flex", alignItems: "center", gap: "6px", color: "var(--muted)" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    color: "var(--muted)",
+                  }}
+                >
                   <FileCode2 size={13} />
                   <span>Local scan: {report.name}</span>
                 </div>
@@ -683,7 +737,8 @@ export default function HandoffModal({
                 padding: "6px 0",
                 cursor: "pointer",
                 fontWeight: 500,
-                color: activeTab === "preview" ? "var(--accent)" : "var(--muted)",
+                color:
+                  activeTab === "preview" ? "var(--accent)" : "var(--muted)",
                 borderBottom:
                   activeTab === "preview"
                     ? "2px solid var(--accent)"
@@ -768,7 +823,10 @@ export default function HandoffModal({
                   gap: "10px",
                 }}
               >
-                <AlertTriangle size={18} style={{ flexShrink: 0, marginTop: "2px" }} />
+                <AlertTriangle
+                  size={18}
+                  style={{ flexShrink: 0, marginTop: "2px" }}
+                />
                 <div>
                   <h4 style={{ margin: "0 0 4px", fontSize: "14px" }}>
                     Failed to Generate AI Handoff
@@ -808,7 +866,8 @@ export default function HandoffModal({
                           color: "var(--muted)",
                         }}
                       >
-                        Copy or download this instruction document. Paste it directly into{" "}
+                        Copy or download this instruction document. Paste it
+                        directly into{" "}
                         <strong>
                           {TARGET_OPTIONS.find((t) => t.id === target)?.label}
                         </strong>{" "}
@@ -909,8 +968,14 @@ export default function HandoffModal({
                   padding: "8px 14px",
                 }}
               >
-                {copied ? <Check size={14} color="var(--accent)" /> : <Copy size={14} />}
-                <span>{copied ? "Copied to Clipboard!" : "Copy Instructions"}</span>
+                {copied ? (
+                  <Check size={14} color="var(--accent)" />
+                ) : (
+                  <Copy size={14} />
+                )}
+                <span>
+                  {copied ? "Copied to Clipboard!" : "Copy Instructions"}
+                </span>
               </button>
 
               <button

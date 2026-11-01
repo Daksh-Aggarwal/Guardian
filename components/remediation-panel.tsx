@@ -230,7 +230,7 @@ export default function RemediationPanel({
     if (plan.validation_status && plan.validation_status !== "VERIFIED") {
       setError(
         `Cannot apply remediation plan: validation status is '${plan.validation_status}'. ` +
-        (plan.validation_reasons?.join("; ") || "")
+          (plan.validation_reasons?.join("; ") || ""),
       );
       return;
     }
@@ -436,7 +436,7 @@ export default function RemediationPanel({
   }
 
   const isGitHubTarget = Boolean(
-    report.source_metadata?.source_type === "github" || plan?.repository_id
+    report.source_metadata?.source_type === "github" || plan?.repository_id,
   );
 
   async function applyGitHubPR() {
@@ -445,7 +445,7 @@ export default function RemediationPanel({
     if (plan.validation_status && plan.validation_status !== "VERIFIED") {
       setError(
         `Cannot apply remediation plan on GitHub: validation status is '${plan.validation_status}'. ` +
-        (plan.validation_reasons?.join("; ") || "")
+          (plan.validation_reasons?.join("; ") || ""),
       );
       return;
     }
@@ -478,11 +478,11 @@ export default function RemediationPanel({
               remediation_commit_sha: res.commit_sha,
               pr_state: "open",
             }
-          : null
+          : null,
       );
       setConfirmApply(false);
       setActionSuccess(
-        `Successfully created Pull Request #${res.pr_number} on GitHub!`
+        `Successfully created Pull Request #${res.pr_number} on GitHub!`,
       );
     } catch (err) {
       setError((err as Error).message);
@@ -511,16 +511,18 @@ export default function RemediationPanel({
         prev
           ? {
               ...prev,
-              status: res.status || (res.pr_state === "merged" ? "applied" : "pr_closed"),
+              status:
+                res.status ||
+                (res.pr_state === "merged" ? "applied" : "pr_closed"),
               pr_state: res.pr_state || "closed",
             }
-          : null
+          : null,
       );
       setActionSuccess(
         res.message ||
           (res.pr_state === "merged"
             ? `Pull Request #${plan.pr_number} was already merged. Merged changes cannot be undone by closing the PR; a separate Git revert is required.`
-            : `Pull Request #${plan.pr_number} closed without merge. Remediation branch changes were not merged into target branch.`)
+            : `Pull Request #${plan.pr_number} closed without merge. Remediation branch changes were not merged into target branch.`),
       );
     } catch (err) {
       setError((err as Error).message);
@@ -604,7 +606,9 @@ export default function RemediationPanel({
   const handleToggleSelectAll = () => {
     if (allEligibleSelected) {
       const eligibleIds = new Set(eligibleFindings.map((f) => f.id));
-      setSelectedFindingIds((prev) => prev.filter((id) => !eligibleIds.has(id)));
+      setSelectedFindingIds((prev) =>
+        prev.filter((id) => !eligibleIds.has(id)),
+      );
     } else {
       const eligibleIds = eligibleFindings.map((f) => f.id);
       setSelectedFindingIds((prev) =>
@@ -969,7 +973,8 @@ export default function RemediationPanel({
                         fontWeight: selectedEligibleCount > 0 ? 600 : 400,
                       }}
                     >
-                      {selectedEligibleCount} of {eligibleFindings.length} selected
+                      {selectedEligibleCount} of {eligibleFindings.length}{" "}
+                      selected
                     </span>
                   )}
                 </div>
@@ -1113,7 +1118,8 @@ export default function RemediationPanel({
                             justifyContent: "space-between",
                             cursor: "pointer",
                             gap: "10px",
-                            transition: "background 0.15s ease, border-color 0.15s ease",
+                            transition:
+                              "background 0.15s ease, border-color 0.15s ease",
                           }}
                         >
                           <div
@@ -1346,17 +1352,30 @@ export default function RemediationPanel({
                     gap: "10px",
                   }}
                 >
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                    }}
+                  >
                     <GitPullRequest size={16} style={{ color: "#10b981" }} />
                     <strong style={{ color: "#10b981" }}>
-                      Pull Request #{plan.pr_number} ({plan.pr_state || "open"}):
+                      Pull Request #{plan.pr_number} ({plan.pr_state || "open"}
+                      ):
                     </strong>
                     <span style={{ color: "var(--text)" }}>
                       Remediation branch <code>{plan.remediation_branch}</code>
                     </span>
                   </div>
 
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                    }}
+                  >
                     <a
                       href={plan.pr_url}
                       target="_blank"
@@ -1438,9 +1457,12 @@ export default function RemediationPanel({
                   <p style={{ margin: 0, lineHeight: "1.5" }}>
                     {isGitHubTarget ? (
                       <>
-                        Guardian Autopilot will create a dedicated remediation branch (
-                        <code>guardian/remediation/{plan.plan_id.slice(0, 8)}</code>)
-                        from commit{" "}
+                        Guardian Autopilot will create a dedicated remediation
+                        branch (
+                        <code>
+                          guardian/remediation/{plan.plan_id.slice(0, 8)}
+                        </code>
+                        ) from commit{" "}
                         <code>
                           {(
                             report.source_metadata?.commit_sha ||
@@ -1451,18 +1473,20 @@ export default function RemediationPanel({
                         , apply atomic Git tree modifications, and open a Pull
                         Request against{" "}
                         <code>
-                          {report.source_metadata?.branch || plan.branch || "main"}
+                          {report.source_metadata?.branch ||
+                            plan.branch ||
+                            "main"}
                         </code>
-                        . Guardian will never directly modify the default branch or
-                        automatically merge pull requests.
+                        . Guardian will never directly modify the default branch
+                        or automatically merge pull requests.
                       </>
                     ) : (
                       <>
-                        Guardian will write exact file modifications to your local
-                        project. It is strongly recommended to work on a dedicated
-                        Git branch and ensure untracked files are committed. A
-                        local IndexedDB recovery backup will be captured
-                        automatically before modification.
+                        Guardian will write exact file modifications to your
+                        local project. It is strongly recommended to work on a
+                        dedicated Git branch and ensure untracked files are
+                        committed. A local IndexedDB recovery backup will be
+                        captured automatically before modification.
                       </>
                     )}
                   </p>
@@ -1471,7 +1495,11 @@ export default function RemediationPanel({
                   >
                     <button
                       onClick={isGitHubTarget ? applyGitHubPR : applyPlan}
-                      disabled={loading || (plan.validation_status && plan.validation_status !== "VERIFIED")}
+                      disabled={
+                        loading ||
+                        (plan.validation_status &&
+                          plan.validation_status !== "VERIFIED")
+                      }
                       className="button primary compact"
                       style={{
                         background: isGitHubTarget
@@ -1480,15 +1508,23 @@ export default function RemediationPanel({
                         borderColor: isGitHubTarget
                           ? "var(--accent, #6366f1)"
                           : "var(--accent-green, #10b981)",
-                        opacity: plan.validation_status && plan.validation_status !== "VERIFIED" ? 0.6 : 1,
-                        cursor: plan.validation_status && plan.validation_status !== "VERIFIED" ? "not-allowed" : "pointer",
+                        opacity:
+                          plan.validation_status &&
+                          plan.validation_status !== "VERIFIED"
+                            ? 0.6
+                            : 1,
+                        cursor:
+                          plan.validation_status &&
+                          plan.validation_status !== "VERIFIED"
+                            ? "not-allowed"
+                            : "pointer",
                       }}
                     >
                       {isGitHubTarget
                         ? "Confirm and Create Pull Request"
                         : plan.status === "reverted"
-                        ? "Confirm and reapply modifications"
-                        : "Confirm and apply modifications"}
+                          ? "Confirm and reapply modifications"
+                          : "Confirm and apply modifications"}
                     </button>
                     <button
                       onClick={() => setConfirmApply(false)}
@@ -1533,7 +1569,10 @@ export default function RemediationPanel({
                   disabled={loading}
                   className="button secondary compact"
                 >
-                  <RefreshCw size={14} className="inline-flex items-center justify-center" />
+                  <RefreshCw
+                    size={14}
+                    className="inline-flex items-center justify-center"
+                  />
                   Regenerate
                 </button>
               </>
@@ -1544,7 +1583,10 @@ export default function RemediationPanel({
                 disabled={loading}
                 className="button secondary compact"
               >
-                <RefreshCw size={14} className="inline-flex items-center justify-center" />
+                <RefreshCw
+                  size={14}
+                  className="inline-flex items-center justify-center"
+                />
                 Regenerate fresh plan
               </button>
             )}
@@ -1572,22 +1614,36 @@ export default function RemediationPanel({
             {plan && plan.status === "proposed" && !confirmApply && (
               <button
                 onClick={() => setConfirmApply(true)}
-                disabled={loading || (plan.validation_status && plan.validation_status !== "VERIFIED")}
+                disabled={
+                  loading ||
+                  (plan.validation_status &&
+                    plan.validation_status !== "VERIFIED")
+                }
                 className="button primary"
                 style={{
                   display: "inline-flex",
                   alignItems: "center",
                   gap: "6px",
-                  opacity: plan.validation_status && plan.validation_status !== "VERIFIED" ? 0.6 : 1,
-                  cursor: plan.validation_status && plan.validation_status !== "VERIFIED" ? "not-allowed" : "pointer",
+                  opacity:
+                    plan.validation_status &&
+                    plan.validation_status !== "VERIFIED"
+                      ? 0.6
+                      : 1,
+                  cursor:
+                    plan.validation_status &&
+                    plan.validation_status !== "VERIFIED"
+                      ? "not-allowed"
+                      : "pointer",
                 }}
                 title={
-                  plan.validation_status && plan.validation_status !== "VERIFIED"
+                  plan.validation_status &&
+                  plan.validation_status !== "VERIFIED"
                     ? `Approval blocked: Plan validation is ${plan.validation_status}`
                     : undefined
                 }
               >
-                {plan.validation_status && plan.validation_status !== "VERIFIED" ? (
+                {plan.validation_status &&
+                plan.validation_status !== "VERIFIED" ? (
                   <>
                     <ShieldAlert size={16} />
                     {plan.validation_status === "UNVERIFIED"
@@ -1608,23 +1664,26 @@ export default function RemediationPanel({
               </button>
             )}
 
-            {plan && plan.status === "applied" && isGitHubTarget && plan.pr_url && (
-              <a
-                href={plan.pr_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="button secondary compact"
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "6px",
-                  textDecoration: "none",
-                }}
-              >
-                <ExternalLink size={14} />
-                Open PR #{plan.pr_number}
-              </a>
-            )}
+            {plan &&
+              plan.status === "applied" &&
+              isGitHubTarget &&
+              plan.pr_url && (
+                <a
+                  href={plan.pr_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="button secondary compact"
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    textDecoration: "none",
+                  }}
+                >
+                  <ExternalLink size={14} />
+                  Open PR #{plan.pr_number}
+                </a>
+              )}
 
             {plan && plan.status === "reverted" && !confirmApply && (
               <button
@@ -1675,7 +1734,8 @@ export default function RemediationPanel({
                       display: "inline-flex",
                       alignItems: "center",
                       background: "var(--surface-2, rgba(255, 255, 255, 0.05))",
-                      border: "1px solid var(--border, rgba(255, 255, 255, 0.12))",
+                      border:
+                        "1px solid var(--border, rgba(255, 255, 255, 0.12))",
                       borderRadius: "6px",
                       padding: "2px",
                       gap: "2px",

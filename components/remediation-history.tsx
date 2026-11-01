@@ -90,12 +90,14 @@ export default function RemediationHistory({
                 ...item,
                 plan: {
                   ...item.plan,
-                  status: res.status || (res.pr_state === "merged" ? "applied" : "pr_closed"),
+                  status:
+                    res.status ||
+                    (res.pr_state === "merged" ? "applied" : "pr_closed"),
                   pr_state: res.pr_state || "closed",
                 },
               }
-            : item
-        )
+            : item,
+        ),
       );
       if (res.message) {
         alert(res.message);
@@ -551,8 +553,18 @@ export default function RemediationHistory({
                     fontSize: "12px",
                   }}
                 >
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                    <GitPullRequest size={13} style={{ color: "var(--accent, #6366f1)" }} />
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <GitPullRequest
+                      size={13}
+                      style={{ color: "var(--accent, #6366f1)" }}
+                    />
                     <span>
                       Target Branch: <code>{plan.branch || "main"}</code>
                     </span>
@@ -570,14 +582,21 @@ export default function RemediationHistory({
                           plan.pr_state === "closed"
                             ? "rgba(239, 68, 68, 0.15)"
                             : "rgba(16, 185, 129, 0.15)",
-                        color: plan.pr_state === "closed" ? "#f87171" : "#10b981",
+                        color:
+                          plan.pr_state === "closed" ? "#f87171" : "#10b981",
                       }}
                     >
                       {plan.pr_state || "open"}
                     </span>
                   </div>
 
-                  <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "6px",
+                    }}
+                  >
                     <a
                       href={plan.pr_url}
                       target="_blank"
