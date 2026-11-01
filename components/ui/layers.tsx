@@ -49,7 +49,7 @@ const LayersIcon = forwardRef<LayersIconHandle, LayersIconProps>(
           await controls.start("secondState");
         }
       },
-      [controls, onMouseEnter]
+      [controls, onMouseEnter],
     );
 
     const handleMouseLeave = useCallback(
@@ -60,7 +60,7 @@ const LayersIcon = forwardRef<LayersIconHandle, LayersIconProps>(
           controls.start("normal");
         }
       },
-      [controls, onMouseLeave]
+      [controls, onMouseLeave],
     );
 
     return (
@@ -105,7 +105,7 @@ const LayersIcon = forwardRef<LayersIconHandle, LayersIconProps>(
         </svg>
       </div>
     );
-  }
+  },
 );
 
 LayersIcon.displayName = "LayersIcon";

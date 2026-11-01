@@ -57,7 +57,7 @@ const CircleCheckIcon = forwardRef<CircleCheckIconHandle, CircleCheckIconProps>(
           controls.start("animate");
         }
       },
-      [controls, onMouseEnter]
+      [controls, onMouseEnter],
     );
 
     const handleMouseLeave = useCallback(
@@ -68,7 +68,7 @@ const CircleCheckIcon = forwardRef<CircleCheckIconHandle, CircleCheckIconProps>(
           controls.start("normal");
         }
       },
-      [controls, onMouseLeave]
+      [controls, onMouseLeave],
     );
 
     return (
@@ -99,7 +99,7 @@ const CircleCheckIcon = forwardRef<CircleCheckIconHandle, CircleCheckIconProps>(
         </svg>
       </div>
     );
-  }
+  },
 );
 
 CircleCheckIcon.displayName = "CircleCheckIcon";

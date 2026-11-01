@@ -49,7 +49,7 @@ const XIcon = forwardRef<XIconHandle, XIconProps>(
           controls.start("animate");
         }
       },
-      [controls, onMouseEnter]
+      [controls, onMouseEnter],
     );
 
     const handleMouseLeave = useCallback(
@@ -60,7 +60,7 @@ const XIcon = forwardRef<XIconHandle, XIconProps>(
           controls.start("normal");
         }
       },
-      [controls, onMouseLeave]
+      [controls, onMouseLeave],
     );
     return (
       <div
@@ -94,7 +94,7 @@ const XIcon = forwardRef<XIconHandle, XIconProps>(
         </svg>
       </div>
     );
-  }
+  },
 );
 
 XIcon.displayName = "XIcon";

@@ -48,7 +48,7 @@ const LogoutIcon = forwardRef<LogoutIconHandle, LogoutIconProps>(
           controls.start("animate");
         }
       },
-      [controls, onMouseEnter]
+      [controls, onMouseEnter],
     );
 
     const handleMouseLeave = useCallback(
@@ -59,7 +59,7 @@ const LogoutIcon = forwardRef<LogoutIconHandle, LogoutIconProps>(
           controls.start("normal");
         }
       },
-      [controls, onMouseLeave]
+      [controls, onMouseLeave],
     );
 
     return (
@@ -97,7 +97,7 @@ const LogoutIcon = forwardRef<LogoutIconHandle, LogoutIconProps>(
         </svg>
       </div>
     );
-  }
+  },
 );
 
 LogoutIcon.displayName = "LogoutIcon";

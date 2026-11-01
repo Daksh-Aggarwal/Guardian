@@ -88,7 +88,7 @@ const HistoryIcon = forwardRef<HistoryIconHandle, HistoryIconProps>(
           controls.start("animate");
         }
       },
-      [controls, onMouseEnter]
+      [controls, onMouseEnter],
     );
 
     const handleMouseLeave = useCallback(
@@ -99,7 +99,7 @@ const HistoryIcon = forwardRef<HistoryIconHandle, HistoryIconProps>(
           controls.start("normal");
         }
       },
-      [controls, onMouseLeave]
+      [controls, onMouseLeave],
     );
 
     return (
@@ -151,7 +151,7 @@ const HistoryIcon = forwardRef<HistoryIconHandle, HistoryIconProps>(
         </svg>
       </div>
     );
-  }
+  },
 );
 
 HistoryIcon.displayName = "HistoryIcon";

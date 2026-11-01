@@ -59,7 +59,7 @@ const CheckIcon = forwardRef<CheckIconHandle, CheckIconProps>(
           controls.start("animate");
         }
       },
-      [controls, onMouseEnter]
+      [controls, onMouseEnter],
     );
 
     const handleMouseLeave = useCallback(
@@ -70,7 +70,7 @@ const CheckIcon = forwardRef<CheckIconHandle, CheckIconProps>(
           controls.start("normal");
         }
       },
-      [controls, onMouseLeave]
+      [controls, onMouseLeave],
     );
 
     return (
@@ -100,7 +100,7 @@ const CheckIcon = forwardRef<CheckIconHandle, CheckIconProps>(
         </svg>
       </div>
     );
-  }
+  },
 );
 
 CheckIcon.displayName = "CheckIcon";

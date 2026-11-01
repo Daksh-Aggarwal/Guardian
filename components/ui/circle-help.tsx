@@ -43,7 +43,7 @@ const CircleHelpIcon = forwardRef<CircleHelpIconHandle, CircleHelpIconProps>(
           controls.start("animate");
         }
       },
-      [controls, onMouseEnter]
+      [controls, onMouseEnter],
     );
 
     const handleMouseLeave = useCallback(
@@ -54,7 +54,7 @@ const CircleHelpIcon = forwardRef<CircleHelpIconHandle, CircleHelpIconProps>(
           controls.start("normal");
         }
       },
-      [controls, onMouseLeave]
+      [controls, onMouseLeave],
     );
 
     return (
@@ -90,7 +90,7 @@ const CircleHelpIcon = forwardRef<CircleHelpIconHandle, CircleHelpIconProps>(
         </svg>
       </div>
     );
-  }
+  },
 );
 
 CircleHelpIcon.displayName = "CircleHelpIcon";

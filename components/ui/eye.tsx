@@ -36,7 +36,7 @@ const EyeIcon = forwardRef<EyeIconHandle, EyeIconProps>(
           controls.start("animate");
         }
       },
-      [controls, onMouseEnter]
+      [controls, onMouseEnter],
     );
 
     const handleMouseLeave = useCallback(
@@ -47,7 +47,7 @@ const EyeIcon = forwardRef<EyeIconHandle, EyeIconProps>(
           controls.start("normal");
         }
       },
-      [controls, onMouseLeave]
+      [controls, onMouseLeave],
     );
 
     return (
@@ -92,7 +92,7 @@ const EyeIcon = forwardRef<EyeIconHandle, EyeIconProps>(
         </svg>
       </div>
     );
-  }
+  },
 );
 
 EyeIcon.displayName = "EyeIcon";

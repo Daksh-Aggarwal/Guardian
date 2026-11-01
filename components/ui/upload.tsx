@@ -51,7 +51,7 @@ const UploadIcon = forwardRef<UploadIconHandle, UploadIconProps>(
           controls.start("animate");
         }
       },
-      [controls, onMouseEnter]
+      [controls, onMouseEnter],
     );
 
     const handleMouseLeave = useCallback(
@@ -62,7 +62,7 @@ const UploadIcon = forwardRef<UploadIconHandle, UploadIconProps>(
           controls.start("normal");
         }
       },
-      [controls, onMouseLeave]
+      [controls, onMouseLeave],
     );
 
     return (
@@ -91,7 +91,7 @@ const UploadIcon = forwardRef<UploadIconHandle, UploadIconProps>(
         </svg>
       </div>
     );
-  }
+  },
 );
 
 UploadIcon.displayName = "UploadIcon";

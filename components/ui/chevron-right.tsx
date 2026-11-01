@@ -44,7 +44,7 @@ const ChevronRightIcon = forwardRef<
         controls.start("animate");
       }
     },
-    [controls, onMouseEnter]
+    [controls, onMouseEnter],
   );
 
   const handleMouseLeave = useCallback(
@@ -55,7 +55,7 @@ const ChevronRightIcon = forwardRef<
         controls.start("normal");
       }
     },
-    [controls, onMouseLeave]
+    [controls, onMouseLeave],
   );
 
   return (

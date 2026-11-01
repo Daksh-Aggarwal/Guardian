@@ -44,7 +44,7 @@ const FolderGit2Icon = forwardRef<FolderGit2IconHandle, FolderGit2IconProps>(
           controls.start("animate");
         }
       },
-      [controls, onMouseEnter]
+      [controls, onMouseEnter],
     );
 
     const handleMouseLeave = useCallback(
@@ -55,7 +55,7 @@ const FolderGit2Icon = forwardRef<FolderGit2IconHandle, FolderGit2IconProps>(
           controls.start("normal");
         }
       },
-      [controls, onMouseLeave]
+      [controls, onMouseLeave],
     );
 
     return (
@@ -138,7 +138,7 @@ const FolderGit2Icon = forwardRef<FolderGit2IconHandle, FolderGit2IconProps>(
         </svg>
       </div>
     );
-  }
+  },
 );
 
 FolderGit2Icon.displayName = "FolderGit2Icon";

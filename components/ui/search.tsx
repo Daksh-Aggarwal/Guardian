@@ -37,7 +37,7 @@ const SearchIcon = forwardRef<SearchIconHandle, SearchIconProps>(
           controls.start("animate");
         }
       },
-      [controls, onMouseEnter]
+      [controls, onMouseEnter],
     );
 
     const handleMouseLeave = useCallback(
@@ -48,7 +48,7 @@ const SearchIcon = forwardRef<SearchIconHandle, SearchIconProps>(
           controls.start("normal");
         }
       },
-      [controls, onMouseLeave]
+      [controls, onMouseLeave],
     );
 
     return (
@@ -86,7 +86,7 @@ const SearchIcon = forwardRef<SearchIconHandle, SearchIconProps>(
         </motion.svg>
       </div>
     );
-  }
+  },
 );
 
 SearchIcon.displayName = "SearchIcon";

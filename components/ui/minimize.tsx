@@ -44,7 +44,7 @@ const MinimizeIcon = forwardRef<MinimizeIconHandle, MinimizeIconProps>(
           controls.start("animate");
         }
       },
-      [controls, onMouseEnter]
+      [controls, onMouseEnter],
     );
 
     const handleMouseLeave = useCallback(
@@ -55,7 +55,7 @@ const MinimizeIcon = forwardRef<MinimizeIconHandle, MinimizeIconProps>(
           controls.start("normal");
         }
       },
-      [controls, onMouseLeave]
+      [controls, onMouseLeave],
     );
 
     return (
@@ -115,7 +115,7 @@ const MinimizeIcon = forwardRef<MinimizeIconHandle, MinimizeIconProps>(
         </svg>
       </div>
     );
-  }
+  },
 );
 
 MinimizeIcon.displayName = "MinimizeIcon";

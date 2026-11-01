@@ -53,7 +53,7 @@ const ArrowDown01Icon = forwardRef<ArrowDown01IconHandle, ArrowDown01IconProps>(
           controls.start("animate");
         }
       },
-      [controls, onMouseEnter]
+      [controls, onMouseEnter],
     );
 
     const handleMouseLeave = useCallback(
@@ -64,7 +64,7 @@ const ArrowDown01Icon = forwardRef<ArrowDown01IconHandle, ArrowDown01IconProps>(
           controls.start("normal");
         }
       },
-      [controls, onMouseLeave]
+      [controls, onMouseLeave],
     );
 
     return (
@@ -112,7 +112,7 @@ const ArrowDown01Icon = forwardRef<ArrowDown01IconHandle, ArrowDown01IconProps>(
         </svg>
       </div>
     );
-  }
+  },
 );
 
 ArrowDown01Icon.displayName = "ArrowDown01con";

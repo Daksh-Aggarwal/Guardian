@@ -47,7 +47,7 @@ const FolderSyncIcon = forwardRef<FolderSyncIconHandle, FolderSyncIconProps>(
           controls.start("animate");
         }
       },
-      [controls, onMouseEnter]
+      [controls, onMouseEnter],
     );
 
     const handleMouseLeave = useCallback(
@@ -58,7 +58,7 @@ const FolderSyncIcon = forwardRef<FolderSyncIconHandle, FolderSyncIconProps>(
           controls.start("normal");
         }
       },
-      [controls, onMouseLeave]
+      [controls, onMouseLeave],
     );
 
     return (
@@ -94,7 +94,7 @@ const FolderSyncIcon = forwardRef<FolderSyncIconHandle, FolderSyncIconProps>(
         </svg>
       </div>
     );
-  }
+  },
 );
 
 FolderSyncIcon.displayName = "FolderSyncIcon";

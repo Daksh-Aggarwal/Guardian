@@ -61,7 +61,7 @@ export interface AnimatedIconProps extends React.HTMLAttributes<HTMLDivElement> 
 
 export function createAnimatedIcon(
   BaseComponent: React.ComponentType<any>,
-  displayName: string
+  displayName: string,
 ) {
   const Component = forwardRef<HTMLDivElement, AnimatedIconProps>(
     ({ size, className, style, ...props }, ref) => {
@@ -69,8 +69,8 @@ export function createAnimatedIcon(
         typeof size === "number"
           ? size
           : typeof size === "string" && !isNaN(Number(size))
-          ? Number(size)
-          : undefined;
+            ? Number(size)
+            : undefined;
 
       const sizeStyle = numericSize
         ? { width: numericSize, height: numericSize }
@@ -82,13 +82,13 @@ export function createAnimatedIcon(
           size={numericSize}
           className={cn(
             "relative inline-flex items-center justify-center shrink-0 [&>svg]:w-full [&>svg]:h-full",
-            className
+            className,
           )}
           style={{ ...sizeStyle, ...style }}
           {...props}
         />
       );
-    }
+    },
   );
 
   Component.displayName = displayName;
@@ -97,34 +97,73 @@ export function createAnimatedIcon(
 
 // --- Wrapped Animated Icons (Primary) ---
 export const ActivityIcon = createAnimatedIcon(BaseActivity, "ActivityIcon");
-export const ArrowDown01Icon = createAnimatedIcon(BaseArrowDown01, "ArrowDown01Icon");
+export const ArrowDown01Icon = createAnimatedIcon(
+  BaseArrowDown01,
+  "ArrowDown01Icon",
+);
 export const ArrowLeftIcon = createAnimatedIcon(BaseArrowLeft, "ArrowLeftIcon");
-export const ArrowRightIcon = createAnimatedIcon(BaseArrowRight, "ArrowRightIcon");
+export const ArrowRightIcon = createAnimatedIcon(
+  BaseArrowRight,
+  "ArrowRightIcon",
+);
 export const ArrowUpIcon = createAnimatedIcon(BaseArrowUp, "ArrowUpIcon");
-export const ArrowUpRightIcon = createAnimatedIcon(BaseArrowUpRight, "ArrowUpRightIcon");
+export const ArrowUpRightIcon = createAnimatedIcon(
+  BaseArrowUpRight,
+  "ArrowUpRightIcon",
+);
 export const BookTextIcon = createAnimatedIcon(BaseBookText, "BookTextIcon");
 export const BoxIcon = createAnimatedIcon(BaseBox, "BoxIcon");
 export const CheckIcon = createAnimatedIcon(BaseCheck, "CheckIcon");
-export const ChevronDownIcon = createAnimatedIcon(BaseChevronDown, "ChevronDownIcon");
-export const ChevronRightIcon = createAnimatedIcon(BaseChevronRight, "ChevronRightIcon");
-export const CircleCheckIcon = createAnimatedIcon(BaseCircleCheck, "CircleCheckIcon");
-export const CircleHelpIcon = createAnimatedIcon(BaseCircleHelp, "CircleHelpIcon");
+export const ChevronDownIcon = createAnimatedIcon(
+  BaseChevronDown,
+  "ChevronDownIcon",
+);
+export const ChevronRightIcon = createAnimatedIcon(
+  BaseChevronRight,
+  "ChevronRightIcon",
+);
+export const CircleCheckIcon = createAnimatedIcon(
+  BaseCircleCheck,
+  "CircleCheckIcon",
+);
+export const CircleHelpIcon = createAnimatedIcon(
+  BaseCircleHelp,
+  "CircleHelpIcon",
+);
 export const ClockIcon = createAnimatedIcon(BaseClock, "ClockIcon");
 export const CopyIcon = createAnimatedIcon(BaseCopy, "CopyIcon");
 export const CpuIcon = createAnimatedIcon(BaseCpu, "CpuIcon");
 export const DownloadIcon = createAnimatedIcon(BaseDownload, "DownloadIcon");
-export const ExternalLinkIcon = createAnimatedIcon(BaseExternalLink, "ExternalLinkIcon");
+export const ExternalLinkIcon = createAnimatedIcon(
+  BaseExternalLink,
+  "ExternalLinkIcon",
+);
 export const EyeIcon = createAnimatedIcon(BaseEye, "EyeIcon");
 export const FileTextIcon = createAnimatedIcon(BaseFileText, "FileTextIcon");
 export const FlaskIcon = createAnimatedIcon(BaseFlask, "FlaskIcon");
-export const FolderGit2Icon = createAnimatedIcon(BaseFolderGit2, "FolderGit2Icon");
-export const FolderOpenIcon = createAnimatedIcon(BaseFolderOpen, "FolderOpenIcon");
-export const FolderSyncIcon = createAnimatedIcon(BaseFolderSync, "FolderSyncIcon");
+export const FolderGit2Icon = createAnimatedIcon(
+  BaseFolderGit2,
+  "FolderGit2Icon",
+);
+export const FolderOpenIcon = createAnimatedIcon(
+  BaseFolderOpen,
+  "FolderOpenIcon",
+);
+export const FolderSyncIcon = createAnimatedIcon(
+  BaseFolderSync,
+  "FolderSyncIcon",
+);
 export const GitBranchIcon = createAnimatedIcon(BaseGitBranch, "GitBranchIcon");
-export const GitPullRequestIcon = createAnimatedIcon(BaseGitPullRequest, "GitPullRequestIcon");
+export const GitPullRequestIcon = createAnimatedIcon(
+  BaseGitPullRequest,
+  "GitPullRequestIcon",
+);
 export const HistoryIcon = createAnimatedIcon(BaseHistory, "HistoryIcon");
 export const LayersIcon = createAnimatedIcon(BaseLayers, "LayersIcon");
-export const LayoutPanelTopIcon = createAnimatedIcon(BaseLayoutPanelTop, "LayoutPanelTopIcon");
+export const LayoutPanelTopIcon = createAnimatedIcon(
+  BaseLayoutPanelTop,
+  "LayoutPanelTopIcon",
+);
 export const LockIcon = createAnimatedIcon(BaseLock, "LockIcon");
 export const LogoutIcon = createAnimatedIcon(BaseLogout, "LogoutIcon");
 export const Maximize2Icon = createAnimatedIcon(BaseMaximize2, "Maximize2Icon");
@@ -135,13 +174,25 @@ export const PlusIcon = createAnimatedIcon(BasePlus, "PlusIcon");
 export const RefreshCWIcon = createAnimatedIcon(BaseRefreshCw, "RefreshCWIcon");
 export const RotateCCWIcon = createAnimatedIcon(BaseRotateCcw, "RotateCCWIcon");
 export const SearchIcon = createAnimatedIcon(BaseSearch, "SearchIcon");
-export const ShieldCheckIcon = createAnimatedIcon(BaseShieldCheck, "ShieldCheckIcon");
-export const SlidersHorizontalIcon = createAnimatedIcon(BaseSlidersHorizontal, "SlidersHorizontalIcon");
+export const ShieldCheckIcon = createAnimatedIcon(
+  BaseShieldCheck,
+  "ShieldCheckIcon",
+);
+export const SlidersHorizontalIcon = createAnimatedIcon(
+  BaseSlidersHorizontal,
+  "SlidersHorizontalIcon",
+);
 export const SparklesIcon = createAnimatedIcon(BaseSparkles, "SparklesIcon");
 export const SunIcon = createAnimatedIcon(BaseSun, "SunIcon");
 export const TerminalIcon = createAnimatedIcon(BaseTerminal, "TerminalIcon");
-export const TrendingDownIcon = createAnimatedIcon(BaseTrendingDown, "TrendingDownIcon");
-export const TrendingUpIcon = createAnimatedIcon(BaseTrendingUp, "TrendingUpIcon");
+export const TrendingDownIcon = createAnimatedIcon(
+  BaseTrendingDown,
+  "TrendingDownIcon",
+);
+export const TrendingUpIcon = createAnimatedIcon(
+  BaseTrendingUp,
+  "TrendingUpIcon",
+);
 export const UploadIcon = createAnimatedIcon(BaseUpload, "UploadIcon");
 export const WrenchIcon = createAnimatedIcon(BaseWrench, "WrenchIcon");
 export const XIcon = createAnimatedIcon(BaseX, "XIcon");

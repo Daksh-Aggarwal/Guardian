@@ -56,7 +56,7 @@ const BoxIcon = forwardRef<BoxIconHandle, BoxIconProps>(
           controls.start("animate");
         }
       },
-      [controls, onMouseEnter]
+      [controls, onMouseEnter],
     );
 
     const handleMouseLeave = useCallback(
@@ -67,7 +67,7 @@ const BoxIcon = forwardRef<BoxIconHandle, BoxIconProps>(
           controls.start("normal");
         }
       },
-      [controls, onMouseLeave]
+      [controls, onMouseLeave],
     );
 
     return (
@@ -109,7 +109,7 @@ const BoxIcon = forwardRef<BoxIconHandle, BoxIconProps>(
         </svg>
       </div>
     );
-  }
+  },
 );
 
 BoxIcon.displayName = "BoxIcon";

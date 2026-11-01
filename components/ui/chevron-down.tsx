@@ -42,7 +42,7 @@ const ChevronDownIcon = forwardRef<ChevronDownIconHandle, ChevronDownIconProps>(
           controls.start("animate");
         }
       },
-      [controls, onMouseEnter]
+      [controls, onMouseEnter],
     );
 
     const handleMouseLeave = useCallback(
@@ -53,7 +53,7 @@ const ChevronDownIcon = forwardRef<ChevronDownIconHandle, ChevronDownIconProps>(
           controls.start("normal");
         }
       },
-      [controls, onMouseLeave]
+      [controls, onMouseLeave],
     );
 
     return (
@@ -86,7 +86,7 @@ const ChevronDownIcon = forwardRef<ChevronDownIconHandle, ChevronDownIconProps>(
         </svg>
       </div>
     );
-  }
+  },
 );
 
 ChevronDownIcon.displayName = "ChevronDownIcon";

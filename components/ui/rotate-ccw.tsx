@@ -33,7 +33,7 @@ const RotateCCWIcon = forwardRef<RotateCCWIconHandle, RotateCCWIconProps>(
         if (isControlledRef.current) onMouseEnter?.(e);
         else controls.start("animate");
       },
-      [controls, onMouseEnter]
+      [controls, onMouseEnter],
     );
 
     const handleMouseLeave = useCallback(
@@ -41,7 +41,7 @@ const RotateCCWIcon = forwardRef<RotateCCWIconHandle, RotateCCWIconProps>(
         if (isControlledRef.current) onMouseLeave?.(e);
         else controls.start("normal");
       },
-      [controls, onMouseLeave]
+      [controls, onMouseLeave],
     );
 
     return (
@@ -73,7 +73,7 @@ const RotateCCWIcon = forwardRef<RotateCCWIconHandle, RotateCCWIconProps>(
         </motion.svg>
       </div>
     );
-  }
+  },
 );
 
 RotateCCWIcon.displayName = "RotateCCWIcon";

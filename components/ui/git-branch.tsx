@@ -45,7 +45,7 @@ const GitBranchIcon = forwardRef<GitBranchIconHandle, GitBranchIconProps>(
           controls.start("animate");
         }
       },
-      [controls, onMouseEnter]
+      [controls, onMouseEnter],
     );
 
     const handleMouseLeave = useCallback(
@@ -56,7 +56,7 @@ const GitBranchIcon = forwardRef<GitBranchIconHandle, GitBranchIconProps>(
           controls.start("normal");
         }
       },
-      [controls, onMouseLeave]
+      [controls, onMouseLeave],
     );
 
     return (
@@ -166,7 +166,7 @@ const GitBranchIcon = forwardRef<GitBranchIconHandle, GitBranchIconProps>(
         </svg>
       </div>
     );
-  }
+  },
 );
 
 GitBranchIcon.displayName = "GitBranchIcon";

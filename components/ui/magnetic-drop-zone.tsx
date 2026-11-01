@@ -107,7 +107,9 @@ function acceptsFile(file: File, accept: string) {
         return fileType.startsWith(rule.slice(0, -1));
       }
 
-      return fileType === rule || fileName === rule || fileName.endsWith("/" + rule);
+      return (
+        fileType === rule || fileName === rule || fileName.endsWith("/" + rule)
+      );
     });
 }
 
@@ -391,7 +393,9 @@ export function MagneticDropZone({
                   key={`${file.name}-${i}`}
                   className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--line)] bg-[var(--surface)] px-2.5 py-1 text-xs text-[var(--text-secondary)] shadow-xs"
                 >
-                  <span className="max-w-[140px] truncate font-medium">{file.name}</span>
+                  <span className="max-w-[140px] truncate font-medium">
+                    {file.name}
+                  </span>
                   <span className="font-mono text-[10px] text-[var(--muted)]">
                     {formatBytes(file.size)}
                   </span>
@@ -440,8 +444,10 @@ export function MagneticDropZone({
           <div
             className={cn(
               "flex size-12 items-center justify-center rounded-xl border border-[var(--line)] bg-[var(--surface)] text-[var(--accent)] shadow-sm transition-[border-color,background-color,color] duration-200",
-              isNear && "border-[var(--accent-border)] text-[var(--accent-hover)]",
-              isOver && "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]",
+              isNear &&
+                "border-[var(--accent-border)] text-[var(--accent-hover)]",
+              isOver &&
+                "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]",
             )}
           >
             <FileArrowUpIcon
@@ -451,7 +457,9 @@ export function MagneticDropZone({
               weight="fill"
             />
           </div>
-          <p className="mt-4 font-medium text-[var(--text)] text-sm">{displayTitle}</p>
+          <p className="mt-4 font-medium text-[var(--text)] text-sm">
+            {displayTitle}
+          </p>
           <p className="mt-1 text-[var(--muted)] text-xs leading-5">
             {subtitle ?? `or click to browse · up to ${formatBytes(maxSize)}`}
           </p>

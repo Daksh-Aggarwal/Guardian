@@ -52,7 +52,7 @@ const WrenchIcon = forwardRef<WrenchIconHandle, WrenchIconProps>(
           controls.start("animate");
         }
       },
-      [controls, onMouseEnter]
+      [controls, onMouseEnter],
     );
 
     const handleMouseLeave = useCallback(
@@ -63,7 +63,7 @@ const WrenchIcon = forwardRef<WrenchIconHandle, WrenchIconProps>(
           controls.start("normal");
         }
       },
-      [controls, onMouseLeave]
+      [controls, onMouseLeave],
     );
 
     return (
@@ -92,7 +92,7 @@ const WrenchIcon = forwardRef<WrenchIconHandle, WrenchIconProps>(
         </motion.svg>
       </div>
     );
-  }
+  },
 );
 
 WrenchIcon.displayName = "WrenchIcon";

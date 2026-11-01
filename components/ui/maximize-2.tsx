@@ -44,7 +44,7 @@ const Maximize2Icon = forwardRef<Maximize2IconHandle, Maximize2IconProps>(
           controls.start("animate");
         }
       },
-      [controls, onMouseEnter]
+      [controls, onMouseEnter],
     );
 
     const handleMouseLeave = useCallback(
@@ -55,7 +55,7 @@ const Maximize2Icon = forwardRef<Maximize2IconHandle, Maximize2IconProps>(
           controls.start("normal");
         }
       },
-      [controls, onMouseLeave]
+      [controls, onMouseLeave],
     );
 
     return (
@@ -97,7 +97,7 @@ const Maximize2Icon = forwardRef<Maximize2IconHandle, Maximize2IconProps>(
         </svg>
       </div>
     );
-  }
+  },
 );
 
 Maximize2Icon.displayName = " Maximize2Icon";

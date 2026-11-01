@@ -50,7 +50,7 @@ const FolderOpenIcon = forwardRef<FolderOpenIconHandle, FolderOpenIconProps>(
           controls.start("animate");
         }
       },
-      [controls, onMouseEnter]
+      [controls, onMouseEnter],
     );
 
     const handleMouseLeave = useCallback(
@@ -61,7 +61,7 @@ const FolderOpenIcon = forwardRef<FolderOpenIconHandle, FolderOpenIconProps>(
           controls.start("normal");
         }
       },
-      [controls, onMouseLeave]
+      [controls, onMouseLeave],
     );
 
     return (
@@ -92,7 +92,7 @@ const FolderOpenIcon = forwardRef<FolderOpenIconHandle, FolderOpenIconProps>(
         </motion.svg>
       </div>
     );
-  }
+  },
 );
 
 FolderOpenIcon.displayName = "FolderOpenIcon";

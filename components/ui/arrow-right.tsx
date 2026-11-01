@@ -59,7 +59,7 @@ const ArrowRightIcon = forwardRef<ArrowRightIconHandle, ArrowRightIconProps>(
           controls.start("animate");
         }
       },
-      [controls, onMouseEnter]
+      [controls, onMouseEnter],
     );
 
     const handleMouseLeave = useCallback(
@@ -70,7 +70,7 @@ const ArrowRightIcon = forwardRef<ArrowRightIconHandle, ArrowRightIconProps>(
           controls.start("normal");
         }
       },
-      [controls, onMouseLeave]
+      [controls, onMouseLeave],
     );
 
     return (
@@ -104,7 +104,7 @@ const ArrowRightIcon = forwardRef<ArrowRightIconHandle, ArrowRightIconProps>(
         </svg>
       </div>
     );
-  }
+  },
 );
 
 ArrowRightIcon.displayName = "ArrowRightIcon";

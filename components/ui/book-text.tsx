@@ -37,7 +37,7 @@ const BookTextIcon = forwardRef<BookTextIconHandle, BookTextIconProps>(
           controls.start("animate");
         }
       },
-      [controls, onMouseEnter]
+      [controls, onMouseEnter],
     );
 
     const handleMouseLeave = useCallback(
@@ -48,7 +48,7 @@ const BookTextIcon = forwardRef<BookTextIconHandle, BookTextIconProps>(
           controls.start("normal");
         }
       },
-      [controls, onMouseLeave]
+      [controls, onMouseLeave],
     );
 
     return (
@@ -93,7 +93,7 @@ const BookTextIcon = forwardRef<BookTextIconHandle, BookTextIconProps>(
         </motion.svg>
       </div>
     );
-  }
+  },
 );
 
 BookTextIcon.displayName = "BookTextIcon";

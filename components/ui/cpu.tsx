@@ -67,7 +67,7 @@ const CpuIcon = forwardRef<CpuIconHandle, CpuIconProps>(
           controls.start("animate");
         }
       },
-      [controls, onMouseEnter]
+      [controls, onMouseEnter],
     );
 
     const handleMouseLeave = useCallback(
@@ -78,7 +78,7 @@ const CpuIcon = forwardRef<CpuIconHandle, CpuIconProps>(
           controls.start("normal");
         }
       },
-      [controls, onMouseLeave]
+      [controls, onMouseLeave],
     );
     return (
       <div
@@ -151,7 +151,7 @@ const CpuIcon = forwardRef<CpuIconHandle, CpuIconProps>(
         </svg>
       </div>
     );
-  }
+  },
 );
 
 CpuIcon.displayName = "CpuIcon";

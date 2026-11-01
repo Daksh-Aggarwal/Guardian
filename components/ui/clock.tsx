@@ -74,7 +74,7 @@ const ClockIcon = forwardRef<ClockIconHandle, ClockIconProps>(
           controls.start("animate");
         }
       },
-      [controls, onMouseEnter]
+      [controls, onMouseEnter],
     );
 
     const handleMouseLeave = useCallback(
@@ -85,7 +85,7 @@ const ClockIcon = forwardRef<ClockIconHandle, ClockIconProps>(
           controls.start("normal");
         }
       },
-      [controls, onMouseLeave]
+      [controls, onMouseLeave],
     );
 
     return (
@@ -130,7 +130,7 @@ const ClockIcon = forwardRef<ClockIconHandle, ClockIconProps>(
         </svg>
       </div>
     );
-  }
+  },
 );
 
 ClockIcon.displayName = "ClockIcon";

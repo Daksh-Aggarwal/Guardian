@@ -55,7 +55,7 @@ const ExternalLinkIcon = forwardRef<
       if (!isControlledRef.current) controls.start("animate");
       onMouseEnter?.(e);
     },
-    [controls, onMouseEnter]
+    [controls, onMouseEnter],
   );
 
   const handleMouseLeave = useCallback(
@@ -63,7 +63,7 @@ const ExternalLinkIcon = forwardRef<
       if (!isControlledRef.current) controls.start("normal");
       onMouseLeave?.(e);
     },
-    [controls, onMouseLeave]
+    [controls, onMouseLeave],
   );
 
   return (

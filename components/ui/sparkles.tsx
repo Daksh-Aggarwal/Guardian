@@ -79,7 +79,7 @@ const SparklesIcon = forwardRef<SparklesIconHandle, SparklesIconProps>(
           starControls.start("blink", { delay: 1 });
         }
       },
-      [onMouseEnter, sparkleControls, starControls]
+      [onMouseEnter, sparkleControls, starControls],
     );
 
     const handleMouseLeave = useCallback(
@@ -91,7 +91,7 @@ const SparklesIcon = forwardRef<SparklesIconHandle, SparklesIconProps>(
           starControls.start("initial");
         }
       },
-      [sparkleControls, starControls, onMouseLeave]
+      [sparkleControls, starControls, onMouseLeave],
     );
 
     return (
@@ -140,7 +140,7 @@ const SparklesIcon = forwardRef<SparklesIconHandle, SparklesIconProps>(
         </svg>
       </div>
     );
-  }
+  },
 );
 
 SparklesIcon.displayName = "SparklesIcon";
