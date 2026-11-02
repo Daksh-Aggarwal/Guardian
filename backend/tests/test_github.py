@@ -135,6 +135,29 @@ def test_installation_callback_valid(github_env, test_client):
         assert active["id"] == 999111
         assert active["account_login"] == "octocat-org"
 
+def test_installation_callback_uses_single_use_handoff_for_separate_frontend(github_env, test_client, monkeypatch):
+    state = create_install_state()
+    monkeypatch.setenv("GUARDIAN_FRONTEND_URL", "https://guardian.example")
+    mock_inst = {
+        "id": 999112,
+        "account": {"id": 445, "login": "octocat-user", "type": "User"},
+        "repository_selection": "selected",
+        "created_at": "2026-01-01T00:00:00Z",
+    }
+
+    with patch("backend.guardian.github._call_app_api", return_value=mock_inst):
+        resp = test_client.get(
+            f"/api/github/callback?installation_id=999112&state={state}",
+            headers={"host": "api.example:8000"},
+            follow_redirects=False,
+        )
+
+    assert resp.status_code == 302
+    location = resp.headers["location"]
+    assert "session_token" not in location
+    assert "handoff_code=" in location
+    assert resp.headers["referrer-policy"] == "no-referrer"
+
 def test_installation_callback_invalid_state(github_env, test_client):
     resp = test_client.get("/api/github/callback?installation_id=999111&state=bogus_state")
     assert resp.status_code == 400
@@ -1096,16 +1119,19 @@ def test_link_installation_endpoint_success(github_env, test_client):
     assert len(st["installations"]) == 1
 
 def test_adopt_session_endpoint(test_client):
-    """POST /api/session/adopt sets cookie for an existing session token."""
+    """POST /api/session/adopt exchanges a short-lived handoff code for a cookie."""
     sid = storage.create_session()
-    resp = test_client.post("/api/session/adopt", json={"session_token": sid})
+    handoff_code = storage.create_session_handoff(sid)
+    resp = test_client.post("/api/session/adopt", json={"handoff_code": handoff_code})
     assert resp.status_code == 200
     assert resp.json()["status"] == "ok"
     assert "guardian_session" in resp.cookies
     assert resp.cookies["guardian_session"] == sid
 
-    # Invalid session token returns 400
-    bad_resp = test_client.post("/api/session/adopt", json={"session_token": "nonexistent_token"})
+    # Handoff codes are single-use and invalid codes return 400.
+    replay_resp = test_client.post("/api/session/adopt", json={"handoff_code": handoff_code})
+    assert replay_resp.status_code == 400
+    bad_resp = test_client.post("/api/session/adopt", json={"handoff_code": "nonexistent_code"})
     assert bad_resp.status_code == 400
 
 def test_sync_installations_returns_available_options_for_multiple_accounts(github_env, test_client):
@@ -1167,7 +1193,5 @@ def test_python_and_manifest_files_eligible():
     assert github.is_eligible_code_file("image.png") is False
     assert github.is_eligible_code_file("binary.exe") is False
     assert github.is_eligible_code_file("data.csv") is False
-
-
 
 

@@ -274,11 +274,12 @@ def session_status(request: Request):
 
 @app.post('/api/session/adopt')
 def session_adopt(body: dict):
-    session_token = body.get("session_token")
-    if not session_token or not storage.get_session(session_token):
-        raise HTTPException(400, "Invalid or expired session token")
+    handoff_code = body.get("handoff_code")
+    session_token = storage.consume_session_handoff(handoff_code)
+    if not session_token:
+        raise HTTPException(400, "Invalid or expired session handoff")
     storage.touch_session(session_token)
-    response = JSONResponse(content={"status": "ok", "session_id": session_token})
+    response = JSONResponse(content={"status": "ok"})
     response.set_cookie(
         key="guardian_session",
         value=session_token,
@@ -1033,11 +1034,13 @@ def github_callback(
         github.handle_installation_callback(installation_id=installation_id, state=state, session_id=session_id)
         host = request.headers.get("host", "")
         if ":8000" in host:
-            session_token_param = f"&session_token={session_id}"
-            redirect_url = os.getenv("GUARDIAN_FRONTEND_URL", "http://localhost:3000").rstrip('/') + f"/?github=connected{session_token_param}"
+            handoff_code = storage.create_session_handoff(session_id)
+            handoff_param = f"&handoff_code={handoff_code}"
+            redirect_url = os.getenv("GUARDIAN_FRONTEND_URL", "http://localhost:3000").rstrip('/') + f"/?github=connected{handoff_param}"
         else:
             redirect_url = "/?github=connected"
         response = RedirectResponse(url=redirect_url, status_code=302)
+        response.headers["Referrer-Policy"] = "no-referrer"
         response.set_cookie(
             key="guardian_session",
             value=session_id,
@@ -1191,6 +1194,5 @@ def close_remediation_github_pr(plan_id: str, request: Request):
         raise HTTPException(400, str(err))
     except Exception as err:
         raise HTTPException(502, f"Failed to close pull request: {err}")
-
 
 

@@ -268,14 +268,15 @@ export default function Home() {
     const urlParams = new URLSearchParams(window.location.search);
     const gh = urlParams.get("github");
     const installationId = urlParams.get("installation_id");
-    const sessionToken = urlParams.get("session_token");
+    const handoffCode = urlParams.get("handoff_code");
 
-    if (sessionToken) {
+    if (handoffCode) {
+      window.history.replaceState(null, "", window.location.pathname);
       api("/session/adopt", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_token: sessionToken }),
-      }).catch(console.error);
+        body: JSON.stringify({ handoff_code: handoffCode }),
+      }).catch((e) => setError(e.message || "Failed to complete GitHub sign-in."));
     }
 
     if (installationId) {
