@@ -76,6 +76,14 @@ def connection():
         )
     ''')
     db.execute('''
+        CREATE TABLE IF NOT EXISTS session_handoffs (
+            handoff_code TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
+        )
+    ''')
+    db.execute('''
         CREATE TABLE IF NOT EXISTS session_installations (
             session_id TEXT NOT NULL,
             installation_id INTEGER NOT NULL,
@@ -517,6 +525,33 @@ def touch_session(session_id: str, ttl_days: int = 30) -> bool:
         )
         return res.rowcount > 0
 
+def create_session_handoff(session_id: str, ttl_seconds: int = 300) -> str:
+    """Creates a short-lived, single-use code for transferring a session between origins."""
+    handoff_code = secrets.token_urlsafe(32)
+    expires = datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)
+    with connection() as db:
+        db.execute(
+            'INSERT INTO session_handoffs (handoff_code, session_id, expires_at) VALUES (?, ?, ?)',
+            (handoff_code, session_id, expires.isoformat())
+        )
+    return handoff_code
+
+def consume_session_handoff(handoff_code: Optional[str]) -> Optional[str]:
+    """Consumes a valid handoff code atomically and returns its session ID."""
+    if not handoff_code or not isinstance(handoff_code, str):
+        return None
+    now_iso = datetime.now(timezone.utc).isoformat()
+    with connection() as db:
+        row = db.execute(
+            '''DELETE FROM session_handoffs
+               WHERE handoff_code = ? AND expires_at >= ?
+               RETURNING session_id''',
+            (handoff_code, now_iso)
+        ).fetchone()
+        if not row or not get_session(row[0]):
+            return None
+        return row[0]
+
 def revoke_session(session_id: str) -> None:
     """Explicitly revokes a session and clears its installation associations."""
     if not session_id:
@@ -696,6 +731,4 @@ def get_session_authorized_installation_ids(session_id: Optional[str]) -> Set[in
             (session_id,)
         ).fetchall()
         return {r[0] for r in rows}
-
-
 
